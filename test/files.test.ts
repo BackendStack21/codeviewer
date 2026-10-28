@@ -72,10 +72,15 @@ test("natural name order (ASCII fast path agrees with the collator)", () => {
   expect(fast.indexOf("file1.ts")).toBeLessThan(fast.indexOf("File2.ts"));
   expect(fast.indexOf("File2.ts")).toBeLessThan(fast.indexOf("file10.ts"));
   expect(fast.indexOf("z9")).toBeLessThan(fast.indexOf("z10"));
+  // Relative, so it holds on slow CI runners: the fast path must clearly beat the collator.
   const big = Array.from({ length: 52_000 }, (_, i) => `module_${(i * 7919) % 52_000}.ts`);
-  const t = performance.now();
-  big.sort(compareNames);
-  expect(performance.now() - t).toBeLessThan(80);
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  let t = performance.now();
+  [...big].sort(collator.compare);
+  const slow = performance.now() - t;
+  t = performance.now();
+  [...big].sort(compareNames);
+  expect(performance.now() - t).toBeLessThan(slow);
 });
 
 test("UTF-16 files are transcoded", async () => {

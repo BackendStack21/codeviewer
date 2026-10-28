@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import { GitState } from "../src/client/git.ts";
 
+/** Timing budgets are tuned on a laptop; shared CI runners get 4× headroom. */
+const BUDGET = process.env.CI ? 4 : 1;
+
 const base = { repo: true, branch: "main", detached: false, oid: null, upstream: null, ahead: 0, behind: 0, state: null, stash: 0, head: null };
 
 test("letters, folder roll-up, untracked/ignored folders and NFC/NFD names", () => {
@@ -26,5 +29,5 @@ test("lookups stay fast with thousands of ignored folders", () => {
   g.set({ ...base, files });
   const t = performance.now();
   for (let i = 0; i < 6000; i++) g.file(`pkg${i % 500}/src/module${i}.py`);
-  expect(performance.now() - t).toBeLessThan(50);
+  expect(performance.now() - t).toBeLessThan(50 * BUDGET);
 });

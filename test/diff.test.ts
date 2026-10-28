@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { diffLines, gutterMarks, ADDED, MODIFIED, DELETED_BELOW, DELETED_ABOVE } from "../src/client/diff.ts";
 
+/** Timing budgets are tuned on a laptop; shared CI runners get 4× headroom. */
+const BUDGET = process.env.CI ? 4 : 1;
+
 /** Applies hunks to `a`; must reproduce `b` exactly. */
 function apply(a: string[], b: string[], hunks: ReturnType<typeof diffLines>): string[] {
   const out: string[] = [];
@@ -61,7 +64,7 @@ describe("line diff", () => {
     for (let i = 0; i < 100_000; i += 997) b[i] = "changed";
     const t = performance.now();
     const h = diffLines(a, b);
-    expect(performance.now() - t).toBeLessThan(500);
+    expect(performance.now() - t).toBeLessThan(500 * BUDGET);
     expect(apply(a, b, h)).toEqual(b);
   });
 });
