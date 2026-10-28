@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codeviewer: read the code, run the agent</title>
+<meta name="description" content="A fast, read-only code viewer with a real built-in terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source (MIT).">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0c0f15">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://codeviewer.21no.de/">
+<meta property="og:title" content="Codeviewer">
+<meta property="og:description" content="Read the code. Run the agent. Same window. A fast, read-only code viewer with a real terminal and live git indicators.">
+<meta property="og:image" content="https://codeviewer.21no.de/assets/screenshot-dark.jpg">
+<meta property="og:url" content="https://codeviewer.21no.de/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="site.css">
+<script type="application/json" id="downloads">[{"id":"macos-arm64","os":"macos","detail":"Apple silicon","file":"Codeviewer-1.0.0-macos-arm64.dmg","url":"https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-arm64.dmg"},{"id":"macos-x64","os":"macos","detail":"Intel","file":"Codeviewer-1.0.0-macos-x64.dmg","url":"https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-x64.dmg"},{"id":"linux-x64","os":"linux","detail":"x86-64","file":"codeviewer-1.0.0-linux-x64.tar.gz","url":"https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-x64.tar.gz"},{"id":"linux-arm64","os":"linux","detail":"ARM64","file":"codeviewer-1.0.0-linux-arm64.tar.gz","url":"https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-arm64.tar.gz"}]</script>
+<script src="site.js" defer></script>
+</head>
+<body>
+<header class="nav">
+  <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" width="22" height="22"><span>Codeviewer</span></a>
+  <nav>
+    <a href="#features">Features</a>
+    <a href="#security">Security</a>
+    <a href="#download">Download</a>
+    <a class="gh" href="https://github.com/BackendStack21/codeviewer" aria-label="Source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.6 0 0 3.6 0 8c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3s1.4.1 2 .3c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.7-3.6 3.9.3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4C13.7 14.5 16 11.5 16 8c0-4.4-3.6-8-8-8z"/></svg><span>GitHub</span></a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <p class="eyebrow"><span class="pill">v1.0.0</span> Free and open source · MIT</p>
+    <h1>Read the code.<br><span class="grad">Run the agent.</span> Same window.</h1>
+    <p class="lede">Codeviewer is a fast, read-only code viewer with a real terminal built in. Point your favourite CLI agent at a project and watch every file it touches update live, with git telling you exactly what changed.</p>
+    <div class="cta">
+      <a class="btn primary" id="dl-primary" href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-arm64.dmg"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Download for <b id="dl-os">macOS</b> <small id="dl-detail">Apple silicon</small></span></a>
+      <a class="btn ghost" href="#download">All platforms</a>
+    </div>
+    <p class="fine"><a href="#verify"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg> Verify your download</a> · SHA-256 and signed build provenance for every file</p>
+    <figure class="shot">
+      <picture>
+        <source srcset="assets/screenshot-light.jpg" media="(prefers-color-scheme: light)">
+        <img src="assets/screenshot-dark.jpg" width="2400" height="1509" alt="Codeviewer showing a project's explorer with git status letters, a TypeScript file with git gutter markers and inline blame, and a terminal running git log.">
+      </picture>
+    </figure>
+  </section>
+
+  <section id="features" class="features">
+    <h2>Built for watching code change</h2>
+    <p class="sub">Everything an IDE shows you, nothing that lets anything slip in by accident: Codeviewer never edits a file.</p>
+    <div class="grid">
+      <article class="card">
+        <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v14H4zM7.5 9.5l3 2.5-3 2.5M12.5 15h4" /></g></svg>
+        <h3>A real terminal, built in</h3>
+        <p>A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code.</p>
+      </article>
+      <article class="card">
+        <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4a8 8 0 1 0 8 8M20 4v5h-5" /></g></svg>
+        <h3>Live while agents work</h3>
+        <p>Files reload in place as they change on disk. Changed lines flash, the explorer marks them, and nothing you are reading jumps.</p>
+      </article>
+      <article class="card">
+        <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v10M7 14a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17 9c0 4-10 3-10 5" /></g></svg>
+        <h3>Git, read-only</h3>
+        <p>Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state. It never writes to your repository.</p>
+      </article>
+      <article class="card">
+        <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 14h6l-1 7 8-11h-6z" /></g></svg>
+        <h3>Fast at any size</h3>
+        <p>Virtualized everything: 100k-line files open instantly, quick-open searches 200k paths as you type, and the terminal streams megabytes per second.</p>
+      </article>
+      <article class="card">
+        <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" /></g></svg>
+        <h3>Locked down</h3>
+        <p>The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, and git hardened against hostile repositories. Reviewed adversarially.</p>
+      </article>
+      <article class="card">
+        <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 8.5h16M7 6.2h.01M9 6.2h.01" /></g></svg>
+        <h3>Native and small</h3>
+        <p>A 40 MB Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="split">
+    <div>
+      <h2>See what HEAD had</h2>
+      <p>Click any gutter marker to peek at the lines as they were in the last commit. Inline blame follows your cursor; the status bar shows the branch, how far ahead or behind you are, and every changed file is one <kbd>⌘⇧G</kbd> away.</p>
+      <ul class="ticks">
+        <li>Explorer letters: <b class="gM">M</b> modified, <b class="gA">A</b> added, <b class="gU">U</b> untracked, <b class="gD">D</b> deleted, <b class="gC">C</b> conflict</li>
+        <li>Live as you or an agent edit, stage, commit or switch branch</li>
+        <li>Safe on untrusted repositories: no hooks, filters or drivers ever run</li>
+      </ul>
+    </div>
+    <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1509" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
+  </section>
+
+  <section id="security" class="security">
+    <h2>A shell in a window deserves care</h2>
+    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in. Every confirmed finding was fixed and pinned with a test.</p>
+    <div class="grid three">
+      <article class="card"><h3>Only its own server</h3><p>The Mac window blocks every request except its own local port. External links open in your browser, never inside the app.</p></article>
+      <article class="card"><h3>No ambient credentials</h3><p>A random 256-bit token lives in the URL fragment and a request header. No cookies, no token in process lists, Host and Origin checked on every request.</p></article>
+      <article class="card"><h3>Hostile repos are fine</h3><p>Git runs without filters, textconv, signature checks, fsmonitor or submodules, and never writes your index. Read the <a href="https://github.com/BackendStack21/codeviewer/blob/main/DESIGN.md">design and review notes</a>.</p></article>
+    </div>
+  </section>
+
+  <section id="download" class="download">
+    <h2>Download</h2>
+    <p class="sub">Version 1.0.0. The apps are self-contained; the CLI binaries serve the viewer to any browser (<code>codeviewer . --no-open</code>).</p>
+    <table class="dl">
+      <thead><tr><th>Platform</th><th>File</th><th>SHA-256</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9s-2-.9-3.3-.9c-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.8-1.1-2.8-4.1zM13.9 5.3c.7-.8 1.2-2 1-3.2-1 0-2.3.7-3 1.5-.7.7-1.2 1.9-1.1 3.1 1.2.1 2.4-.6 3.1-1.4z"/></svg><span><b>macOS</b><small>Apple silicon</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-arm64.dmg">Codeviewer-1.0.0-macos-arm64.dmg</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9s-2-.9-3.3-.9c-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.8-1.1-2.8-4.1zM13.9 5.3c.7-.8 1.2-2 1-3.2-1 0-2.3.7-3 1.5-.7.7-1.2 1.9-1.1 3.1 1.2.1 2.4-.6 3.1-1.4z"/></svg><span><b>macOS</b><small>Intel</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-x64.dmg">Codeviewer-1.0.0-macos-x64.dmg</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.4.3 2.3-.5 3.6-1 1.6-2.8 3.6-2.8 6.1 0 .9.2 1.6.6 2.1-.7.4-1.4.9-1.4 1.6 0 1.2 2 1.4 3.5 1.8 1.3.3 2.1.9 3 .9 1 0 1.6-.6 1.9-.6h.6c.3 0 .9.6 1.9.6.9 0 1.7-.6 3-.9 1.5-.4 3.5-.6 3.5-1.8 0-.7-.7-1.2-1.4-1.6.4-.5.6-1.2.6-2.1 0-2.5-1.8-4.5-2.8-6.1-.8-1.3-.5-2.2-.5-3.6C15.6 3.9 14.2 2 12 2zm-1.6 4.2c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zm3.2 0c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zM12 9.4c.9 0 2 .6 2 1s-1.1 1.1-2 1.1-2-.7-2-1.1 1.1-1 2-1z"/></svg><span><b>Linux</b><small>x86-64</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-x64.tar.gz">codeviewer-1.0.0-linux-x64.tar.gz</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.4.3 2.3-.5 3.6-1 1.6-2.8 3.6-2.8 6.1 0 .9.2 1.6.6 2.1-.7.4-1.4.9-1.4 1.6 0 1.2 2 1.4 3.5 1.8 1.3.3 2.1.9 3 .9 1 0 1.6-.6 1.9-.6h.6c.3 0 .9.6 1.9.6.9 0 1.7-.6 3-.9 1.5-.4 3.5-.6 3.5-1.8 0-.7-.7-1.2-1.4-1.6.4-.5.6-1.2.6-2.1 0-2.5-1.8-4.5-2.8-6.1-.8-1.3-.5-2.2-.5-3.6C15.6 3.9 14.2 2 12 2zm-1.6 4.2c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zm3.2 0c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zM12 9.4c.9 0 2 .6 2 1s-1.1 1.1-2 1.1-2-.7-2-1.1 1.1-1 2-1z"/></svg><span><b>Linux</b><small>ARM64</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-arm64.tar.gz">codeviewer-1.0.0-linux-arm64.tar.gz</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <details class="more">
+      <summary>Command-line only (no window, any browser)</summary>
+      <table class="dl"><tbody>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9s-2-.9-3.3-.9c-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.8-1.1-2.8-4.1zM13.9 5.3c.7-.8 1.2-2 1-3.2-1 0-2.3.7-3 1.5-.7.7-1.2 1.9-1.1 3.1 1.2.1 2.4-.6 3.1-1.4z"/></svg><span><b>macOS CLI</b><small>Apple silicon</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-macos-arm64">codeviewer-1.0.0-macos-arm64</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9s-2-.9-3.3-.9c-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.8-1.1-2.8-4.1zM13.9 5.3c.7-.8 1.2-2 1-3.2-1 0-2.3.7-3 1.5-.7.7-1.2 1.9-1.1 3.1 1.2.1 2.4-.6 3.1-1.4z"/></svg><span><b>macOS CLI</b><small>Intel</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-macos-x64">codeviewer-1.0.0-macos-x64</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.4.3 2.3-.5 3.6-1 1.6-2.8 3.6-2.8 6.1 0 .9.2 1.6.6 2.1-.7.4-1.4.9-1.4 1.6 0 1.2 2 1.4 3.5 1.8 1.3.3 2.1.9 3 .9 1 0 1.6-.6 1.9-.6h.6c.3 0 .9.6 1.9.6.9 0 1.7-.6 3-.9 1.5-.4 3.5-.6 3.5-1.8 0-.7-.7-1.2-1.4-1.6.4-.5.6-1.2.6-2.1 0-2.5-1.8-4.5-2.8-6.1-.8-1.3-.5-2.2-.5-3.6C15.6 3.9 14.2 2 12 2zm-1.6 4.2c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zm3.2 0c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zM12 9.4c.9 0 2 .6 2 1s-1.1 1.1-2 1.1-2-.7-2-1.1 1.1-1 2-1z"/></svg><span><b>Linux CLI</b><small>x86-64 (glibc)</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-x64">codeviewer-1.0.0-linux-x64</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.4.3 2.3-.5 3.6-1 1.6-2.8 3.6-2.8 6.1 0 .9.2 1.6.6 2.1-.7.4-1.4.9-1.4 1.6 0 1.2 2 1.4 3.5 1.8 1.3.3 2.1.9 3 .9 1 0 1.6-.6 1.9-.6h.6c.3 0 .9.6 1.9.6.9 0 1.7-.6 3-.9 1.5-.4 3.5-.6 3.5-1.8 0-.7-.7-1.2-1.4-1.6.4-.5.6-1.2.6-2.1 0-2.5-1.8-4.5-2.8-6.1-.8-1.3-.5-2.2-.5-3.6C15.6 3.9 14.2 2 12 2zm-1.6 4.2c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zm3.2 0c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zM12 9.4c.9 0 2 .6 2 1s-1.1 1.1-2 1.1-2-.7-2-1.1 1.1-1 2-1z"/></svg><span><b>Linux CLI</b><small>ARM64 (glibc)</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-arm64">codeviewer-1.0.0-linux-arm64</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+        <tr>
+          <td><div class="plat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2c-2.2 0-3.6 1.9-3.6 4.6 0 1.4.3 2.3-.5 3.6-1 1.6-2.8 3.6-2.8 6.1 0 .9.2 1.6.6 2.1-.7.4-1.4.9-1.4 1.6 0 1.2 2 1.4 3.5 1.8 1.3.3 2.1.9 3 .9 1 0 1.6-.6 1.9-.6h.6c.3 0 .9.6 1.9.6.9 0 1.7-.6 3-.9 1.5-.4 3.5-.6 3.5-1.8 0-.7-.7-1.2-1.4-1.6.4-.5.6-1.2.6-2.1 0-2.5-1.8-4.5-2.8-6.1-.8-1.3-.5-2.2-.5-3.6C15.6 3.9 14.2 2 12 2zm-1.6 4.2c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zm3.2 0c.4 0 .7.5.7 1.1s-.3 1.1-.7 1.1-.7-.5-.7-1.1.3-1.1.7-1.1zM12 9.4c.9 0 2 .6 2 1s-1.1 1.1-2 1.1-2-.7-2-1.1 1.1-1 2-1z"/></svg><span><b>Linux CLI</b><small>x86-64 (musl / Alpine)</small></span></div></td>
+          <td><div class="file"><a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-x64-musl">codeviewer-1.0.0-linux-x64-musl</a><small></small></div></td>
+          <td class="hash"><span class="muted">pending</span></td>
+        </tr>
+      </tbody></table>
+    </details>
+    <p class="fine">All files and the full <a href="https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/SHA256SUMS">SHA256SUMS</a> list are on the <a href="https://github.com/BackendStack21/codeviewer/releases/tag/v1.0.0">GitHub release</a>.</p>
+  </section>
+
+  <section id="verify" class="verify">
+    <h2>Verify before you run it</h2>
+    <p class="sub">Every release is built by <a href="https://github.com/BackendStack21/codeviewer/blob/main/.github/workflows/release.yml">GitHub Actions</a> from a tagged commit, on a clean runner. Two independent checks prove the file you have is that build.</p>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="macos">macOS</button>
+      <button role="tab" aria-selected="false" data-tab="linux">Linux</button>
+    </div>
+    <div class="panel" data-panel="macos">
+      <ol class="steps">
+        <li><h3>Download the app and the checksum list</h3><div class="cmd"><pre><code>curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-arm64.dmg
+curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/SHA256SUMS</code></pre><button class="copy" type="button" data-copy="curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/Codeviewer-1.0.0-macos-arm64.dmg
+curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/SHA256SUMS" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">Intel Mac: use <code>Codeviewer-1.0.0-macos-x64.dmg</code>.</p></li>
+        <li><h3>Check the SHA-256</h3><div class="cmd"><pre><code>shasum -a 256 -c SHA256SUMS --ignore-missing</code></pre><button class="copy" type="button" data-copy="shasum -a 256 -c SHA256SUMS --ignore-missing" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">Expect <code>Codeviewer-1.0.0-macos-arm64.dmg: OK</code>. It must also match the hash in the table above.</p></li>
+        <li><h3>Check where it was built</h3><div class="cmd"><pre><code><span class="c"># GitHub CLI: https://cli.github.com</span>
+gh attestation verify Codeviewer-1.0.0-macos-arm64.dmg --repo BackendStack21/codeviewer</code></pre><button class="copy" type="button" data-copy="gh attestation verify Codeviewer-1.0.0-macos-arm64.dmg --repo BackendStack21/codeviewer" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">This checks a Sigstore-signed provenance statement logged in a public transparency log. It proves the file came out of this repository's release workflow, at a specific commit. It does not depend on this website.</p></li>
+        <li><h3>Install</h3><p>Open the DMG and drag <b>Codeviewer</b> to <b>Applications</b>. The app is not notarized by Apple, so the first launch needs <b>right-click → Open</b>, or:</p><div class="cmd"><pre><code>xattr -dr com.apple.quarantine /Applications/Codeviewer.app</code></pre><button class="copy" type="button" data-copy="xattr -dr com.apple.quarantine /Applications/Codeviewer.app" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div></li>
+      </ol>
+    </div>
+    <div class="panel" data-panel="linux" hidden>
+      <ol class="steps">
+        <li><h3>Download the package and the checksum list</h3><div class="cmd"><pre><code>curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-x64.tar.gz
+curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/SHA256SUMS</code></pre><button class="copy" type="button" data-copy="curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/codeviewer-1.0.0-linux-x64.tar.gz
+curl -LO https://github.com/BackendStack21/codeviewer/releases/download/v1.0.0/SHA256SUMS" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">ARM64: use <code>codeviewer-1.0.0-linux-arm64.tar.gz</code>.</p></li>
+        <li><h3>Check the SHA-256</h3><div class="cmd"><pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre><button class="copy" type="button" data-copy="sha256sum -c SHA256SUMS --ignore-missing" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">Expect <code>codeviewer-1.0.0-linux-x64.tar.gz: OK</code>. It must also match the hash in the table above.</p></li>
+        <li><h3>Check where it was built</h3><div class="cmd"><pre><code>gh attestation verify codeviewer-1.0.0-linux-x64.tar.gz --repo BackendStack21/codeviewer</code></pre><button class="copy" type="button" data-copy="gh attestation verify codeviewer-1.0.0-linux-x64.tar.gz --repo BackendStack21/codeviewer" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">Proves the file came out of this repository's release workflow at a specific commit, independently of this website.</p></li>
+        <li><h3>Install</h3><div class="cmd"><pre><code>tar -xzf codeviewer-1.0.0-linux-x64.tar.gz
+./codeviewer/install.sh</code></pre><button class="copy" type="button" data-copy="tar -xzf codeviewer-1.0.0-linux-x64.tar.gz
+./codeviewer/install.sh" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div><p class="note">Adds <code>codeviewer</code> to <code>~/.local/bin</code> and a desktop entry. The bundled browser is ungoogled-chromium, itself pinned by SHA-256 in the repository.</p></li>
+      </ol>
+    </div>
+    <details class="more">
+      <summary>Or build it yourself</summary>
+      <p>You need <a href="https://bun.sh">Bun</a> 1.3.5 or newer (and Xcode command line tools for the Mac app). There are no dependencies to install.</p>
+      <div class="cmd"><pre><code>git clone https://github.com/BackendStack21/codeviewer.git
+cd codeviewer &amp;&amp; git checkout v1.0.0
+bun run test
+bun run build:local</code></pre><button class="copy" type="button" data-copy="git clone https://github.com/BackendStack21/codeviewer.git
+cd codeviewer &amp;&amp; git checkout v1.0.0
+bun run test
+bun run build:local" aria-label="Copy command"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 5.5h8v8h-8zM10.5 5.5v-3h-8v8h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button></div>
+    </details>
+  </section>
+</main>
+
+<footer class="foot">
+  <div><img src="assets/favicon.svg" alt="" width="18" height="18"> Codeviewer 1.0.0</div>
+  <div>MIT License · © 2026 <a href="https://21no.de">21no.de</a> · <a href="https://github.com/BackendStack21/codeviewer">Source</a> · <a href="https://github.com/BackendStack21/codeviewer/blob/main/SECURITY.md">Security</a></div>
+</footer>
+</body>
+</html>

@@ -1,16 +1,21 @@
-// Generates the landing page (https://codeviewer.21no.de) into site/dist.
+// Generates docs/index.html, the landing page served by Cloudflare Pages at
+// https://codeviewer.21no.de (output directory: docs/, no build command).
 //
-// Every download on the page is read from the actual release files: name, size and the
-// SHA-256 from dist/release/SHA256SUMS, so the page and the release can never disagree.
-// The output is fully static and self-contained (no third-party requests, embedded fonts).
+// docs/ holds the static site (site.css, site.js, assets/, fonts/, _headers). Only
+// index.html is generated, because it embeds each download's size and SHA-256.
 //
-//   bun run build && bun run site
-import { copyFile, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+//   bun run site                # checksums shown as "pending" (no release yet)
+//   bun run site -- --release   # read dist/release (+ SHA256SUMS): used by the release workflow
+//
+// Local builds aren't byte-identical to CI builds, so only the release workflow publishes
+// checksums: the page and the GitHub release always describe the same files.
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "..");
-const out = path.join(root, "site/dist");
+const out = path.join(root, "docs");
+const useRelease = process.argv.includes("--release");
 const releaseDir = path.join(root, "dist/release");
 const pkg = (await Bun.file(path.join(root, "package.json")).json()) as { version: string; repository: { url: string } };
 const VERSION = pkg.version;
@@ -45,7 +50,7 @@ const PLATFORMS: Omit<Download, "size" | "sha256">[] = [
 // ───────────────────────────── release data ─────────────────────────────
 
 const sums = new Map<string, string>();
-if (existsSync(path.join(releaseDir, "SHA256SUMS"))) {
+if (useRelease && existsSync(path.join(releaseDir, "SHA256SUMS"))) {
   for (const line of (await Bun.file(path.join(releaseDir, "SHA256SUMS")).text()).split("\n")) {
     const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
     if (m) sums.set(m[2]!, m[1]!);
@@ -54,13 +59,12 @@ if (existsSync(path.join(releaseDir, "SHA256SUMS"))) {
 const downloads: Download[] = await Promise.all(
   PLATFORMS.map(async (p) => {
     const f = path.join(releaseDir, p.file);
-    return { ...p, size: existsSync(f) ? (await stat(f)).size : null, sha256: sums.get(p.file) ?? null };
+    return { ...p, size: useRelease && existsSync(f) ? (await stat(f)).size : null, sha256: sums.get(p.file) ?? null };
   }),
 );
 const missing = downloads.filter((d) => !d.sha256);
-if (missing.length) {
-  console.warn(`warn  no release file/checksum for: ${missing.map((d) => d.file).join(", ")}`);
-  if (process.env.CI) throw new Error("release incomplete: refusing to publish a page without every checksum");
+if (useRelease && missing.length) {
+  throw new Error(`release incomplete, refusing to publish without checksums for: ${missing.map((d) => d.file).join(", ")}`);
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
@@ -264,14 +268,7 @@ ${FEATURES.map(
 
 // ───────────────────────────── write ─────────────────────────────
 
-await rm(out, { recursive: true, force: true });
-await mkdir(path.join(out, "assets"), { recursive: true });
 await mkdir(path.join(out, "fonts"), { recursive: true });
 await writeFile(path.join(out, "index.html"), html);
-await copyFile(path.join(root, "site/site.css"), path.join(out, "site.css"));
-await copyFile(path.join(root, "site/site.js"), path.join(out, "site.js"));
-for (const f of await readdir(path.join(root, "site/assets"))) await copyFile(path.join(root, "site/assets", f), path.join(out, "assets", f));
 for (const f of ["InterVariable.woff2", "JetBrainsMono-Regular.woff2"]) await copyFile(path.join(root, "vendor/fonts", f), path.join(out, "fonts", f));
-await writeFile(path.join(out, "CNAME"), DOMAIN + "\n");
-await writeFile(path.join(out, ".nojekyll"), "");
-console.log(`site     site/dist (${downloads.length - missing.length}/${downloads.length} downloads with checksums)`);
+console.log(`site     docs/index.html (${useRelease ? `${downloads.length - missing.length}/${downloads.length} downloads with checksums` : "checksums pending until the release workflow runs"})`);

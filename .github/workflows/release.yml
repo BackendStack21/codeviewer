@@ -1,6 +1,7 @@
 # Builds every package from a version tag on a clean GitHub-hosted runner, signs SLSA build
 # provenance for each file (Sigstore, verifiable with `gh attestation verify`), publishes the
-# release with SHA256SUMS, and deploys the landing page with the same checksums.
+# release with SHA256SUMS, then regenerates docs/ (the landing page, deployed by Cloudflare
+# Pages from main) with the sizes and checksums of exactly these files.
 name: release
 
 on:
@@ -47,22 +48,13 @@ jobs:
             --title "Codeviewer $GITHUB_REF_NAME" \
             --notes "Downloads, checksums and verification steps: https://codeviewer.21no.de/#verify"
 
-      - name: Build the landing page
-        run: bun run site
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site/dist
-
-  pages:
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - name: Update the landing page with this release's checksums
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          bun run site -- --release
+          git add docs
+          git diff --cached --quiet || git commit -m "docs: downloads and checksums for $GITHUB_REF_NAME"
+          git push origin main

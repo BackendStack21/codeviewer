@@ -9,7 +9,7 @@ watching your code while an agent (Claude Code, Codex, aider…) or any CLI tool
 Linux (x86-64 / ARM64), or a single command-line binary. Every download comes with a SHA-256 and
 signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify).
 
-![Codeviewer](site/assets/screenshot-dark.jpg)
+![Codeviewer](docs/assets/screenshot-dark.jpg)
 
 - **Zero dependencies.** Bun + TypeScript only: the terminal emulator, syntax highlighter,
   fuzzy finder, file watcher and UI are all written from scratch.
@@ -119,7 +119,7 @@ bun run build         # slim binaries (dist/bin) + .dmg / .tar.gz for every targ
 bun run build:local   # this machine only: dist/bin/codeviewer + its app (on a Mac: the .dmg)
 bun scripts/build.ts --slim             # binaries only, no browser download
 bun scripts/build.ts --browser <tag|latest>  # re-pin the Linux browser (packaging/browser-pins.json)
-bun run site          # landing page → site/dist (reads dist/release for sizes + checksums)
+bun run site          # regenerate docs/index.html (the landing page); `-- --release` reads dist/release
 ```
 
 ### Releasing
@@ -127,8 +127,11 @@ bun run site          # landing page → site/dist (reads dist/release for sizes
 1. Bump `version` in `package.json` and commit.
 2. `git tag v<version> && git push --tags`
 3. The release workflow runs the tests, builds every package, attests provenance, publishes
-   the GitHub release with `SHA256SUMS`, and deploys the landing page to GitHub Pages
-   (custom domain `codeviewer.21no.de`, served from `site/dist/CNAME`).
+   the GitHub release with `SHA256SUMS`, and commits the release's sizes and checksums into
+   `docs/` on `main`.
+
+The landing page is `docs/`, served by **Cloudflare Pages** at `codeviewer.21no.de`
+(production branch `main`, no build command, output directory `docs`; headers in `docs/_headers`).
 
 ## License
 
