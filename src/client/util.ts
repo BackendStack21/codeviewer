@@ -126,3 +126,35 @@ export function dragSplitter(handle: HTMLElement, axis: "x" | "y", onStart: () =
     handle.addEventListener("pointercancel", up);
   });
 }
+
+/**
+ * Closes a popup on a mousedown outside it and on Escape (or `key`, which then decides),
+ * optionally also when the window blurs, resizes or scrolls. Capture phase, so handlers that
+ * stop propagation can't keep it open. Returns the function that removes the listeners.
+ */
+export function dismissable(
+  el: HTMLElement,
+  onClose: () => void,
+  opts: { key?: (e: KeyboardEvent) => void; keep?: (target: HTMLElement) => boolean; transient?: boolean } = {},
+): () => void {
+  const onDown = (e: Event) => {
+    const t = e.target as HTMLElement;
+    if (!el.contains(t) && !opts.keep?.(t)) onClose();
+  };
+  const onKey = opts.key ?? ((e: KeyboardEvent) => e.key === "Escape" && onClose());
+  const onAway = () => onClose();
+  window.addEventListener("mousedown", onDown, true);
+  window.addEventListener("keydown", onKey, true);
+  if (opts.transient) {
+    window.addEventListener("blur", onAway);
+    window.addEventListener("resize", onAway);
+    window.addEventListener("wheel", onAway, { passive: true, capture: true });
+  }
+  return () => {
+    window.removeEventListener("mousedown", onDown, true);
+    window.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("blur", onAway);
+    window.removeEventListener("resize", onAway);
+    window.removeEventListener("wheel", onAway, true);
+  };
+}

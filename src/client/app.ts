@@ -9,6 +9,7 @@ import { icons } from "./icons.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
+import { isContextMenuOpen } from "./menu.ts";
 
 type ThemeName = "dark" | "light" | "system";
 
@@ -531,6 +532,7 @@ class App {
     window.addEventListener(
       "keydown",
       (e) => {
+        if (isContextMenuOpen()) return; // its own listener takes the key
         const mod = IS_MAC ? e.metaKey : e.ctrlKey;
         const k = e.key.toLowerCase();
         const inTerm = (e.target as HTMLElement).classList?.contains("term-input");

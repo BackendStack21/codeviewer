@@ -31,3 +31,20 @@ test("lookups stay fast with thousands of ignored folders", () => {
   for (let i = 0; i < 6000; i++) g.file(`pkg${i % 500}/src/module${i}.py`);
   expect(performance.now() - t).toBeLessThan(50 * BUDGET);
 });
+
+test("cleared: only a changed-to-clean/ignored transition counts", () => {
+  const g = new GitState();
+  g.set({ ...base, files: { "a.ts": ".M", "b.ts": "??", "gen/": "!!", "c.ts": ".M", "out/": "??" } });
+  expect(g.cleared("a.ts")).toBe(false); // nothing before this status
+  // A status taken before d.ts was written still calls it clean: that mustn't count.
+  g.set({ ...base, files: { "b.ts": "!!", "gen/": "!!", "c.ts": ".M" } });
+  expect(g.cleared("a.ts")).toBe(true); // committed or reverted
+  expect(g.cleared("b.ts")).toBe(true); // now ignored
+  expect(g.cleared("out/x.js")).toBe(true); // untracked folder gone
+  expect(g.cleared("c.ts")).toBe(false); // still modified
+  expect(g.cleared("d.ts")).toBe(false); // clean before and after
+  expect(g.cleared("gen/x.js")).toBe(false); // ignored before and after
+  g.set({ ...base, files: { "c.ts": ".M", "d.ts": ".M" } });
+  expect(g.cleared("d.ts")).toBe(false); // clean to modified
+  expect(g.cleared("a.ts")).toBe(false); // clean to clean
+});
