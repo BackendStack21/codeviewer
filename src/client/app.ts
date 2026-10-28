@@ -103,7 +103,7 @@ class App {
     this.tree.git = this.git;
     this.editor.git = this.git;
     this.git.onChange(() => {
-      this.tree.refresh();
+      this.tree.onGitChanged();
       this.editor.onGitChanged();
       this.renderStatus(this.lastStatus);
     });

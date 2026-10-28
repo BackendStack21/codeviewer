@@ -256,11 +256,6 @@ export class FileTree {
     else if (top + ROW > s.scrollTop + s.clientHeight) s.scrollTop = top + ROW - s.clientHeight;
   }
 
-  /** Repaint (e.g. git status changed). */
-  refresh() {
-    this.schedule();
-  }
-
   focus() {
     this.scroller.focus();
     if (!this.selected && this.flat[0]) {
@@ -318,7 +313,7 @@ export class FileTree {
       dirs.add(dirname(p));
       const node = this.byPath.get(p);
       if (node?.type === "dir" && node.children) dirs.add(p);
-      if (p !== this.active && (!node || node.type === "file")) this.changed.add(p);
+      if (p !== this.active && (!node || node.type === "file") && !this.isIgnored(p)) this.changed.add(p);
     }
     // Bounded: a build can touch tens of thousands of files; keep the most recent ones.
     if (this.changed.size > 2000) {
@@ -334,6 +329,24 @@ export class FileTree {
     }
     this.recomputeChangedDirs();
     this.reflow();
+  }
+
+  /** Git status changed: committed, reverted or ignored files no longer count as changes. */
+  onGitChanged() {
+    if (this.git?.repo) {
+      let pruned = false;
+      for (const p of this.changed) {
+        const g = this.git.file(p);
+        if (!g || g.letter === "I") pruned = this.changed.delete(p) || pruned;
+      }
+      if (pruned) this.recomputeChangedDirs();
+    }
+    this.schedule();
+  }
+
+  /** Build output and the like: churn there isn't worth a marker. */
+  private isIgnored(p: string) {
+    return !!this.git?.repo && this.git.file(p)?.letter === "I";
   }
 
   clearChanges() {
