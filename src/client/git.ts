@@ -52,14 +52,16 @@ export class GitState {
   status: GitStatus = { repo: false } as GitStatus;
   private files = new Map<string, FileGit>();
   private prefixes = new Map<string, FileGit>(); // untracked/ignored directories (no trailing "/")
+  private prev = { files: this.files, prefixes: this.prefixes };
   private dirs = new Map<string, Letter>();
   private listeners = new Set<() => void>();
   counts = { changed: 0, staged: 0, untracked: 0, conflicts: 0 };
 
   set(s: GitStatus) {
     this.status = s;
-    this.files.clear();
-    this.prefixes.clear();
+    this.prev = { files: this.files, prefixes: this.prefixes };
+    this.files = new Map();
+    this.prefixes = new Map();
     this.dirs.clear();
     this.counts = { changed: 0, staged: 0, untracked: 0, conflicts: 0 };
     for (const [raw, xy] of Object.entries(s.files ?? {})) {
@@ -93,23 +95,20 @@ export class GitState {
 
   file(path: string): FileGit | null {
     path = nfc(path);
-    return this.files.get(path) ?? this.underPrefix(path);
+    return this.files.get(path) ?? underPrefix(this.prefixes, path);
+  }
+
+  /** True if the last status update took `path` from changed to clean or ignored. */
+  cleared(path: string): boolean {
+    path = nfc(path);
+    const was = this.prev.files.get(path) ?? underPrefix(this.prev.prefixes, path);
+    return !!was && was.letter !== "I" && (this.file(path)?.letter ?? "I") === "I";
   }
 
   /** Status of a directory: its own (untracked/ignored) or the strongest inside it. */
   dir(path: string): Letter | null {
     path = nfc(path);
-    return (this.prefixes.get(path) ?? this.underPrefix(path))?.letter ?? this.dirs.get(path) ?? null;
-  }
-
-  /** Nearest untracked/ignored ancestor directory, walking up (O(depth)). */
-  private underPrefix(path: string): FileGit | null {
-    if (!this.prefixes.size) return null;
-    for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
-      const g = this.prefixes.get(path.slice(0, i));
-      if (g) return g;
-    }
-    return null;
+    return (this.prefixes.get(path) ?? underPrefix(this.prefixes, path))?.letter ?? this.dirs.get(path) ?? null;
   }
 
   /** Changed (non-ignored) files, most important first. */
@@ -119,6 +118,16 @@ export class GitState {
     for (const [path, git] of this.prefixes) if (git.letter !== "I") out.push({ path: path + "/", git });
     return out.sort((a, b) => PRIORITY[b.git.letter] - PRIORITY[a.git.letter] || a.path.localeCompare(b.path));
   }
+}
+
+/** Nearest untracked/ignored ancestor directory, walking up (O(depth)). */
+function underPrefix(prefixes: Map<string, FileGit>, path: string): FileGit | null {
+  if (!prefixes.size) return null;
+  for (let i = path.lastIndexOf("/"); i > 0; i = path.lastIndexOf("/", i - 1)) {
+    const g = prefixes.get(path.slice(0, i));
+    if (g) return g;
+  }
+  return null;
 }
 
 export function relativeTime(ms: number): string {

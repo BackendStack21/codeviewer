@@ -106,6 +106,8 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     private var tabbarHeight = -1 // last value sent to the page
     private var measuredTabbar = 0 // AppKit's tab bar height, measured outside full screen
     private var layoutObserver: NSKeyValueObservation?
+    private var tabBarObserver: NSKeyValueObservation?
+    private weak var observedGroup: NSWindowTabGroup?
 
     init(folder: URL) {
         server = Server(folder: folder)
@@ -166,17 +168,23 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
 
     /// Tells the page how tall the native tab bar is (0 when hidden).
     func syncTabBar(force: Bool = false) {
-        let inset = ViewerWindow.titlebarMetrics(window).height
-        var h: Int
-        if window.styleMask.contains(.fullScreen) {
-            // The title bar is gone; a tab bar that stays on screen is the whole inset. A larger
-            // inset is the toolbar sliding in while the pointer is at the top edge: an overlay,
-            // so keep the current offset rather than shifting the page under the pointer.
-            if inset > max(measuredTabbar, 1) + 4 { return }
-            h = inset
-        } else {
-            h = max(0, inset - titlebarHeight)
-            if h > 0 { measuredTabbar = h }
+        // The window moves to another group when its tab is dragged out or into another window.
+        if window.tabGroup !== observedGroup {
+            observedGroup = window.tabGroup
+            tabBarObserver = observedGroup?.observe(\.isTabBarVisible) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.syncTabBar() }
+            }
+        }
+        var h = 0
+        if window.tabGroup?.isTabBarVisible == true {
+            if window.styleMask.contains(.fullScreen) {
+                // The title bar is gone, and the inset also grows while the toolbar slides in at the
+                // top edge (an overlay): use the height measured in a window, not the inset.
+                h = measuredTabbar > 0 ? measuredTabbar : 28
+            } else {
+                h = max(0, ViewerWindow.titlebarMetrics(window).height - titlebarHeight)
+                if h > 0 { measuredTabbar = h }
+            }
         }
         if h == tabbarHeight && !force { return }
         tabbarHeight = h
@@ -260,9 +268,10 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         }
     }
 
-    // A new document starts without the offset: send it before the page first paints.
+    // A new document starts without the offset or full screen state: send them before the page first paints.
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         syncTabBar(force: true)
+        setFullScreenAttribute(window.styleMask.contains(.fullScreen))
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -311,6 +320,7 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
 
     func windowWillClose(_ notification: Notification) {
         layoutObserver = nil
+        tabBarObserver = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "native")
         server.stop()
         onClose?(self)
@@ -340,11 +350,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `codeviewer <dir>` from a terminal runs: open -n -a Codeviewer --args --folder <dir>
         // (a restart after an update passes one --folder per tab, --window to start a new window).
+        // Without --window (the CLI, or a restart from an older build) each --folder tabs as usual.
         let args = CommandLine.arguments
+        let layout = args.contains("--window")
         var last: ViewerWindow?
         for (i, a) in args.enumerated() where (a == "--folder" || a == "--window") && i + 1 < args.count {
+            let url = URL(fileURLWithPath: args[i + 1], isDirectory: true)
             let tabbed = a == "--folder"
-            last = open(folder: URL(fileURLWithPath: args[i + 1], isDirectory: true), tabbed: tabbed, into: tabbed ? last?.window : nil)
+            last = layout ? open(folder: url, tabbed: tabbed, into: tabbed ? last?.window : nil) : open(folder: url)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             if !self.openedSomething { self.chooseFolder(nil) }
@@ -420,7 +433,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.message = "Choose a folder to view"
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK {
-            panel.urls.forEach { open(folder: $0, tabbed: tabbed) }
+            // New Window with several folders: one new window, the rest as its tabs.
+            var host: NSWindow?
+            for u in panel.urls {
+                let w = open(folder: u, tabbed: tabbed || host != nil, into: host)
+                if !tabbed && host == nil { host = w.window }
+            }
         } else if windows.isEmpty {
             NSApp.terminate(nil)
         }
@@ -430,16 +448,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// window layout: tabs of one window stay together, separate windows stay separate.
     func relaunch() {
         var args = ["-n", Bundle.main.bundlePath, "--args"]
-        var groups: [[ViewerWindow]] = []
-        for w in windows {
-            if let i = groups.firstIndex(where: { $0[0].window.tabbedWindows?.contains(w.window) == true }) {
-                groups[i].append(w)
-            } else {
-                groups.append([w])
+        var done = Set<ObjectIdentifier>()
+        for w in windows where !done.contains(ObjectIdentifier(w)) {
+            // tabbedWindows is in tab order; nil for a window that stands alone.
+            let group = (w.window.tabbedWindows ?? [w.window]).compactMap { nsw in windows.first { $0.window === nsw } }
+            for (i, t) in group.enumerated() {
+                done.insert(ObjectIdentifier(t))
+                args += [i == 0 ? "--window" : "--folder", t.server.folder.path]
             }
-        }
-        for g in groups {
-            for (i, w) in g.enumerated() { args += [i == 0 ? "--window" : "--folder", w.server.folder.path] }
         }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/open")

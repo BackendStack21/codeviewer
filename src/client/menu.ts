@@ -1,4 +1,4 @@
-import { h } from "./util.ts";
+import { dismissable, h } from "./util.ts";
 
 export interface MenuItem {
   label: string;
@@ -9,6 +9,10 @@ let current: { dispose: () => void } | null = null;
 
 export function closeContextMenu() {
   current?.dispose();
+}
+
+export function isContextMenuOpen() {
+  return !!current;
 }
 
 /** Shows a small context menu at the pointer, replacing the browser's (or WebView's) own. */
@@ -39,10 +43,7 @@ export function showContextMenu(e: MouseEvent, items: MenuItem[]) {
   el.style.top = `${Math.max(4, Math.min(e.clientY, innerHeight - r.height - 4))}px`;
 
   const buttons = [...el.querySelectorAll<HTMLElement>(".ctx-item")];
-  const onDown = (ev: Event) => {
-    if (!el.contains(ev.target as Node)) closeContextMenu();
-  };
-  // While open, the menu owns the keyboard: no shortcut runs underneath it.
+  // While open, the menu owns the keyboard: App's shortcuts check isContextMenuOpen() and step aside.
   const onKey = (ev: KeyboardEvent) => {
     ev.stopPropagation();
     if (["Shift", "Control", "Alt", "Meta"].includes(ev.key)) return;
@@ -56,22 +57,12 @@ export function showContextMenu(e: MouseEvent, items: MenuItem[]) {
     } else closeContextMenu();
     ev.preventDefault();
   };
-  const onBlur = () => closeContextMenu();
-  // Capture phase, so a click elsewhere closes the menu even if a handler stops propagation.
-  window.addEventListener("mousedown", onDown, true);
-  window.addEventListener("keydown", onKey, true);
-  window.addEventListener("blur", onBlur);
-  window.addEventListener("resize", onBlur);
-  window.addEventListener("wheel", onBlur, { passive: true, capture: true });
+  const off = dismissable(el, closeContextMenu, { key: onKey, transient: true });
   current = {
     dispose: () => {
       current = null;
       el.remove();
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("resize", onBlur);
-      window.removeEventListener("wheel", onBlur, true);
+      off();
       // Only if focus was still in the menu (or lost with it); a click elsewhere keeps its target.
       if (returnTo?.isConnected && (!document.activeElement || document.activeElement === document.body)) {
         returnTo.focus({ preventScroll: true });

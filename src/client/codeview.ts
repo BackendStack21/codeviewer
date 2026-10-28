@@ -1,5 +1,5 @@
 import { Highlighter, type Tok } from "./highlight.ts";
-import { esc, h } from "./util.ts";
+import { dismissable, esc, h } from "./util.ts";
 import { icons } from "./icons.ts";
 import { diffLines, gutterMarks, ADDED, MODIFIED, DELETED_BELOW, DELETED_ABOVE, type Hunk } from "./diff.ts";
 
@@ -254,18 +254,9 @@ export class CodeView {
     box.style.left = `${this.gutterW - 6}px`;
     this.el.append(box);
     this.peek = box;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") this.closePeek();
-    };
-    const onDown = (e: MouseEvent) => {
-      if (!box.contains(e.target as Node) && !(e.target as HTMLElement).classList.contains("g")) this.closePeek();
-    };
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("mousedown", onDown, true);
-    box.addEventListener("peek-close", () => {
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("mousedown", onDown, true);
-    });
+    // A click on a gutter marker toggles the peek itself.
+    const off = dismissable(box, () => this.closePeek(), { keep: (t) => !!t.classList?.contains("g") });
+    box.addEventListener("peek-close", off);
   }
 
   private closePeek() {

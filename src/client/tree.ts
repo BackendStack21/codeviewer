@@ -45,7 +45,7 @@ export class FileTree {
     new ResizeObserver(() => this.schedule()).observe(this.scroller);
     this.rows.addEventListener("click", (e) => this.onClick(e as MouseEvent, false));
     this.rows.addEventListener("dblclick", (e) => this.onClick(e as MouseEvent, true));
-    this.rows.addEventListener("contextmenu", (e) => this.onContextMenu(e as MouseEvent));
+    this.scroller.addEventListener("contextmenu", (e) => this.onContextMenu(e as MouseEvent));
     this.scroller.addEventListener("keydown", (e) => this.onKey(e));
   }
 
@@ -182,15 +182,20 @@ export class FileTree {
     this.schedule();
   }
 
-  /** Our own menu instead of the WebView's (Reload, Inspect Element…). */
+  /** Our own menu instead of the WebView's (Reload, Inspect Element…), anywhere in the explorer. */
   private onContextMenu(e: MouseEvent) {
     e.preventDefault();
     const row = (e.target as HTMLElement).closest<HTMLElement>(".row");
     const n = row && this.flat[Number(row.dataset.i)];
-    if (!n || n.type !== "file") return;
+    const collapse = { label: "Collapse All", run: () => this.collapseAll() };
+    if (!n) return showContextMenu(e, [collapse]);
     this.selected = n.path;
     this.schedule();
-    showContextMenu(e, [{ label: "Open in New Tab", run: () => this.onOpen(n.path, true) }]);
+    if (n.type === "dir") {
+      showContextMenu(e, [{ label: n.expanded ? "Collapse" : "Expand", run: () => void this.toggle(n) }, collapse]);
+    } else if (n.type === "file") {
+      showContextMenu(e, [{ label: "Open in New Tab", run: () => this.onOpen(n.path, true) }]);
+    }
   }
 
   private async toggle(n: TNode, open = !n.expanded) {
@@ -332,14 +337,15 @@ export class FileTree {
     this.reflow();
   }
 
-  /** Git status changed: committed, reverted or ignored files no longer count as changes. */
+  /**
+   * Git status changed: files it just saw committed, reverted or ignored no longer count as
+   * changes. Only that transition prunes: a status taken before a write would still call the
+   * file clean, and the next one (showing it modified) wouldn't bring the marker back.
+   */
   onGitChanged() {
     if (this.git?.repo) {
       let pruned = false;
-      for (const p of this.changed) {
-        const g = this.git.file(p);
-        if (!g || g.letter === "I") pruned = this.changed.delete(p) || pruned;
-      }
+      for (const p of this.changed) if (this.git.cleared(p)) pruned = this.changed.delete(p) || pruned;
       if (pruned) this.recomputeChangedDirs();
     }
     this.schedule();
