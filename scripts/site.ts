@@ -140,7 +140,7 @@ const html = `<!doctype html>
 <meta property="og:image" content="https://${DOMAIN}/assets/screenshot-dark.jpg">
 <meta property="og:url" content="https://${DOMAIN}/">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" href="fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="site.css">
 <script type="application/json" id="downloads">${JSON.stringify(apps.map(({ id, os, detail, file }) => ({ id, os, detail, file, url: url(file) })))}</script>
 <script src="site.js" defer></script>
@@ -158,7 +158,7 @@ const html = `<!doctype html>
 
 <main id="top">
   <section class="hero">
-    <p class="eyebrow"><span class="pill">v${VERSION}</span> Free and open source · MIT</p>
+    <p class="eyebrow"><span class="pill">Free</span> Open source · MIT licensed</p>
     <h1>Read the code.<br><span class="grad">Run the agent.</span> Same window.</h1>
     <p class="lede">Codeviewer is a fast, read-only code viewer with a real terminal built in. Point your favourite CLI agent at a project and watch every file it touches update live, with git telling you exactly what changed.</p>
     <div class="cta">
@@ -213,7 +213,7 @@ ${FEATURES.map(
 
   <section id="download" class="download">
     <h2>Download</h2>
-    <p class="sub">Version ${VERSION}. The apps are self-contained; the CLI binaries serve the viewer to any browser (<code>codeviewer . --no-open</code>).</p>
+    <p class="sub">The latest release. The apps are self-contained; the CLI binaries serve the viewer to any browser (<code>codeviewer . --no-open</code>).</p>
     <table class="dl">
       <thead><tr><th>Platform</th><th>File</th><th>SHA-256</th></tr></thead>
       <tbody>${apps.map(row).join("")}
@@ -259,7 +259,7 @@ ${FEATURES.map(
 </main>
 
 <footer class="foot">
-  <div><img src="assets/favicon.svg" alt="" width="18" height="18"> Codeviewer ${VERSION}</div>
+  <div><img src="assets/favicon.svg" alt="" width="18" height="18"> Codeviewer</div>
   <div>MIT License · © ${new Date().getFullYear()} <a href="https://21no.de">21no.de</a> · <a href="${REPO}">Source</a> · <a href="${REPO}/blob/main/SECURITY.md">Security</a></div>
 </footer>
 </body>
@@ -270,5 +270,5 @@ ${FEATURES.map(
 
 await mkdir(path.join(out, "fonts"), { recursive: true });
 await writeFile(path.join(out, "index.html"), html);
-for (const f of ["InterVariable.woff2", "JetBrainsMono-Regular.woff2"]) await copyFile(path.join(root, "vendor/fonts", f), path.join(out, "fonts", f));
+for (const f of ["SpaceGrotesk.woff2", "JetBrainsMono-Regular.woff2"]) await copyFile(path.join(root, "vendor/fonts", f), path.join(out, "fonts", f));
 console.log(`site     docs/index.html (${useRelease ? `${downloads.length - missing.length}/${downloads.length} downloads with checksums` : "checksums pending until the release workflow runs"})`);

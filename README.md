@@ -135,5 +135,5 @@ The landing page is `docs/`, served by **Cloudflare Pages** at `codeviewer.21no.
 
 ## License
 
-[MIT](LICENSE) © 2026 [21no.de](https://21no.de). Bundled fonts: JetBrains Mono and Inter (SIL OFL 1.1,
-see `vendor/fonts`). The Linux packages bundle ungoogled-chromium (BSD-3-Clause and others).
+[MIT](LICENSE) © 2026 [21no.de](https://21no.de). Bundled fonts: JetBrains Mono and Inter in the app,
+Space Grotesk on the website (all SIL OFL 1.1, see `vendor/fonts`). The Linux packages bundle ungoogled-chromium (BSD-3-Clause and others).
