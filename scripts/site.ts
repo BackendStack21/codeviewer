@@ -1,101 +1,54 @@
-// Generates docs/index.html, the landing page served by Cloudflare Pages at
-// https://codeviewer.21no.de (output directory: docs/, no build command).
+// Generates docs/index.html, the landing page served by Cloudflare at https://codeviewer.21no.de.
 //
-// docs/ holds the static site (site.css, site.js, assets/, fonts/, _headers). Only
-// index.html is generated, because it embeds each download's size and SHA-256.
+// The page carries no release data (no version, sizes or checksums baked in): docs/site.js reads
+// the latest release from GitHub's API in the browser and fills in file names, sizes, SHA-256
+// digests and the exact verification commands. Without JavaScript (or if the API is
+// unreachable) every link falls back to the GitHub "latest release" page. Nothing goes stale,
+// and nothing needs regenerating when a release is published.
 //
-//   bun run site                # re-render using the published release in docs/release.json
-//   bun run site -- --release   # read dist/release (+ SHA256SUMS), write docs/release.json:
-//                               # used by the release workflow only
-//
-// Local builds aren't byte-identical to CI builds, so only the release workflow records
-// checksums: the page and the GitHub release always describe the same files, and editing
-// the page can never wipe them.
-import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+//   bun run site
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "..");
 const out = path.join(root, "docs");
-const releaseDir = path.join(root, "dist/release");
-const pkg = (await Bun.file(path.join(root, "package.json")).json()) as { version: string; repository: { url: string } };
-const useRelease = process.argv.includes("--release");
-const RELEASE_JSON = path.join(root, "docs/release.json");
-
-/** Published release: name → size + SHA-256, and whether SHA256SUMS is signed. */
-interface ReleaseData {
-  version: string;
-  signed: boolean;
-  files: Record<string, { size: number; sha256: string }>;
-}
-
-let release: ReleaseData | null = null;
-if (useRelease) {
-  const sums = existsSync(path.join(releaseDir, "SHA256SUMS")) ? await Bun.file(path.join(releaseDir, "SHA256SUMS")).text() : "";
-  const files: ReleaseData["files"] = {};
-  for (const line of sums.split("\n")) {
-    const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
-    if (m && existsSync(path.join(releaseDir, m[2]!))) files[m[2]!] = { sha256: m[1]!, size: (await stat(path.join(releaseDir, m[2]!))).size };
-  }
-  release = { version: pkg.version, signed: existsSync(path.join(releaseDir, "SHA256SUMS.sig")), files };
-} else if (existsSync(RELEASE_JSON)) {
-  release = (await Bun.file(RELEASE_JSON).json()) as ReleaseData;
-}
-// File names and links follow the published release (package.json may already be ahead).
-const VERSION = release?.version ?? pkg.version;
+const pkg = (await Bun.file(path.join(root, "package.json")).json()) as { repository: { url: string } };
 const REPO = pkg.repository.url.replace(/^git\+/, "").replace(/\.git$/, ""); // https://github.com/owner/name
 const REPO_SLUG = REPO.replace("https://github.com/", "");
-const DL = `${REPO}/releases/download/v${VERSION}`;
+const LATEST = `${REPO}/releases/latest`;
+const LATEST_DL = `${LATEST}/download`; // stable URLs for versionless assets (SHA256SUMS, .sig)
+const KEY_URL = `${REPO.replace("github.com", "raw.githubusercontent.com")}/main/packaging/update-key.pub`;
 const DOMAIN = "codeviewer.21no.de";
 
-interface Download {
+/** A downloadable build, identified in the latest release by its file-name suffix. */
+interface Platform {
   id: string;
   os: "macos" | "linux";
   label: string;
   detail: string;
-  file: string;
   kind: "app" | "cli";
-  size: number | null;
-  sha256: string | null;
+  prefix: string;
+  suffix: string;
 }
 
-const PLATFORMS: Omit<Download, "size" | "sha256">[] = [
-  { id: "macos-arm64", os: "macos", label: "macOS", detail: "Apple silicon", file: `Codeviewer-${VERSION}-macos-arm64.dmg`, kind: "app" },
-  { id: "macos-x64", os: "macos", label: "macOS", detail: "Intel", file: `Codeviewer-${VERSION}-macos-x64.dmg`, kind: "app" },
-  { id: "linux-x64", os: "linux", label: "Linux", detail: "x86-64", file: `codeviewer-${VERSION}-linux-x64.tar.gz`, kind: "app" },
-  { id: "linux-arm64", os: "linux", label: "Linux", detail: "ARM64", file: `codeviewer-${VERSION}-linux-arm64.tar.gz`, kind: "app" },
-  { id: "cli-macos-arm64", os: "macos", label: "macOS CLI", detail: "Apple silicon", file: `codeviewer-${VERSION}-macos-arm64`, kind: "cli" },
-  { id: "cli-macos-x64", os: "macos", label: "macOS CLI", detail: "Intel", file: `codeviewer-${VERSION}-macos-x64`, kind: "cli" },
-  { id: "cli-linux-x64", os: "linux", label: "Linux CLI", detail: "x86-64 (glibc)", file: `codeviewer-${VERSION}-linux-x64`, kind: "cli" },
-  { id: "cli-linux-arm64", os: "linux", label: "Linux CLI", detail: "ARM64 (glibc)", file: `codeviewer-${VERSION}-linux-arm64`, kind: "cli" },
-  { id: "cli-linux-x64-musl", os: "linux", label: "Linux CLI", detail: "x86-64 (musl / Alpine)", file: `codeviewer-${VERSION}-linux-x64-musl`, kind: "cli" },
+const PLATFORMS: Platform[] = [
+  { id: "macos-arm64", os: "macos", label: "macOS", detail: "Apple silicon", kind: "app", prefix: "Codeviewer-", suffix: "-macos-arm64.dmg" },
+  { id: "macos-x64", os: "macos", label: "macOS", detail: "Intel", kind: "app", prefix: "Codeviewer-", suffix: "-macos-x64.dmg" },
+  { id: "linux-x64", os: "linux", label: "Linux", detail: "x86-64", kind: "app", prefix: "codeviewer-", suffix: "-linux-x64.tar.gz" },
+  { id: "linux-arm64", os: "linux", label: "Linux", detail: "ARM64", kind: "app", prefix: "codeviewer-", suffix: "-linux-arm64.tar.gz" },
+  { id: "cli-macos-arm64", os: "macos", label: "macOS CLI", detail: "Apple silicon", kind: "cli", prefix: "codeviewer-", suffix: "-macos-arm64" },
+  { id: "cli-macos-x64", os: "macos", label: "macOS CLI", detail: "Intel", kind: "cli", prefix: "codeviewer-", suffix: "-macos-x64" },
+  { id: "cli-linux-x64", os: "linux", label: "Linux CLI", detail: "x86-64 (glibc)", kind: "cli", prefix: "codeviewer-", suffix: "-linux-x64" },
+  { id: "cli-linux-arm64", os: "linux", label: "Linux CLI", detail: "ARM64 (glibc)", kind: "cli", prefix: "codeviewer-", suffix: "-linux-arm64" },
+  { id: "cli-linux-x64-musl", os: "linux", label: "Linux CLI", detail: "x86-64 (musl / Alpine)", kind: "cli", prefix: "codeviewer-", suffix: "-linux-x64-musl" },
 ];
-
-// ───────────────────────────── release data ─────────────────────────────
-
-const downloads: Download[] = PLATFORMS.map((p) => {
-  const f = release?.files[p.file];
-  return { ...p, size: f?.size ?? null, sha256: f?.sha256 ?? null };
-});
-const missing = downloads.filter((d) => !d.sha256);
-// Releases from 1.1 on sign SHA256SUMS (the in-app updater requires it).
-const signed = !!release?.signed;
-const KEY_URL = `${REPO.replace("github.com", "raw.githubusercontent.com")}/main/packaging/update-key.pub`;
-const sigStep = (os: "macos" | "linux") =>
-  signed
-    ? `<li><h3>Check the release signature</h3>${code(
-        `curl -LO ${DL}/SHA256SUMS.sig\ncurl -fsSLo codeviewer.pub ${KEY_URL}\nopenssl pkeyutl -verify -pubin -inkey codeviewer.pub -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig`,
-      )}<p class="note">Expect <code>Signature Verified Successfully</code>. Needs OpenSSL 3 or newer${os === "macos" ? " (<code>brew install openssl</code>; the built-in one is LibreSSL)" : ""}. This is the same Ed25519 signature the in-app updater checks before installing anything.</p></li>`
-    : "";
-if (useRelease && missing.length) {
-  throw new Error(`release incomplete, refusing to publish without checksums for: ${missing.map((d) => d.file).join(", ")}`);
-}
+const byId = new Map(PLATFORMS.map((p) => [p.id, p]));
 
 // ───────────────────────────── helpers ─────────────────────────────
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-const mb = (n: number | null) => (n === null ? "" : `${(n / 1024 / 1024).toFixed(0)} MB`);
-const url = (file: string) => `${DL}/${file}`;
+/** Generic name shown until (or unless) the latest release is known. */
+const placeholder = (id: string) => `${byId.get(id)!.prefix}<version>${byId.get(id)!.suffix}`;
 
 const ICON = {
   apple: `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9s-2-.9-3.3-.9c-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8s2 .8 3.3.8c1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9 0 0-2.8-1.1-2.8-4.1zM13.9 5.3c.7-.8 1.2-2 1-3.2-1 0-2.3.7-3 1.5-.7.7-1.2 1.9-1.1 3.1 1.2.1 2.4-.6 3.1-1.4z"/></svg>`,
@@ -107,11 +60,24 @@ const ICON = {
   shield: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
 };
 
-const code = (cmd: string) =>
-  `<div class="cmd"><pre><code>${cmd
-    .split("\n")
+/**
+ * A copyable command. Templates may use {url:ID}, {name:ID} and {tag}; site.js substitutes the
+ * latest release's values. The static rendering shows generic placeholders.
+ */
+const code = (cmd: string) => {
+  const shown = cmd
+    .replace(/\{url:([\w-]+)\}/g, (_, id: string) => `${REPO}/releases/download/<tag>/${placeholder(id)}`)
+    .replace(/\{name:([\w-]+)\}/g, (_, id: string) => placeholder(id))
+    .replace(/\{tag\}/g, "<tag>");
+  const lines = shown.split("\n");
+  const tpl = cmd.includes("{") ? ` data-template="${esc(cmd)}"` : "";
+  return `<div class="cmd"${tpl}><pre><code>${lines
     .map((l) => (l.startsWith("#") ? `<span class="c"># ${esc(l.slice(1).trim())}</span>` : esc(l)))
-    .join("\n")}</code></pre><button class="copy" type="button" data-copy="${esc(cmd.split("\n").filter((l) => !l.startsWith("#")).join("\n"))}" aria-label="Copy command">${ICON.copy}</button></div>`;
+    .join("\n")}</code></pre><button class="copy" type="button" data-copy="${esc(lines.filter((l) => !l.startsWith("#")).join("\n"))}" aria-label="Copy command">${ICON.copy}</button></div>`;
+};
+
+/** An inline file name that becomes the latest release's real name. */
+const fileName = (id: string) => `<code data-name="${id}">${esc(placeholder(id))}</code>`;
 
 const FEATURES: [string, string, string][] = [
   ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code."],
@@ -119,7 +85,7 @@ const FEATURES: [string, string, string][] = [
   ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state. It never writes to your repository."],
   ["fast", "Fast at any size", "Virtualized everything: 100k-line files open instantly, quick-open searches 200k paths as you type, and the terminal streams megabytes per second."],
   ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, and git hardened against hostile repositories. Reviewed adversarially."],
-  ["native", "Native and small", "A 40 MB Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies."],
+  ["native", "Native and small", "A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies."],
 ];
 
 const FEATURE_ICONS: Record<string, string> = {
@@ -131,20 +97,21 @@ const FEATURE_ICONS: Record<string, string> = {
   native: `<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 8.5h16M7 6.2h.01M9 6.2h.01" />`,
 };
 
-const row = (d: Download) => `
-        <tr>
-          <td><div class="plat">${d.os === "macos" ? ICON.apple : ICON.linux}<span><b>${esc(d.label)}</b><small>${esc(d.detail)}</small></span></div></td>
-          <td><div class="file"><a href="${esc(url(d.file))}">${esc(d.file)}</a><small>${mb(d.size)}</small></div></td>
-          <td class="hash">${
-            d.sha256
-              ? `<button class="sha" type="button" data-copy="${d.sha256}" title="Copy SHA-256"><code>${d.sha256.slice(0, 16)}…${d.sha256.slice(-8)}</code>${ICON.copy}</button>`
-              : `<span class="muted">pending</span>`
-          }</td>
+const row = (p: Platform) => `
+        <tr data-asset="${p.id}">
+          <td><div class="plat">${p.os === "macos" ? ICON.apple : ICON.linux}<span><b>${esc(p.label)}</b><small>${esc(p.detail)}</small></span></div></td>
+          <td><div class="file"><a href="${LATEST}" data-link>${esc(placeholder(p.id))}</a><small data-size></small></div></td>
+          <td class="hash"><span class="muted" data-hash>on GitHub</span></td>
         </tr>`;
 
-const apps = downloads.filter((d) => d.kind === "app");
-const clis = downloads.filter((d) => d.kind === "cli");
-const primary = apps[0]!;
+/** Signature check (site.js hides it if the latest release has no SHA256SUMS.sig). */
+const sigStep = (os: "macos" | "linux") =>
+  `<li data-needs="SHA256SUMS.sig"><h3>Check the release signature</h3>${code(
+    `curl -fsSLo codeviewer.pub ${KEY_URL}\nopenssl pkeyutl -verify -pubin -inkey codeviewer.pub -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig`,
+  )}<p class="note">Expect <code>Signature Verified Successfully</code>. Needs OpenSSL 3 or newer${os === "macos" ? " (<code>brew install openssl</code>; the built-in one is LibreSSL)" : ""}. This is the same Ed25519 signature the in-app updater checks before installing anything.</p></li>`;
+
+const apps = PLATFORMS.filter((p) => p.kind === "app");
+const clis = PLATFORMS.filter((p) => p.kind === "cli");
 
 // ───────────────────────────── page ─────────────────────────────
 
@@ -166,7 +133,7 @@ const html = `<!doctype html>
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="site.css">
-<script type="application/json" id="downloads">${JSON.stringify(apps.map(({ id, os, detail, file }) => ({ id, os, detail, file, url: url(file) })))}</script>
+<script type="application/json" id="platforms">${JSON.stringify({ repo: REPO_SLUG, platforms: PLATFORMS.map(({ id, os, detail, suffix }) => ({ id, os, detail, suffix })) })}</script>
 <script src="site.js" defer></script>
 </head>
 <body>
@@ -186,7 +153,7 @@ const html = `<!doctype html>
     <h1>Read the code.<br><span class="grad">Run the agent.</span> Same window.</h1>
     <p class="lede">Codeviewer is a fast, read-only code viewer with a real terminal built in. Point your favourite CLI agent at a project and watch every file it touches update live, with git telling you exactly what changed.</p>
     <div class="cta">
-      <a class="btn primary" id="dl-primary" href="${esc(url(primary.file))}">${ICON.download}<span>Download for <b id="dl-os">macOS</b> <small id="dl-detail">${esc(primary.detail)}</small></span></a>
+      <a class="btn primary" id="dl-primary" href="${LATEST}">${ICON.download}<span>Download for <b id="dl-os">macOS</b> <small id="dl-detail">Apple silicon</small></span></a>
       <a class="btn ghost" href="#download">All platforms</a>
     </div>
     <p class="fine"><a href="#verify">${ICON.shield} Verify your download</a> · SHA-256 and signed build provenance for every file</p>
@@ -237,7 +204,7 @@ ${FEATURES.map(
 
   <section id="download" class="download">
     <h2>Download</h2>
-    <p class="sub">The latest release. The apps are self-contained; the CLI binaries serve the viewer to any browser (<code>codeviewer . --no-open</code>).</p>
+    <p class="sub"><span id="release-line">The latest release.</span> The apps are self-contained; the CLI binaries serve the viewer to any browser (<code>codeviewer . --no-open</code>).</p>
     <table class="dl">
       <thead><tr><th>Platform</th><th>File</th><th>SHA-256</th></tr></thead>
       <tbody>${apps.map(row).join("")}
@@ -248,45 +215,45 @@ ${FEATURES.map(
       <table class="dl"><tbody>${clis.map(row).join("")}
       </tbody></table>
     </details>
-    <p class="fine">All files and the full <a href="${DL}/SHA256SUMS">SHA256SUMS</a> list are on the <a href="${REPO}/releases/tag/v${VERSION}">GitHub release</a>.</p>
+    <p class="fine">All files, <a href="${LATEST_DL}/SHA256SUMS">SHA256SUMS</a> and its <a href="${LATEST_DL}/SHA256SUMS.sig">signature</a> are on the <a href="${LATEST}">latest GitHub release</a>.</p>
   </section>
 
   <section id="verify" class="verify">
     <h2>Verify before you run it</h2>
-    <p class="sub">Every release is built by <a href="${REPO}/blob/main/.github/workflows/release.yml">GitHub Actions</a> from a tagged commit, on a clean runner. Two independent checks prove the file you have is that build.</p>
+    <p class="sub">Every release is built by <a href="${REPO}/blob/main/.github/workflows/release.yml">GitHub Actions</a> from a tagged commit, on a clean runner. Independent checks prove the file you have is that build: its checksum, the release signature, and where it was built.</p>
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected="true" data-tab="macos">macOS</button>
       <button role="tab" aria-selected="false" data-tab="linux">Linux</button>
     </div>
     <div class="panel" data-panel="macos">
       <ol class="steps">
-        <li><h3>Download the app and the checksum list</h3>${code(`curl -LO ${url(`Codeviewer-${VERSION}-macos-arm64.dmg`)}\ncurl -LO ${DL}/SHA256SUMS`)}<p class="note">Intel Mac: use <code>Codeviewer-${VERSION}-macos-x64.dmg</code>.</p></li>
-        <li><h3>Check the SHA-256</h3>${code(`shasum -a 256 -c SHA256SUMS --ignore-missing`)}<p class="note">Expect <code>Codeviewer-${VERSION}-macos-arm64.dmg: OK</code>. It must also match the hash in the table above.</p></li>
+        <li><h3>Download the app, the checksum list and its signature</h3>${code(`curl -LO {url:macos-arm64}\ncurl -LO ${LATEST_DL}/SHA256SUMS\ncurl -LO ${LATEST_DL}/SHA256SUMS.sig`)}<p class="note">Intel Mac: use ${fileName("macos-x64")}.</p></li>
+        <li><h3>Check the SHA-256</h3>${code(`shasum -a 256 -c SHA256SUMS --ignore-missing`)}<p class="note">Expect ${fileName("macos-arm64")}<code>: OK</code>. It must also match the hash in the table above.</p></li>
         ${sigStep("macos")}
-        <li><h3>Check where it was built</h3>${code(`# GitHub CLI: https://cli.github.com\ngh attestation verify Codeviewer-${VERSION}-macos-arm64.dmg --repo ${REPO_SLUG}`)}<p class="note">This checks a Sigstore-signed provenance statement logged in a public transparency log. It proves the file came out of this repository's release workflow, at a specific commit. It does not depend on this website.</p></li>
+        <li><h3>Check where it was built</h3>${code(`# GitHub CLI: https://cli.github.com\ngh attestation verify {name:macos-arm64} --repo ${REPO_SLUG}`)}<p class="note">This checks a Sigstore-signed provenance statement logged in a public transparency log. It proves the file came out of this repository's release workflow, at a specific commit. It does not depend on this website.</p></li>
         <li><h3>Install</h3><p>Open the DMG and drag <b>Codeviewer</b> to <b>Applications</b>. The app is not notarized by Apple, so the first launch needs <b>right-click → Open</b>, or:</p>${code(`xattr -dr com.apple.quarantine /Applications/Codeviewer.app`)}</li>
       </ol>
     </div>
     <div class="panel" data-panel="linux" hidden>
       <ol class="steps">
-        <li><h3>Download the package and the checksum list</h3>${code(`curl -LO ${url(`codeviewer-${VERSION}-linux-x64.tar.gz`)}\ncurl -LO ${DL}/SHA256SUMS`)}<p class="note">ARM64: use <code>codeviewer-${VERSION}-linux-arm64.tar.gz</code>.</p></li>
-        <li><h3>Check the SHA-256</h3>${code(`sha256sum -c SHA256SUMS --ignore-missing`)}<p class="note">Expect <code>codeviewer-${VERSION}-linux-x64.tar.gz: OK</code>. It must also match the hash in the table above.</p></li>
+        <li><h3>Download the package, the checksum list and its signature</h3>${code(`curl -LO {url:linux-x64}\ncurl -LO ${LATEST_DL}/SHA256SUMS\ncurl -LO ${LATEST_DL}/SHA256SUMS.sig`)}<p class="note">ARM64: use ${fileName("linux-arm64")}.</p></li>
+        <li><h3>Check the SHA-256</h3>${code(`sha256sum -c SHA256SUMS --ignore-missing`)}<p class="note">Expect ${fileName("linux-x64")}<code>: OK</code>. It must also match the hash in the table above.</p></li>
         ${sigStep("linux")}
-        <li><h3>Check where it was built</h3>${code(`gh attestation verify codeviewer-${VERSION}-linux-x64.tar.gz --repo ${REPO_SLUG}`)}<p class="note">Proves the file came out of this repository's release workflow at a specific commit, independently of this website.</p></li>
-        <li><h3>Install</h3>${code(`tar -xzf codeviewer-${VERSION}-linux-x64.tar.gz\n./codeviewer/install.sh`)}<p class="note">Adds <code>codeviewer</code> to <code>~/.local/bin</code> and a desktop entry. The bundled browser is ungoogled-chromium, itself pinned by SHA-256 in the repository.</p></li>
+        <li><h3>Check where it was built</h3>${code(`gh attestation verify {name:linux-x64} --repo ${REPO_SLUG}`)}<p class="note">Proves the file came out of this repository's release workflow at a specific commit, independently of this website.</p></li>
+        <li><h3>Install</h3>${code(`tar -xzf {name:linux-x64}\n./codeviewer/install.sh`)}<p class="note">Adds <code>codeviewer</code> to <code>~/.local/bin</code> and a desktop entry. The bundled browser is ungoogled-chromium, itself pinned by SHA-256 in the repository.</p></li>
       </ol>
     </div>
     <details class="more">
       <summary>Or build it yourself</summary>
       <p>You need <a href="https://bun.sh">Bun</a> 1.3.5 or newer (and Xcode command line tools for the Mac app). There are no dependencies to install.</p>
-      ${code(`git clone ${REPO}.git\ncd codeviewer && git checkout v${VERSION}\nbun run test\nbun run build:local`)}
+      ${code(`git clone ${REPO}.git\ncd codeviewer && git checkout {tag}\nbun run test\nbun run build:local`)}
     </details>
   </section>
 </main>
 
 <footer class="foot">
   <div><img src="assets/favicon.svg" alt="" width="18" height="18"> Codeviewer</div>
-  <div>MIT License · © ${new Date().getFullYear()} <a href="https://21no.de">21no.de</a> · <a href="${REPO}">Source</a> · <a href="${REPO}/blob/main/SECURITY.md">Security</a></div>
+  <div>MIT License · © 2026 <a href="https://21no.de">21no.de</a> · <a href="${REPO}">Source</a> · <a href="${REPO}/blob/main/SECURITY.md">Security</a></div>
 </footer>
 </body>
 </html>
@@ -296,6 +263,5 @@ ${FEATURES.map(
 
 await mkdir(path.join(out, "fonts"), { recursive: true });
 await writeFile(path.join(out, "index.html"), html);
-if (useRelease) await writeFile(RELEASE_JSON, JSON.stringify(release, null, 2) + "\n");
 for (const f of ["SpaceGrotesk.woff2", "JetBrainsMono-Regular.woff2"]) await copyFile(path.join(root, "vendor/fonts", f), path.join(out, "fonts", f));
-console.log(`site     docs/index.html (v${VERSION}: ${downloads.length - missing.length}/${downloads.length} downloads with checksums${signed ? ", signed" : ""})`);
+console.log("site     docs/index.html (release data is loaded live from GitHub)");

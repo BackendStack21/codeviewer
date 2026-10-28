@@ -123,7 +123,7 @@ bun run build         # slim binaries (dist/bin) + .dmg / .tar.gz for every targ
 bun run build:local   # this machine only: dist/bin/codeviewer + its app (on a Mac: the .dmg)
 bun scripts/build.ts --slim             # binaries only, no browser download
 bun scripts/build.ts --browser <tag|latest>  # re-pin the Linux browser (packaging/browser-pins.json)
-bun run site          # regenerate docs/index.html (the landing page); `-- --release` reads dist/release
+bun run site          # regenerate docs/index.html (the landing page; release data loads live from GitHub)
 ```
 
 ### Release signing (once)
@@ -137,9 +137,9 @@ updated. Commit that file. Releases fail until the key exists.
 
 1. Bump `version` in `package.json` and commit.
 2. `git tag v<version> && git push --tags`
-3. The release workflow runs the tests, builds every package, attests provenance, publishes
-   the GitHub release with `SHA256SUMS`, and commits the release's sizes and checksums into
-   `docs/` on `main`.
+3. The release workflow runs the tests, builds every package, signs `SHA256SUMS`, attests
+   provenance and publishes the GitHub release. The landing page picks it up by itself: it
+   reads the latest release (names, sizes, SHA-256) from GitHub's API in the browser.
 
 The landing page is `docs/`, served as static assets by **Cloudflare Workers** at
 `codeviewer.21no.de` (config in `wrangler.jsonc`; headers in `docs/_headers`). In the Cloudflare

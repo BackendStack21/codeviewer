@@ -1,7 +1,7 @@
-# Builds every package from a version tag on a clean GitHub-hosted runner, signs SLSA build
-# provenance for each file (Sigstore, verifiable with `gh attestation verify`), publishes the
-# release with SHA256SUMS, then regenerates docs/ (the landing page, deployed by Cloudflare
-# Pages from main) with the sizes and checksums of exactly these files.
+# Builds every package from a version tag on a clean GitHub-hosted runner, signs SHA256SUMS
+# (Ed25519; required by the in-app updater), signs SLSA build provenance for each file
+# (Sigstore, verifiable with `gh attestation verify`) and publishes the release. The landing
+# page reads the latest release from GitHub's API, so it needs no update here.
 name: release
 
 on:
@@ -53,14 +53,3 @@ jobs:
             --verify-tag \
             --title "Codeviewer $GITHUB_REF_NAME" \
             --notes "Downloads, checksums and verification steps: https://codeviewer.21no.de/#verify"
-
-      - name: Update the landing page with this release's checksums
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B main origin/main
-          bun run site -- --release
-          git add docs
-          git diff --cached --quiet || git commit -m "docs: downloads and checksums for $GITHUB_REF_NAME"
-          git push origin main
