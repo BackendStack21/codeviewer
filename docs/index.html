@@ -3,17 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Codeviewer: read the code, run the agent</title>
-<meta name="description" content="A fast, read-only code viewer with a real built-in terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source (MIT).">
+<title>Codeviewer: a read-only code viewer with a built-in terminal for coding agents</title>
+<meta name="description" content="Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Free and open source (MIT) for macOS and Linux.">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="author" content="21no.de">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0c0f15">
-<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://codeviewer.21no.de/">
-<meta property="og:title" content="Codeviewer">
-<meta property="og:description" content="Read the code. Run the agent. Same window. A fast, read-only code viewer with a real terminal and live git indicators.">
-<meta property="og:image" content="https://codeviewer.21no.de/assets/screenshot-dark.jpg">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Codeviewer">
+<meta property="og:locale" content="en_US">
 <meta property="og:url" content="https://codeviewer.21no.de/">
+<meta property="og:title" content="Codeviewer: read the code, run the agent, same window">
+<meta property="og:description" content="A fast, read-only code viewer with a real terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source.">
+<meta property="og:image" content="https://codeviewer.21no.de/assets/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Codeviewer: Read the code. Run the agent. Same window. Next to a screenshot of the app with its file explorer, code view and terminal.">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Codeviewer: read the code, run the agent, same window">
+<meta name="twitter:description" content="A fast, read-only code viewer with a real terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source.">
+<meta name="twitter:image" content="https://codeviewer.21no.de/assets/og.png">
+<meta name="twitter:image:alt" content="Codeviewer: Read the code. Run the agent. Same window. Next to a screenshot of the app with its file explorer, code view and terminal.">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Codeviewer","description":"Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Free and open source (MIT) for macOS and Linux.","url":"https://codeviewer.21no.de/","image":"https://codeviewer.21no.de/assets/og.png","screenshot":"https://codeviewer.21no.de/assets/screenshot-dark.jpg","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"downloadUrl":"https://github.com/BackendStack21/codeviewer/releases/latest","codeRepository":"https://github.com/BackendStack21/codeviewer","author":{"@type":"Organization","name":"21no.de","url":"https://21no.de"}}</script>
 <link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="site.css">
 <script type="application/json" id="platforms">{"repo":"BackendStack21/codeviewer","platforms":[{"id":"macos-arm64","os":"macos","detail":"Apple silicon","suffix":"-macos-arm64.dmg"},{"id":"macos-x64","os":"macos","detail":"Intel","suffix":"-macos-x64.dmg"},{"id":"linux-x64","os":"linux","detail":"x86-64","suffix":"-linux-x64.tar.gz"},{"id":"linux-arm64","os":"linux","detail":"ARM64","suffix":"-linux-arm64.tar.gz"},{"id":"cli-macos-arm64","os":"macos","detail":"Apple silicon","suffix":"-macos-arm64"},{"id":"cli-macos-x64","os":"macos","detail":"Intel","suffix":"-macos-x64"},{"id":"cli-linux-x64","os":"linux","detail":"x86-64 (glibc)","suffix":"-linux-x64"},{"id":"cli-linux-arm64","os":"linux","detail":"ARM64 (glibc)","suffix":"-linux-arm64"},{"id":"cli-linux-x64-musl","os":"linux","detail":"x86-64 (musl / Alpine)","suffix":"-linux-x64-musl"}]}</script>
@@ -43,7 +58,7 @@
     <figure class="shot">
       <picture>
         <source srcset="assets/screenshot-light.jpg" media="(prefers-color-scheme: light)">
-        <img src="assets/screenshot-dark.jpg" width="2400" height="1509" alt="Codeviewer showing a project's explorer with git status letters, a TypeScript file with git gutter markers and inline blame, and a terminal running git log.">
+        <img src="assets/screenshot-dark.jpg" width="2400" height="1508" alt="Codeviewer showing a project's explorer with git status letters, a TypeScript file with git gutter markers and inline blame, and a terminal running git log.">
       </picture>
     </figure>
   </section>
@@ -95,7 +110,7 @@
         <li>Safe on untrusted repositories: no hooks, filters or drivers ever run</li>
       </ul>
     </div>
-    <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1509" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
+    <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1508" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
   </section>
 
   <section id="security" class="security">

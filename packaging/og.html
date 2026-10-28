@@ -1,0 +1,52 @@
+<!doctype html>
+<!-- Source of docs/assets/og.png, the 1200x630 social preview card (bun run og). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Space Grotesk"; src: url("../docs/fonts/SpaceGrotesk.woff2") format("woff2"); font-weight: 300 700; }
+  @font-face { font-family: "JetBrains Mono"; src: url("../docs/fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    position: relative;
+    background:
+      radial-gradient(700px 420px at 8% 0%, rgba(122, 162, 255, 0.22), transparent 70%),
+      radial-gradient(600px 420px at 100% 100%, rgba(179, 140, 255, 0.2), transparent 70%),
+      #0b0e14;
+    color: #d6dbe5;
+    font-family: "Space Grotesk", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(160, 180, 220, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(160, 180, 220, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+    -webkit-mask-image: linear-gradient(100deg, #000 0%, transparent 55%);
+  }
+  .copy { position: absolute; left: 72px; top: 64px; bottom: 60px; width: 560px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 14px; font-size: 30px; font-weight: 600; color: #f3f6fb; letter-spacing: -0.01em; }
+  .brand img { width: 44px; height: 44px; }
+  h1 { margin-top: 54px; font-size: 66px; line-height: 1.04; font-weight: 700; letter-spacing: -0.035em; color: #f3f6fb; }
+  .grad { background: linear-gradient(100deg, #7aa2ff, #b38cff); -webkit-background-clip: text; color: transparent; }
+  .lede { margin-top: 26px; font-size: 25px; line-height: 1.4; color: #a3abbb; max-width: 470px; }
+  .foot { margin-top: auto; display: flex; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 17px; color: #8b94a5; }
+  .chip { padding: 7px 13px; border-radius: 999px; border: 1px solid rgba(160, 180, 220, 0.2); background: rgba(20, 25, 36, 0.7); }
+  .chip b { color: #8fd18a; font-weight: 400; }
+  .shot {
+    position: absolute; left: 640px; top: 92px; width: 860px; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 40px 90px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(160, 180, 220, 0.16);
+  }
+  .shot img { display: block; width: 100%; }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <div class="brand"><img src="../docs/assets/favicon.svg" alt="">Codeviewer</div>
+    <h1>Read the code.<br><span class="grad">Run the agent.</span><br>Same window.</h1>
+    <p class="lede">A fast, read-only code viewer with a real terminal and live git.</p>
+    <div class="foot"><span class="chip"><b>●</b> Free · MIT</span><span class="chip">macOS · Linux</span></div>
+  </div>
+  <div class="shot"><img src="../docs/assets/screenshot-dark.jpg" alt=""></div>
+</body>
+</html>

@@ -20,6 +20,7 @@
     "build": "bun scripts/build.ts",
     "build:local": "bun scripts/build.ts --local",
     "site": "bun scripts/site.ts",
+    "og": "bun scripts/og.ts",
     "test": "bun scripts/build.ts --client-only && bun test"
   }
 }

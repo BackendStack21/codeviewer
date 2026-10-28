@@ -19,6 +19,34 @@ const LATEST = `${REPO}/releases/latest`;
 const LATEST_DL = `${LATEST}/download`; // stable URLs for versionless assets (SHA256SUMS, .sig)
 const KEY_URL = `${REPO.replace("github.com", "raw.githubusercontent.com")}/main/packaging/update-key.pub`;
 const DOMAIN = "codeviewer.21no.de";
+const SITE = `https://${DOMAIN}/`;
+
+// Search and social metadata. The card image is docs/assets/og.png (bun run og).
+const TITLE = "Codeviewer: a read-only code viewer with a built-in terminal for coding agents";
+const DESCRIPTION =
+  "Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Free and open source (MIT) for macOS and Linux.";
+const OG_TITLE = "Codeviewer: read the code, run the agent, same window";
+const OG_DESCRIPTION = "A fast, read-only code viewer with a real terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source.";
+const OG_IMAGE = `${SITE}assets/og.png`;
+const OG_IMAGE_ALT = "Codeviewer: Read the code. Run the agent. Same window. Next to a screenshot of the app with its file explorer, code view and terminal.";
+// No version or file data here, for the same reason as the rest of the page (see above).
+const JSON_LD = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Codeviewer",
+  description: DESCRIPTION,
+  url: SITE,
+  image: OG_IMAGE,
+  screenshot: `${SITE}assets/screenshot-dark.jpg`,
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "macOS, Linux",
+  license: "https://opensource.org/licenses/MIT",
+  isAccessibleForFree: true,
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  downloadUrl: LATEST,
+  codeRepository: REPO,
+  author: { "@type": "Organization", name: "21no.de", url: "https://21no.de" },
+}).replace(/</g, "\\u003c");
 
 /** A downloadable build, identified in the latest release by its file-name suffix. */
 interface Platform {
@@ -120,17 +148,32 @@ const html = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Codeviewer: read the code, run the agent</title>
-<meta name="description" content="A fast, read-only code viewer with a real built-in terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source (MIT).">
+<title>${TITLE}</title>
+<meta name="description" content="${esc(DESCRIPTION)}">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="author" content="21no.de">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0c0f15">
+<link rel="canonical" href="${SITE}">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-<link rel="canonical" href="https://${DOMAIN}/">
-<meta property="og:title" content="Codeviewer">
-<meta property="og:description" content="Read the code. Run the agent. Same window. A fast, read-only code viewer with a real terminal and live git indicators.">
-<meta property="og:image" content="https://${DOMAIN}/assets/screenshot-dark.jpg">
-<meta property="og:url" content="https://${DOMAIN}/">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Codeviewer">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="${SITE}">
+<meta property="og:title" content="${OG_TITLE}">
+<meta property="og:description" content="${esc(OG_DESCRIPTION)}">
+<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="${esc(OG_IMAGE_ALT)}">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${OG_TITLE}">
+<meta name="twitter:description" content="${esc(OG_DESCRIPTION)}">
+<meta name="twitter:image" content="${OG_IMAGE}">
+<meta name="twitter:image:alt" content="${esc(OG_IMAGE_ALT)}">
+<script type="application/ld+json">${JSON_LD}</script>
 <link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="site.css">
 <script type="application/json" id="platforms">${JSON.stringify({ repo: REPO_SLUG, platforms: PLATFORMS.map(({ id, os, detail, suffix }) => ({ id, os, detail, suffix })) })}</script>
@@ -160,7 +203,7 @@ const html = `<!doctype html>
     <figure class="shot">
       <picture>
         <source srcset="assets/screenshot-light.jpg" media="(prefers-color-scheme: light)">
-        <img src="assets/screenshot-dark.jpg" width="2400" height="1509" alt="Codeviewer showing a project's explorer with git status letters, a TypeScript file with git gutter markers and inline blame, and a terminal running git log.">
+        <img src="assets/screenshot-dark.jpg" width="2400" height="1508" alt="Codeviewer showing a project's explorer with git status letters, a TypeScript file with git gutter markers and inline blame, and a terminal running git log.">
       </picture>
     </figure>
   </section>
@@ -189,7 +232,7 @@ ${FEATURES.map(
         <li>Safe on untrusted repositories: no hooks, filters or drivers ever run</li>
       </ul>
     </div>
-    <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1509" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
+    <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1508" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
   </section>
 
   <section id="security" class="security">
@@ -263,5 +306,10 @@ ${FEATURES.map(
 
 await mkdir(path.join(out, "fonts"), { recursive: true });
 await writeFile(path.join(out, "index.html"), html);
+await writeFile(path.join(out, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${SITE}sitemap.xml\n`);
+await writeFile(
+  path.join(out, "sitemap.xml"),
+  `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${SITE}</loc></url>\n</urlset>\n`,
+);
 for (const f of ["SpaceGrotesk.woff2", "JetBrainsMono-Regular.woff2"]) await copyFile(path.join(root, "vendor/fonts", f), path.join(out, "fonts", f));
 console.log("site     docs/index.html (release data is loaded live from GitHub)");
