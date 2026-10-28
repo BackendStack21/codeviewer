@@ -1,0 +1,68 @@
+# Builds every package from a version tag on a clean GitHub-hosted runner, signs SLSA build
+# provenance for each file (Sigstore, verifiable with `gh attestation verify`), publishes the
+# release with SHA256SUMS, and deploys the landing page with the same checksums.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15 # Apple silicon: builds the macOS apps (Swift + WebKit) and the Linux packages
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # sign attestations
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - name: Tag matches package.json
+        run: |
+          v=$(bun -e 'console.log(require("./package.json").version)')
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != package.json $v"; exit 1; }
+
+      - run: bun run test
+
+      # Pinned browser for the Linux packages is verified against packaging/browser-pins.json.
+      - run: bun run build
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/release/*
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/release/* \
+            --verify-tag \
+            --title "Codeviewer $GITHUB_REF_NAME" \
+            --notes "Downloads, checksums and verification steps: https://codeviewer.21no.de/#verify"
+
+      - name: Build the landing page
+        run: bun run site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  pages:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

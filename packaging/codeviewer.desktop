@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Codeviewer
+GenericName=Code Viewer
+Comment=Fast, read-only code viewer with a built-in terminal
+Exec=codeviewer %f
+Icon=codeviewer
+Terminal=false
+Categories=Development;Viewer;
+StartupWMClass=codeviewer

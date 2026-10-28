@@ -1,0 +1,25 @@
+{
+  "name": "codeviewer",
+  "version": "1.0.0",
+  "description": "A fast, read-only code viewer with a real built-in terminal and live git indicators. Zero dependencies.",
+  "license": "MIT",
+  "author": "21no.de",
+  "homepage": "https://codeviewer.21no.de",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BackendStack21/codeviewer.git"
+  },
+  "bugs": "https://github.com/BackendStack21/codeviewer/issues",
+  "keywords": ["code-viewer", "terminal", "git", "bun", "read-only", "ide", "claude-code", "agents"],
+  "type": "module",
+  "private": true,
+  "engines": { "bun": ">=1.3.5" },
+  "bin": { "codeviewer": "src/server/main.ts" },
+  "scripts": {
+    "dev": "bun scripts/build.ts --client-only && bun src/server/main.ts",
+    "build": "bun scripts/build.ts",
+    "build:local": "bun scripts/build.ts --local",
+    "site": "bun scripts/site.ts",
+    "test": "bun scripts/build.ts --client-only && bun test"
+  }
+}
