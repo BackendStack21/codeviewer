@@ -103,7 +103,8 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
 
     private var port = -1 // the only origin this window may talk to: http://127.0.0.1:<port>
     private var titlebarHeight = 0
-    private var tabbarHeight = -1
+    private var tabbarHeight = -1 // last value sent to the page
+    private var measuredTabbar = 0 // AppKit's tab bar height, measured outside full screen
     private var layoutObserver: NSKeyValueObservation?
 
     init(folder: URL) {
@@ -164,11 +165,20 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     }
 
     /// Tells the page how tall the native tab bar is (0 when hidden).
-    func syncTabBar() {
-        let inset = Int((window.frame.height - window.contentLayoutRect.height).rounded())
-        let title = window.styleMask.contains(.fullScreen) ? 0 : titlebarHeight
-        let h = max(0, inset - title)
-        if h == tabbarHeight { return }
+    func syncTabBar(force: Bool = false) {
+        let inset = ViewerWindow.titlebarMetrics(window).height
+        var h: Int
+        if window.styleMask.contains(.fullScreen) {
+            // The title bar is gone; a tab bar that stays on screen is the whole inset. A larger
+            // inset is the toolbar sliding in while the pointer is at the top edge: an overlay,
+            // so keep the current offset rather than shifting the page under the pointer.
+            if inset > max(measuredTabbar, 1) + 4 { return }
+            h = inset
+        } else {
+            h = max(0, inset - titlebarHeight)
+            if h > 0 { measuredTabbar = h }
+        }
+        if h == tabbarHeight && !force { return }
         tabbarHeight = h
         webView.evaluateJavaScript("document.documentElement.style.setProperty('--native-tabbar-h', '\(h)px')")
     }
@@ -250,9 +260,12 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         }
     }
 
+    // A new document starts without the offset: send it before the page first paints.
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        syncTabBar(force: true)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        tabbarHeight = -1 // a fresh page: send the current value
-        syncTabBar()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             webView.animator().alphaValue = 1
@@ -289,8 +302,8 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         setFullScreenAttribute(false)
         syncTabBar()
     }
+    // Backstop for the KVO: the tab bar shows on every window of a group, not only the new one.
     func windowDidBecomeKey(_ notification: Notification) { syncTabBar() }
-    func windowDidResize(_ notification: Notification) { syncTabBar() }
 
     private func setFullScreenAttribute(_ on: Bool) {
         webView.evaluateJavaScript("document.documentElement.toggleAttribute('data-fullscreen', \(on))")
@@ -326,10 +339,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `codeviewer <dir>` from a terminal runs: open -n -a Codeviewer --args --folder <dir>
-        // (a restart after an update passes one --folder per window).
+        // (a restart after an update passes one --folder per tab, --window to start a new window).
         let args = CommandLine.arguments
-        for (i, a) in args.enumerated() where a == "--folder" && i + 1 < args.count {
-            open(folder: URL(fileURLWithPath: args[i + 1], isDirectory: true))
+        var last: ViewerWindow?
+        for (i, a) in args.enumerated() where (a == "--folder" || a == "--window") && i + 1 < args.count {
+            let tabbed = a == "--folder"
+            last = open(folder: URL(fileURLWithPath: args[i + 1], isDirectory: true), tabbed: tabbed, into: tabbed ? last?.window : nil)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             if !self.openedSomething { self.chooseFolder(nil) }
@@ -357,8 +372,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.forEach { $0.server.stop() }
     }
 
-    /// Opens `folder` as a tab of the front window, or in a window of its own when `tabbed` is false.
-    func open(folder: URL, tabbed: Bool = true) {
+    /// Opens `folder` as a tab of `into` (default: the front window), or in a window of its own
+    /// when `tabbed` is false.
+    @discardableResult
+    func open(folder: URL, tabbed: Bool = true, into host: NSWindow? = nil) -> ViewerWindow {
         openedSomething = true
         let w = ViewerWindow(folder: folder.standardizedFileURL)
         w.onClose = { [weak self] closed in self?.windows.removeAll { $0 === closed } }
@@ -366,13 +383,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !tabbed {
             // .preferred would tab it into the front window as soon as it is shown.
             w.window.tabbingMode = .disallowed
-        } else if let key = NSApp.keyWindow, key.tabbingMode != .disallowed, windows.count > 1 {
-            key.addTabbedWindow(w.window, ordered: .above)
+            // Every window restores the same autosaved frame: step down from the front one.
+            if let front = NSApp.orderedWindows.first(where: { $0 !== w.window && $0.isVisible && $0.delegate is ViewerWindow }) {
+                let next = NSPoint(x: front.frame.minX + 26, y: front.frame.maxY - 26)
+                w.window.setFrameTopLeftPoint(next)
+                w.window.setFrame(w.window.constrainFrameRect(w.window.frame, to: front.screen), display: false)
+            }
+        } else if let host = host ?? NSApp.keyWindow, host.tabbingMode != .disallowed, windows.count > 1 {
+            host.addTabbedWindow(w.window, ordered: .above)
         }
         w.show()
-        // Once on screen it can take (or be dragged into) tabs again.
-        if !tabbed { DispatchQueue.main.async { w.window.tabbingMode = .preferred } }
+        // Tabbing is decided when the window is ordered in; from now on it can take (or be dragged into) tabs.
+        if !tabbed { w.window.tabbingMode = .preferred }
         NSDocumentController.shared.noteNewRecentDocumentURL(folder)
+        return w
     }
 
     @objc func chooseFolder(_ sender: Any?) { pickFolders(tabbed: true) }
@@ -402,10 +426,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Restarts into the freshly installed bundle (same path), reopening every window's folder.
+    /// Restarts into the freshly installed bundle (same path), reopening every folder in the same
+    /// window layout: tabs of one window stay together, separate windows stay separate.
     func relaunch() {
         var args = ["-n", Bundle.main.bundlePath, "--args"]
-        for w in windows { args += ["--folder", w.server.folder.path] }
+        var groups: [[ViewerWindow]] = []
+        for w in windows {
+            if let i = groups.firstIndex(where: { $0[0].window.tabbedWindows?.contains(w.window) == true }) {
+                groups[i].append(w)
+            } else {
+                groups.append([w])
+            }
+        }
+        for g in groups {
+            for (i, w) in g.enumerated() { args += [i == 0 ? "--window" : "--folder", w.server.folder.path] }
+        }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         p.arguments = args

@@ -350,6 +350,14 @@ svg {
 :root[data-native="macos"] .workbench {
   margin-top: var(--native-tabbar-h, 0px);
 }
+/* In full screen there is no title bar above it: the tab bar sits at the top, over ours. */
+:root[data-native="macos"][data-fullscreen] body {
+  box-sizing: border-box;
+  padding-top: var(--native-tabbar-h, 0px);
+}
+:root[data-native="macos"][data-fullscreen] .workbench {
+  margin-top: 0;
+}
 
 .brand {
   display: flex;
