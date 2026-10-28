@@ -172,9 +172,14 @@ export class FakeElement extends Target {
 
   get textContent(): string {
     if (this._html !== null) {
-      // Strip until stable so nested fragments like "<<b>script>" can't leave a tag behind.
-      let t = this._html;
-      for (let prev = ""; prev !== t; ) [prev, t] = [t, t.replace(/<[^>]*>/g, "")];
+      // Text outside tags; a scan rather than a regex so no "<" ever survives.
+      let t = "";
+      let depth = 0;
+      for (const ch of this._html) {
+        if (ch === "<") depth++;
+        else if (ch === ">") depth = Math.max(0, depth - 1);
+        else if (depth === 0) t += ch;
+      }
       return t;
     }
     return this.children.map((c) => c.textContent).join("");
