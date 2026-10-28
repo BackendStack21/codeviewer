@@ -210,6 +210,10 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
             if let e = webView.lastMouseDown { window.performDrag(with: e) }
             return
         }
+        if t == "relaunch" {
+            (NSApp.delegate as? AppDelegate)?.relaunch()
+            return
+        }
         if t == "dblclick" {
             switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
             case "Minimize": window.performMiniaturize(nil)
@@ -294,8 +298,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `codeviewer <dir>` from a terminal runs: open -n -a Codeviewer --args --folder <dir>
+        // (a restart after an update passes one --folder per window).
         let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--folder"), i + 1 < args.count {
+        for (i, a) in args.enumerated() where a == "--folder" && i + 1 < args.count {
             open(folder: URL(fileURLWithPath: args[i + 1], isDirectory: true))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -352,6 +357,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Restarts into the freshly installed bundle (same path), reopening every window's folder.
+    func relaunch() {
+        var args = ["-n", Bundle.main.bundlePath, "--args"]
+        for w in windows { args += ["--folder", w.server.folder.path] }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        p.arguments = args
+        // Let this process exit first so the new one isn't merged into it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            try? p.run()
+            NSApp.terminate(nil)
+        }
+    }
+
+    /// Runs the update check in the front window's page (which owns the update UI).
+    @objc func checkForUpdates(_ sender: Any?) {
+        let w = windows.first { $0.window == NSApp.keyWindow } ?? windows.first
+        guard let w else { return chooseFolder(nil) }
+        w.window.makeKeyAndOrderFront(nil)
+        w.webView.evaluateJavaScript("window.dispatchEvent(new Event('cv-check-updates'))")
+    }
+
     /// Symlinks the bundled CLI into /usr/local/bin (asks for an administrator password).
     @objc func installCommandLineTool(_ sender: Any?) {
         guard let exe = Bundle.main.url(forResource: "codeviewer", withExtension: nil)?.path else { return }
@@ -388,6 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         submenu("Codeviewer", [
             item("About Codeviewer", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            item("Check for Updates…", #selector(checkForUpdates(_:))),
             .separator(),
             item("Install ‘codeviewer’ Command…", #selector(installCommandLineTool(_:))),
             .separator(),

@@ -4,21 +4,45 @@
 // docs/ holds the static site (site.css, site.js, assets/, fonts/, _headers). Only
 // index.html is generated, because it embeds each download's size and SHA-256.
 //
-//   bun run site                # checksums shown as "pending" (no release yet)
-//   bun run site -- --release   # read dist/release (+ SHA256SUMS): used by the release workflow
+//   bun run site                # re-render using the published release in docs/release.json
+//   bun run site -- --release   # read dist/release (+ SHA256SUMS), write docs/release.json:
+//                               # used by the release workflow only
 //
-// Local builds aren't byte-identical to CI builds, so only the release workflow publishes
-// checksums: the page and the GitHub release always describe the same files.
+// Local builds aren't byte-identical to CI builds, so only the release workflow records
+// checksums: the page and the GitHub release always describe the same files, and editing
+// the page can never wipe them.
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "..");
 const out = path.join(root, "docs");
-const useRelease = process.argv.includes("--release");
 const releaseDir = path.join(root, "dist/release");
 const pkg = (await Bun.file(path.join(root, "package.json")).json()) as { version: string; repository: { url: string } };
-const VERSION = pkg.version;
+const useRelease = process.argv.includes("--release");
+const RELEASE_JSON = path.join(root, "docs/release.json");
+
+/** Published release: name → size + SHA-256, and whether SHA256SUMS is signed. */
+interface ReleaseData {
+  version: string;
+  signed: boolean;
+  files: Record<string, { size: number; sha256: string }>;
+}
+
+let release: ReleaseData | null = null;
+if (useRelease) {
+  const sums = existsSync(path.join(releaseDir, "SHA256SUMS")) ? await Bun.file(path.join(releaseDir, "SHA256SUMS")).text() : "";
+  const files: ReleaseData["files"] = {};
+  for (const line of sums.split("\n")) {
+    const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
+    if (m && existsSync(path.join(releaseDir, m[2]!))) files[m[2]!] = { sha256: m[1]!, size: (await stat(path.join(releaseDir, m[2]!))).size };
+  }
+  release = { version: pkg.version, signed: existsSync(path.join(releaseDir, "SHA256SUMS.sig")), files };
+} else if (existsSync(RELEASE_JSON)) {
+  release = (await Bun.file(RELEASE_JSON).json()) as ReleaseData;
+}
+// File names and links follow the published release (package.json may already be ahead).
+const VERSION = release?.version ?? pkg.version;
 const REPO = pkg.repository.url.replace(/^git\+/, "").replace(/\.git$/, ""); // https://github.com/owner/name
 const REPO_SLUG = REPO.replace("https://github.com/", "");
 const DL = `${REPO}/releases/download/v${VERSION}`;
@@ -49,20 +73,20 @@ const PLATFORMS: Omit<Download, "size" | "sha256">[] = [
 
 // ───────────────────────────── release data ─────────────────────────────
 
-const sums = new Map<string, string>();
-if (useRelease && existsSync(path.join(releaseDir, "SHA256SUMS"))) {
-  for (const line of (await Bun.file(path.join(releaseDir, "SHA256SUMS")).text()).split("\n")) {
-    const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
-    if (m) sums.set(m[2]!, m[1]!);
-  }
-}
-const downloads: Download[] = await Promise.all(
-  PLATFORMS.map(async (p) => {
-    const f = path.join(releaseDir, p.file);
-    return { ...p, size: useRelease && existsSync(f) ? (await stat(f)).size : null, sha256: sums.get(p.file) ?? null };
-  }),
-);
+const downloads: Download[] = PLATFORMS.map((p) => {
+  const f = release?.files[p.file];
+  return { ...p, size: f?.size ?? null, sha256: f?.sha256 ?? null };
+});
 const missing = downloads.filter((d) => !d.sha256);
+// Releases from 1.1 on sign SHA256SUMS (the in-app updater requires it).
+const signed = !!release?.signed;
+const KEY_URL = `${REPO.replace("github.com", "raw.githubusercontent.com")}/main/packaging/update-key.pub`;
+const sigStep = (os: "macos" | "linux") =>
+  signed
+    ? `<li><h3>Check the release signature</h3>${code(
+        `curl -LO ${DL}/SHA256SUMS.sig\ncurl -fsSLo codeviewer.pub ${KEY_URL}\nopenssl pkeyutl -verify -pubin -inkey codeviewer.pub -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig`,
+      )}<p class="note">Expect <code>Signature Verified Successfully</code>. Needs OpenSSL 3 or newer${os === "macos" ? " (<code>brew install openssl</code>; the built-in one is LibreSSL)" : ""}. This is the same Ed25519 signature the in-app updater checks before installing anything.</p></li>`
+    : "";
 if (useRelease && missing.length) {
   throw new Error(`release incomplete, refusing to publish without checksums for: ${missing.map((d) => d.file).join(", ")}`);
 }
@@ -238,6 +262,7 @@ ${FEATURES.map(
       <ol class="steps">
         <li><h3>Download the app and the checksum list</h3>${code(`curl -LO ${url(`Codeviewer-${VERSION}-macos-arm64.dmg`)}\ncurl -LO ${DL}/SHA256SUMS`)}<p class="note">Intel Mac: use <code>Codeviewer-${VERSION}-macos-x64.dmg</code>.</p></li>
         <li><h3>Check the SHA-256</h3>${code(`shasum -a 256 -c SHA256SUMS --ignore-missing`)}<p class="note">Expect <code>Codeviewer-${VERSION}-macos-arm64.dmg: OK</code>. It must also match the hash in the table above.</p></li>
+        ${sigStep("macos")}
         <li><h3>Check where it was built</h3>${code(`# GitHub CLI: https://cli.github.com\ngh attestation verify Codeviewer-${VERSION}-macos-arm64.dmg --repo ${REPO_SLUG}`)}<p class="note">This checks a Sigstore-signed provenance statement logged in a public transparency log. It proves the file came out of this repository's release workflow, at a specific commit. It does not depend on this website.</p></li>
         <li><h3>Install</h3><p>Open the DMG and drag <b>Codeviewer</b> to <b>Applications</b>. The app is not notarized by Apple, so the first launch needs <b>right-click → Open</b>, or:</p>${code(`xattr -dr com.apple.quarantine /Applications/Codeviewer.app`)}</li>
       </ol>
@@ -246,6 +271,7 @@ ${FEATURES.map(
       <ol class="steps">
         <li><h3>Download the package and the checksum list</h3>${code(`curl -LO ${url(`codeviewer-${VERSION}-linux-x64.tar.gz`)}\ncurl -LO ${DL}/SHA256SUMS`)}<p class="note">ARM64: use <code>codeviewer-${VERSION}-linux-arm64.tar.gz</code>.</p></li>
         <li><h3>Check the SHA-256</h3>${code(`sha256sum -c SHA256SUMS --ignore-missing`)}<p class="note">Expect <code>codeviewer-${VERSION}-linux-x64.tar.gz: OK</code>. It must also match the hash in the table above.</p></li>
+        ${sigStep("linux")}
         <li><h3>Check where it was built</h3>${code(`gh attestation verify codeviewer-${VERSION}-linux-x64.tar.gz --repo ${REPO_SLUG}`)}<p class="note">Proves the file came out of this repository's release workflow at a specific commit, independently of this website.</p></li>
         <li><h3>Install</h3>${code(`tar -xzf codeviewer-${VERSION}-linux-x64.tar.gz\n./codeviewer/install.sh`)}<p class="note">Adds <code>codeviewer</code> to <code>~/.local/bin</code> and a desktop entry. The bundled browser is ungoogled-chromium, itself pinned by SHA-256 in the repository.</p></li>
       </ol>
@@ -270,5 +296,6 @@ ${FEATURES.map(
 
 await mkdir(path.join(out, "fonts"), { recursive: true });
 await writeFile(path.join(out, "index.html"), html);
+if (useRelease) await writeFile(RELEASE_JSON, JSON.stringify(release, null, 2) + "\n");
 for (const f of ["SpaceGrotesk.woff2", "JetBrainsMono-Regular.woff2"]) await copyFile(path.join(root, "vendor/fonts", f), path.join(out, "fonts", f));
-console.log(`site     docs/index.html (${useRelease ? `${downloads.length - missing.length}/${downloads.length} downloads with checksums` : "checksums pending until the release workflow runs"})`);
+console.log(`site     docs/index.html (v${VERSION}: ${downloads.length - missing.length}/${downloads.length} downloads with checksums${signed ? ", signed" : ""})`);

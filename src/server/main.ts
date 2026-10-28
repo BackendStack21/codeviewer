@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { startServer, VERSION } from "./http.ts";
-import { findAppBrowser, findMacApp, openDefault, openPrivately, pickFolder, runAppWindow } from "./browser.ts";
+import { closeAppWindow, findAppBrowser, findMacApp, openDefault, openPrivately, pickFolder, runAppWindow } from "./browser.ts";
 
 const HELP = `codeviewer ${VERSION}: a fast, read-only code viewer with a built-in terminal
 
@@ -97,7 +97,18 @@ async function main() {
   }
 
   const token = randomBytes(32).toString("base64url");
-  const app = startServer({ root, port, host, shell, token, openExternal: (u) => void openDefault(u) });
+  // After a self-update, the Linux app restarts itself: start the new binary (same path,
+  // already swapped in), close this window, exit. The Mac app is restarted by its shell.
+  let windowed = false;
+  const relaunch = {
+    available: () => windowed,
+    run() {
+      Bun.spawn([process.execPath, root], { stdio: ["ignore", "ignore", "ignore"], detached: true } as Parameters<typeof Bun.spawn>[1]).unref();
+      closeAppWindow();
+      quit();
+    },
+  };
+  const app = startServer({ root, port, host, shell, token, openExternal: (u) => void openDefault(u), relaunch });
 
   const quit = () => {
     app.stop();
@@ -130,6 +141,7 @@ async function main() {
   if (browser) {
     console.log(dim(`  app window: ${browser.bundled ? "bundled ungoogled-chromium" : browser.path}`));
     console.log(dim("  Close the window or press Ctrl+C to quit.\n"));
+    windowed = browser.bundled;
     if ((await runAppWindow(browser.path, app.url)) === "closed") {
       // Give the page's final settings write a moment to land.
       await Bun.sleep(150);

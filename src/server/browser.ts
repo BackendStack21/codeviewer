@@ -112,6 +112,13 @@ export async function bootPage(url: string): Promise<{ fileUrl: string; cleanup(
  * Runs the app window and resolves when it closes. Resolves `"failed"` if the browser dies
  * immediately (e.g. a Linux kernel that forbids the sandbox); the sandbox is never disabled.
  */
+let appWindow: ReturnType<typeof Bun.spawn> | null = null;
+
+/** Closes the app window opened by runAppWindow (used when restarting after an update). */
+export function closeAppWindow() {
+  appWindow?.kill();
+}
+
 export async function runAppWindow(browser: string, url: string): Promise<"closed" | "failed"> {
   const profile = await mkdtemp(path.join(os.tmpdir(), "codeviewer-profile-"));
   const boot = await bootPage(url);
@@ -119,6 +126,7 @@ export async function runAppWindow(browser: string, url: string): Promise<"close
   let stderr = "";
   try {
     const proc = Bun.spawn([browser, ...appWindowArgs(boot.fileUrl, profile)], { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+    appWindow = proc;
     void (async () => {
       const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
       for (let r = await reader.read(); !r.done; r = await reader.read()) {
@@ -137,6 +145,7 @@ export async function runAppWindow(browser: string, url: string): Promise<"close
     }
     return "closed";
   } finally {
+    appWindow = null;
     await boot.cleanup();
     await rm(profile, { recursive: true, force: true }).catch(() => {});
   }

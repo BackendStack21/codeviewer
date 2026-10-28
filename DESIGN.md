@@ -341,3 +341,33 @@ measurement. Every confirmed finding was fixed and, where possible, locked in wi
 | Performance | One WebSocket frame per PTY read (298k frames for 52 MB) and no backpressure | Coalesced 4 ms/64 KB frames; high-water mark with a resync on drain |
 | Performance | Line allocation per scroll; scrollback at 4.6 KB/line | Lines recycled, cleared only up to a write high-water mark; history compacted. `yes` 9.3 → 13 MB/s, memory −62% |
 | Performance | Per-keystroke and per-frame linear work | Quick-open narrowing + top-k; O(depth) git lookups; ASCII natural sort; incremental file index; adaptive git debounce; render windows in the tree and code view; glyph-width cache |
+
+## 12. Updates
+
+Users update from inside the app ("Check for Updates…", or the status-bar pill). A self-updater
+is a remote-code-execution channel by design, so it gets the same treatment as the terminal:
+
+- **Authenticity, not just integrity.** The release workflow signs `SHA256SUMS` with an
+  Ed25519 key that exists only as an Actions secret (`CODEVIEWER_UPDATE_KEY`). Every build
+  embeds the public key (`packaging/update-key.pub`). Before anything is installed, the
+  updater checks four things:
+  1. The signature is valid, so a compromised download host or a swapped release asset is
+     rejected.
+  2. The downloaded file's SHA-256 matches its line in the signed list.
+  3. The signed file name carries the new version.
+  4. The version is strictly newer, so no rollbacks.
+  
+  On macOS the staged app must also pass `codesign --verify --deep --strict`. Verification uses
+  WebCrypto, so it adds no dependencies.
+- **Atomic, with rollback.** Updates are staged next to the target, on the same file system,
+  and swapped in with `rename`: the `.app` bundle, the Linux package directory, or the CLI
+  binary. If the swap fails, the old copy is put back. Nothing new runs until verification passes.
+- **Restart.** The Mac shell reopens every window's folder in the new version. The Linux app
+  window starts the new binary and closes itself. CLI users are told to restart. Running from
+  source is never auto-updated (`git pull`).
+- **Privacy.** One request to `api.github.com` per launch, which can be turned off (setting, or
+  `CODEVIEWER_NO_UPDATE_CHECK=1`).
+- **Tests** run the real updater against a fake GitHub:
+  - Successful installs of the CLI, the Linux package and a real code-signed DMG.
+  - Rejection of a forged signature, a checksum mismatch, a rollback, an unsigned release, a
+    missing key, and a tampered app bundle. In each case the installed copy must stay untouched.

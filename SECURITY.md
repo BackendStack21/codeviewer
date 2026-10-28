@@ -11,5 +11,7 @@ Include the version, OS, and the steps to reproduce. Expect an acknowledgement w
 
 ## Verifying a download
 
-Every release is built by GitHub Actions from a tagged commit and ships with `SHA256SUMS` and
-signed build-provenance attestations. See https://codeviewer.21no.de/#verify.
+Every release is built by GitHub Actions from a tagged commit and ships with `SHA256SUMS`, an
+Ed25519 signature of it (`SHA256SUMS.sig`, key in `packaging/update-key.pub`; the in-app
+updater refuses anything that doesn't verify) and signed build-provenance attestations.
+See https://codeviewer.21no.de/#verify.

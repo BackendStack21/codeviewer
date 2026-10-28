@@ -7,6 +7,7 @@ import { TerminalPanel } from "./terminals.ts";
 import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
 import { GitState, relativeTime } from "./git.ts";
+import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 
 type ThemeName = "dark" | "light" | "system";
@@ -75,6 +76,7 @@ class App {
   private toast!: HTMLElement;
   private recent: string[] = [];
   private git = new GitState();
+  private updates = new Updates();
   private lastStatus: StatusInfo | null = null;
 
   async start() {
@@ -228,7 +230,18 @@ class App {
 
     this.toast = h("div", { class: "toast", hidden: true });
     window.addEventListener("cv-toast", (e) => this.notify((e as CustomEvent<string>).detail));
-    document.body.replaceChildren(titlebar, this.workbench, statusbar, this.palette.el, this.toast);
+    // Updates: launch check result, the Mac app's menu item, and its native restart.
+    this.updates.onInfo = () => this.renderStatus(this.lastStatus);
+    if (native) this.updates.nativeRelaunch = () => native.postMessage({ t: "relaunch" });
+    window.addEventListener("cv-check-updates", () => void this.updates.checkNow());
+    void this.updates.load().then(() => {
+      const u = this.updates.info;
+      if (u?.available && store.get<string>("updates.notified", "") !== u.latest) {
+        store.set("updates.notified", u.latest);
+        this.notify(`Codeviewer ${u.latest} is available: click "Update" in the status bar`);
+      }
+    });
+    document.body.replaceChildren(titlebar, this.workbench, statusbar, this.palette.el, this.updates.el, this.toast);
 
     // Splitters
     dragSplitter(sideSplit, "x", () => L.sidebarWidth, (s, d) => {
@@ -295,6 +308,12 @@ class App {
       c("tree.clear", "Clear Change Markers", () => this.tree.clearChanges()),
       c("tree.focus", "Focus Explorer", () => this.tree.focus(), `${MOD}⇧E`),
       c("git.changes", "Git: Show Changed Files", () => this.showChanges(), `${MOD}⇧G`),
+      c("app.update", "Check for Updates…", () => void this.updates.checkNow()),
+      c("app.autoUpdate", "Toggle Automatic Update Checks", () => {
+        const auto = !(store.get<{ auto?: boolean }>("updates", {}).auto ?? true);
+        store.set("updates", { auto });
+        this.notify(`Automatic update checks ${auto ? "on" : "off"} (from the next launch)`);
+      }),
       c("git.next", "Git: Next Change in File", () => this.editor.nextChange(1), "⌥F5"),
       c("git.prev", "Git: Previous Change in File", () => this.editor.nextChange(-1), "⌥⇧F5"),
     ];
@@ -496,6 +515,12 @@ class App {
       if (s.kind === "text") right.push(item(s.encoding ?? "UTF-8"));
       if (s.lang) right.push(item(s.lang));
     }
+    const u = this.updates.info;
+    if (u?.available) {
+      const b = h("button", { class: "st-item st-update", title: `Codeviewer ${u.latest} is available (you have ${u.current})`, onclick: () => this.updates.open() });
+      b.innerHTML = `<span class="st-up">↑</span>Update ${u.latest}`;
+      right.push(b);
+    }
     right.push(h("span", { class: "st-item muted" }, "Read-only"));
     this.statusRight.replaceChildren(...right);
   }
@@ -562,6 +587,9 @@ class App {
             void this.tree.onChanged(msg.paths);
             this.editor.onChanged(msg.paths);
           }
+        } else if (msg.t === "update") {
+          const m = msg as unknown as { phase: string; detail?: string; relaunch?: "native" | "server" | "manual" };
+          this.updates.onEvent(m.phase, m.detail, m.relaunch);
         } else if (msg.t === "git" && msg.status) {
           this.git.set(msg.status as never);
         } else if (msg.t === "open" && msg.path) {

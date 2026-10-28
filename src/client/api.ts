@@ -24,6 +24,18 @@ export interface FileData {
 
 const q = (p: string) => encodeURIComponent(p);
 
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  available: boolean;
+  kind: "macos-app" | "linux-app" | "cli" | "source";
+  canInstall: boolean;
+  reason?: string;
+  url?: string;
+  notes?: string;
+  checkedAt: number;
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -31,6 +43,8 @@ async function check(res: Response): Promise<Response> {
   }
   return res;
 }
+
+const check_ = (res: Response) => check(res);
 
 export const api = {
   info: async (): Promise<Info> => (await check(await fetch("/api/info"))).json(),
@@ -67,6 +81,10 @@ export const api = {
       ? ((await r.json()) as { hash: string; author: string; time: number; summary: string; you: boolean; uncommitted: boolean })
       : null;
   },
+  /** Update status; `check` forces a fresh look at the latest release. */
+  update: async (check = false): Promise<UpdateInfo> => (await check_(await fetch(`/api/update${check ? "?check=1" : ""}`))).json(),
+  updateInstall: async () => check_(await fetch("/api/update/install", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })),
+  updateRelaunch: async () => check_(await fetch("/api/update/relaunch", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })),
   /** Opens an http(s) link in the user's default browser, outside the app window. */
   external: (url: string) =>
     fetch("/api/external", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }),

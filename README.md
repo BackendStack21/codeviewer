@@ -31,6 +31,10 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
   - Status bar: branch, ahead/behind, merge/rebase state, stash count, and change counts that open
     a changed-files list (⌘⇧G).
   - Everything updates live as files, the index or refs change.
+- **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
+  update pill in the status bar when a new version is out. Installing verifies the release's
+  Ed25519 signature and the file's SHA-256 before an atomic swap, then restarts. Turn off the
+  launch-time check with "Toggle Automatic Update Checks" or `CODEVIEWER_NO_UPDATE_CHECK=1`.
 - **Live:** files that change on disk reload in place, the changed lines flash, the gutter marks
   them, and the explorer shows dots on changed files.
 - **Fast:** a virtualized code view and tree, an incremental highlighter, and dirty-row
@@ -121,6 +125,13 @@ bun scripts/build.ts --slim             # binaries only, no browser download
 bun scripts/build.ts --browser <tag|latest>  # re-pin the Linux browser (packaging/browser-pins.json)
 bun run site          # regenerate docs/index.html (the landing page); `-- --release` reads dist/release
 ```
+
+### Release signing (once)
+
+The in-app updater only installs releases whose `SHA256SUMS` is signed by the release key.
+Create it once with `bun scripts/release-key.ts`: the private key goes straight into the
+`CODEVIEWER_UPDATE_KEY` Actions secret (never to disk), and `packaging/update-key.pub` is
+updated. Commit that file. Releases fail until the key exists.
 
 ### Releasing
 

@@ -1,0 +1,4 @@
+# Placeholder: no release-signing key yet.
+# Run `bun scripts/release-key.ts` once to generate it (stores the private key in the
+# CODEVIEWER_UPDATE_KEY Actions secret and replaces this file with the PEM public key).
+# Until then, builds refuse to auto-install updates.

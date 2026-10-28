@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "signed": false,
+  "files": {
+    "Codeviewer-1.0.0-macos-arm64.dmg": {
+      "size": 42406123,
+      "sha256": "2ae291c639158d75543b9eae81f3354e82eda9d467c3630467a8594715b6c069"
+    },
+    "Codeviewer-1.0.0-macos-x64.dmg": {
+      "size": 44880139,
+      "sha256": "e2ed82d9fea6fca728de2d3c383fc5083a72b67a51d49e16ff03810521012e58"
+    },
+    "codeviewer-1.0.0-linux-arm64": {
+      "size": 110283768,
+      "sha256": "1a8673ea1b7c462a5e9634bd8e0e3e3108cb6bf9e02cc8ec36c94545d7401009"
+    },
+    "codeviewer-1.0.0-linux-arm64.tar.gz": {
+      "size": 281479237,
+      "sha256": "98f06ff7c420f3d654a71c5fc7ed7fc7bafc7e66f962cc10ece991e8d13670b1"
+    },
+    "codeviewer-1.0.0-linux-x64": {
+      "size": 110172336,
+      "sha256": "33d212707dddd57a7bd791fe1cdf68406a1aa7aa8d2933a56e0979d0989b0b6a"
+    },
+    "codeviewer-1.0.0-linux-x64-musl": {
+      "size": 103761320,
+      "sha256": "796531601c2d246afe62ed0b85ebd25bdb905d5e1208a7bd8265783710073352"
+    },
+    "codeviewer-1.0.0-linux-x64.tar.gz": {
+      "size": 292958382,
+      "sha256": "6f46cc93ca0823b703be5eaa454855e30cd82d4224de20e7f522b0bd36a25d75"
+    },
+    "codeviewer-1.0.0-macos-arm64": {
+      "size": 90216674,
+      "sha256": "b6416572020bc23c4b4d426ba10d43b7c0941ae4e2257ac6e1bc6edb253784a6"
+    },
+    "codeviewer-1.0.0-macos-x64": {
+      "size": 99216864,
+      "sha256": "8fb13d8dba90939d1efa74cf17cb8ff315969d919313f07f2faab32ed9747cdc"
+    }
+  }
+}

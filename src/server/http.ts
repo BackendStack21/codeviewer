@@ -9,6 +9,7 @@ import { PtyManager, type PtySocketData } from "./pty.ts";
 import { loadAssets, FONTS, type Asset } from "./assets.ts";
 import { Settings } from "./settings.ts";
 import { Git } from "./git.ts";
+import { Updater } from "./update.ts";
 
 import pkg from "../../package.json" with { type: "json" };
 
@@ -22,6 +23,10 @@ export interface ServeOptions {
   token: string;
   /** Opens a URL in the user's default browser (external links from the app window). */
   openExternal(url: string): void;
+  /** Restarts into a freshly installed version, when this process can (Linux app window). */
+  relaunch?: { available(): boolean; run(): void };
+  /** Injected for tests; defaults to the real updater. */
+  updater?: Updater;
 }
 
 type EventsSocketData = { kind: "events" };
@@ -39,6 +44,15 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
   const assets = loadAssets();
   const index = new FileIndex(opts.root);
   const settings = new Settings();
+  const updater = opts.updater ?? new Updater({ version: VERSION });
+  // One background check per launch, unless turned off (setting or CODEVIEWER_NO_UPDATE_CHECK).
+  const autoCheck = (async () => {
+    if (process.env.CODEVIEWER_NO_UPDATE_CHECK) return null;
+    const s = (await settings.read()) as { updates?: { auto?: boolean } };
+    if (s.updates?.auto === false) return null;
+    await Bun.sleep(3000);
+    return updater.check().catch(() => null);
+  })();
   const events = new Set<ServerWebSocket<SocketData>>();
   let origin = "";
   let port = 0;
@@ -273,6 +287,39 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           if (!g || !Number.isInteger(line) || line < 1 || !(await resolveSafe(opts.root, rel))) return fail(404, "no blame");
           const b = await g.blame(rel, line);
           return b ? json(b) : fail(404, "no blame");
+        }
+
+        case "/api/update": {
+          // GET: status (?check=1 forces a fresh check). Never throws for offline users.
+          if (url.searchParams.has("check")) {
+            try {
+              return json(await updater.check(true));
+            } catch (e) {
+              return fail(502, (e as Error).message);
+            }
+          }
+          const info = await autoCheck;
+          return json(info ?? { current: VERSION, latest: null, available: false, kind: updater.install.kind, canInstall: false, checkedAt: 0 });
+        }
+
+        case "/api/update/install": {
+          if (req.method !== "POST") return fail(405, "POST only");
+          if (updater.installing) return fail(409, "an update is already being installed");
+          // Runs in the background; progress and the result arrive on the events socket.
+          void updater
+            .apply((phase, detail) => broadcast({ t: "update", phase, detail }))
+            .then(
+              (r) => broadcast({ t: "update", phase: "installed", detail: r.version, relaunch: r.kind === "macos-app" ? "native" : opts.relaunch?.available() ? "server" : "manual" }),
+              (e: Error) => broadcast({ t: "update", phase: "error", detail: e.message }),
+            );
+          return json({ ok: true });
+        }
+
+        case "/api/update/relaunch": {
+          if (req.method !== "POST") return fail(405, "POST only");
+          if (!opts.relaunch?.available()) return fail(409, "restart codeviewer to use the new version");
+          setTimeout(() => opts.relaunch?.run(), 150);
+          return json({ ok: true });
         }
 
         case "/api/settings": {

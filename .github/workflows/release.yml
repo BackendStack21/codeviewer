@@ -34,6 +34,12 @@ jobs:
       # Pinned browser for the Linux packages is verified against packaging/browser-pins.json.
       - run: bun run build
 
+      # The in-app updater only installs releases whose SHA256SUMS carries this signature.
+      - name: Sign SHA256SUMS
+        env:
+          CODEVIEWER_UPDATE_KEY: ${{ secrets.CODEVIEWER_UPDATE_KEY }}
+        run: bun scripts/sign.ts dist/release/SHA256SUMS
+
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4
         with:
