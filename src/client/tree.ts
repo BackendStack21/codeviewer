@@ -1,6 +1,7 @@
 import { api, type Entry } from "./api.ts";
 import { chevron, fileIcon, folderIcon } from "./icons.ts";
 import { dirname, esc, h } from "./util.ts";
+import { showContextMenu } from "./menu.ts";
 import type { GitState } from "./git.ts";
 
 interface TNode {
@@ -44,6 +45,7 @@ export class FileTree {
     new ResizeObserver(() => this.schedule()).observe(this.scroller);
     this.rows.addEventListener("click", (e) => this.onClick(e as MouseEvent, false));
     this.rows.addEventListener("dblclick", (e) => this.onClick(e as MouseEvent, true));
+    this.rows.addEventListener("contextmenu", (e) => this.onContextMenu(e as MouseEvent));
     this.scroller.addEventListener("keydown", (e) => this.onKey(e));
   }
 
@@ -177,6 +179,17 @@ export class FileTree {
       this.onOpen(n.path, dbl);
     }
     this.schedule();
+  }
+
+  /** Our own menu instead of the WebView's (Reload, Inspect Element…). */
+  private onContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    const row = (e.target as HTMLElement).closest<HTMLElement>(".row");
+    const n = row && this.flat[Number(row.dataset.i)];
+    if (!n || n.type !== "file") return;
+    this.selected = n.path;
+    this.schedule();
+    showContextMenu(e, [{ label: "Open in New Tab", run: () => this.onOpen(n.path, true) }]);
   }
 
   private async toggle(n: TNode, open = !n.expanded) {

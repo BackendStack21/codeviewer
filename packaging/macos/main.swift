@@ -102,6 +102,9 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     var onClose: ((ViewerWindow) -> Void)?
 
     private var port = -1 // the only origin this window may talk to: http://127.0.0.1:<port>
+    private var titlebarHeight = 0
+    private var tabbarHeight = -1
+    private var layoutObserver: NSKeyValueObservation?
 
     init(folder: URL) {
         server = Server(folder: folder)
@@ -120,6 +123,7 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         window.toolbarStyle = .unifiedCompact
         window.layoutIfNeeded()
         let metrics = ViewerWindow.titlebarMetrics(window)
+        titlebarHeight = metrics.height
 
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent() // no cookies, cache or storage survive the window
@@ -152,6 +156,21 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         if window.frame.origin == .zero { window.center() }
         webView.navigationDelegate = self
         webView.uiDelegate = self
+        // With several folders tabbed into one window, AppKit shows its tab bar below the title bar,
+        // over the page. contentLayoutRect shrinks when it appears; the page moves down to match.
+        layoutObserver = window.observe(\.contentLayoutRect) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.syncTabBar() }
+        }
+    }
+
+    /// Tells the page how tall the native tab bar is (0 when hidden).
+    func syncTabBar() {
+        let inset = Int((window.frame.height - window.contentLayoutRect.height).rounded())
+        let title = window.styleMask.contains(.fullScreen) ? 0 : titlebarHeight
+        let h = max(0, inset - title)
+        if h == tabbarHeight { return }
+        tabbarHeight = h
+        webView.evaluateJavaScript("document.documentElement.style.setProperty('--native-tabbar-h', '\(h)px')")
     }
 
     /// Title bar height and the x where the traffic lights end, measured from AppKit's own layout.
@@ -232,6 +251,8 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        tabbarHeight = -1 // a fresh page: send the current value
+        syncTabBar()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             webView.animator().alphaValue = 1
@@ -263,13 +284,20 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
 
     // In full screen the traffic lights are hidden, so the page drops its left inset.
     func windowWillEnterFullScreen(_ notification: Notification) { setFullScreenAttribute(true) }
-    func windowDidExitFullScreen(_ notification: Notification) { setFullScreenAttribute(false) }
+    func windowDidEnterFullScreen(_ notification: Notification) { syncTabBar() }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        setFullScreenAttribute(false)
+        syncTabBar()
+    }
+    func windowDidBecomeKey(_ notification: Notification) { syncTabBar() }
+    func windowDidResize(_ notification: Notification) { syncTabBar() }
 
     private func setFullScreenAttribute(_ on: Bool) {
         webView.evaluateJavaScript("document.documentElement.toggleAttribute('data-fullscreen', \(on))")
     }
 
     func windowWillClose(_ notification: Notification) {
+        layoutObserver = nil
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "native")
         server.stop()
         onClose?(self)
@@ -329,19 +357,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.forEach { $0.server.stop() }
     }
 
-    func open(folder: URL) {
+    /// Opens `folder` as a tab of the front window, or in a window of its own when `tabbed` is false.
+    func open(folder: URL, tabbed: Bool = true) {
         openedSomething = true
         let w = ViewerWindow(folder: folder.standardizedFileURL)
         w.onClose = { [weak self] closed in self?.windows.removeAll { $0 === closed } }
         windows.append(w)
-        if let key = NSApp.keyWindow, key.tabbingMode != .disallowed, windows.count > 1 {
+        if !tabbed {
+            // .preferred would tab it into the front window as soon as it is shown.
+            w.window.tabbingMode = .disallowed
+        } else if let key = NSApp.keyWindow, key.tabbingMode != .disallowed, windows.count > 1 {
             key.addTabbedWindow(w.window, ordered: .above)
         }
         w.show()
+        // Once on screen it can take (or be dragged into) tabs again.
+        if !tabbed { DispatchQueue.main.async { w.window.tabbingMode = .preferred } }
         NSDocumentController.shared.noteNewRecentDocumentURL(folder)
     }
 
-    @objc func chooseFolder(_ sender: Any?) {
+    @objc func chooseFolder(_ sender: Any?) { pickFolders(tabbed: true) }
+
+    @objc func newWindow(_ sender: Any?) { pickFolders(tabbed: false) }
+
+    // Right-click on the Dock icon.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: ""))
+        return menu
+    }
+
+    private func pickFolders(tabbed: Bool) {
         openedSomething = true
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -351,7 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.message = "Choose a folder to view"
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK {
-            panel.urls.forEach { open(folder: $0) }
+            panel.urls.forEach { open(folder: $0, tabbed: tabbed) }
         } else if windows.isEmpty {
             NSApp.terminate(nil)
         }
@@ -428,6 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ⌘W is left to the page (closes an editor tab); ⇧⌘W closes the window.
         submenu("File", [
             item("Open Folder…", #selector(chooseFolder(_:)), "o"),
+            item("New Window…", #selector(newWindow(_:)), "n", [.command, .shift]),
             .separator(),
             item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]),
         ])
