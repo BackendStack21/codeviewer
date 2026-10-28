@@ -1,0 +1,14 @@
+// Cloudflare Workers static assets: the landing page at codeviewer.21no.de.
+// Only docs/ is published (headers in docs/_headers). No build step is needed:
+// docs/ is committed, and the release workflow updates it with each release's checksums.
+{
+  "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
+  "name": "codeviewer",
+  "compatibility_date": "2026-10-23",
+  "assets": {
+    "directory": "./docs",
+    "not_found_handling": "none"
+  },
+  "workers_dev": true,
+  "preview_urls": false
+}

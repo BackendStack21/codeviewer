@@ -130,8 +130,10 @@ bun run site          # regenerate docs/index.html (the landing page); `-- --rel
    the GitHub release with `SHA256SUMS`, and commits the release's sizes and checksums into
    `docs/` on `main`.
 
-The landing page is `docs/`, served by **Cloudflare Pages** at `codeviewer.21no.de`
-(production branch `main`, no build command, output directory `docs`; headers in `docs/_headers`).
+The landing page is `docs/`, served as static assets by **Cloudflare Workers** at
+`codeviewer.21no.de` (config in `wrangler.jsonc`; headers in `docs/_headers`). In the Cloudflare
+build settings, leave the **build command empty**: `docs/` is committed, and `npm run build` would
+build every release binary for nothing. The deploy command is `npx wrangler deploy`.
 
 ## License
 
