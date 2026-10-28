@@ -1,6 +1,6 @@
 import { api, type Entry } from "./api.ts";
 import { chevron, fileIcon, folderIcon } from "./icons.ts";
-import { dirname, esc, h } from "./util.ts";
+import { dirname, esc, h, IS_MAC } from "./util.ts";
 import { showContextMenu } from "./menu.ts";
 import type { GitState } from "./git.ts";
 
@@ -168,6 +168,7 @@ export class FileTree {
   }
 
   private onClick(e: MouseEvent, dbl: boolean) {
+    if (IS_MAC && e.ctrlKey) return; // ⌃-click is the context menu there
     const row = (e.target as HTMLElement).closest<HTMLElement>(".row");
     if (!row) return;
     const n = this.flat[Number(row.dataset.i)];
