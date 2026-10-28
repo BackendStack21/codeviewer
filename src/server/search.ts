@@ -61,7 +61,8 @@ export function matchText(text: string, re: RegExp, maxPerFile = 100): MatchResu
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     if (m[0].length === 0) {
-      re.lastIndex++;
+      const cp = text.codePointAt(re.lastIndex);
+      re.lastIndex += cp !== undefined && cp > 0xffff ? 2 : 1;
       continue;
     }
     let lo = 0;
@@ -83,12 +84,14 @@ export function matchText(text: string, re: RegExp, maxPerFile = 100): MatchResu
     let start = col > PREVIEW_LEAD ? col - PREVIEW_LEAD : 0;
     const lowSurrogate = (i: number) => (line.charCodeAt(i) & 0xfc00) === 0xdc00;
     if (start > 0 && lowSurrogate(start)) start++;
+    let end = start + PREVIEW_LEN;
+    if (end < line.length && (line.charCodeAt(end - 1) & 0xfc00) === 0xd800) end--;
     const lead = start > 0 ? "…" : "";
     matches.push({
       line: lo + 1,
       col,
       len,
-      preview: lead + line.slice(start, start + PREVIEW_LEN),
+      preview: lead + line.slice(start, end),
       pcol: lead.length + col - start,
     });
   }
