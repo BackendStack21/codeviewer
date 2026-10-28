@@ -143,10 +143,20 @@ test.skipIf(process.platform === "darwin")("pickFolder uses zenity, then kdialog
   process.env.PATH = tmp;
   const home = (await import("node:os")).homedir();
   expect(await pickFolder()).toBe(home);
+  // Bun.spawn resolves commands against the PATH the process started with, so the dialog
+  // branches run in a child process launched with the fake PATH.
+  const src = path.join(path.dirname(fileURLToPath(import.meta.url)), "../src/server/browser.ts");
+  const pick = async () => {
+    const p = Bun.spawn([process.execPath, "-e", `const { pickFolder } = await import(${JSON.stringify(src)}); console.log(JSON.stringify(await pickFolder()));`], {
+      env: { PATH: tmp, HOME: home },
+      stdout: "pipe",
+    });
+    return JSON.parse((await new Response(p.stdout).text()).trim());
+  };
   await script("kdialog", `echo /picked/kde`);
-  expect(await pickFolder()).toBe("/picked/kde");
+  expect(await pick()).toBe("/picked/kde");
   await script("zenity", `echo /picked/gtk`);
-  expect(await pickFolder()).toBe("/picked/gtk");
+  expect(await pick()).toBe("/picked/gtk");
   await script("zenity", `exit 1`); // cancel
-  expect(await pickFolder()).toBeNull();
+  expect(await pick()).toBeNull();
 });
