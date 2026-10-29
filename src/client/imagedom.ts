@@ -1,6 +1,7 @@
 // Thin browser glue for image copy (canvas, clipboard, native bridge). Verified manually.
 import { snapTracker, type CopyImageDeps, type SnapRect, type SnapshotDeps } from "./copyimage.ts";
 import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
+import { canvasFont, fontLoadSpecs, glyphCells, scaledShadow } from "./imageframe.ts";
 import type { ImageLayout } from "./imagelayout.ts";
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -14,8 +15,10 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 export async function renderLayoutPng(layout: ImageLayout, scale: number, font: string, size: number): Promise<Blob> {
+  font = layout.font ?? font;
+  size = layout.size ?? size;
   try {
-    await document.fonts.load(`${size}px ${font}`);
+    await Promise.all(fontLoadSpecs(layout.ops, font, size).map((f) => document.fonts.load(f)));
   } catch {
     /* draw with whatever font is available */
   }
@@ -36,8 +39,9 @@ export async function renderLayoutPng(layout: ImageLayout, scale: number, font: 
       ctx.save();
       if (op.shadow) {
         ctx.shadowColor = op.shadow.color;
-        ctx.shadowBlur = op.shadow.blur;
-        ctx.shadowOffsetY = op.shadow.offsetY;
+        const sh = scaledShadow(op.shadow, scale);
+        ctx.shadowBlur = sh.blur;
+        ctx.shadowOffsetY = sh.offsetY;
       }
       ctx.fillStyle = op.fill;
       roundRect(ctx, op.x, op.y, op.w, op.h, op.r);
@@ -49,9 +53,11 @@ export async function renderLayoutPng(layout: ImageLayout, scale: number, font: 
       ctx.arc(op.cx, op.cy, op.r, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      ctx.font = `${op.italic ? "italic " : ""}${op.bold ? "bold " : ""}${size}px ${font}`;
+      ctx.font = canvasFont(font, size, op.bold, op.italic);
       ctx.fillStyle = op.fill;
-      ctx.fillText(op.text, op.x, op.y);
+      // One glyph per grid cell: the editor disables ligatures, so the image must never form them.
+      const charW = layout.charW ?? size * 0.6;
+      for (const g of glyphCells(op.text, op.x, charW)) ctx.fillText(g.ch, g.x, op.y);
     }
   }
   return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));

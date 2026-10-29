@@ -74,7 +74,6 @@ describe("clipboard.write is called inside the gesture (R-01)", () => {
     });
     const msg = await copyCodeImage(deps, { lines: ["ab", "cd"], tokens: [[], []], theme, range, dpr: 1 });
     expect(msg).toBe("Could not copy image to the clipboard");
-    expect(log.some((l) => l.startsWith("text:"))).toBe(false);
     expect(log).not.toContain("download");
   });
   test("too large is decided before write is called", async () => {

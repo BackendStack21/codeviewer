@@ -97,15 +97,46 @@ export function frameOps(frame: Frame): DrawOp[] {
   return ops;
 }
 
-/** Wraps a laid-out code image in the frame: offsets its text into the card and fits the scale to the outer size. */
-export function frameImage(layout: ImageLayout, title: string, theme: ImageTheme, measure: Measure, dpr: number): FramedResult {
+/** Wraps a laid-out code image (always 2x, reduced only to fit the pixel cap; dpr is not consulted) in the frame: offsets its text into the card and fits the scale to the outer size. */
+export function frameImage(layout: ImageLayout, title: string, theme: ImageTheme, measure: Measure, _dpr: number): FramedResult {
   const ft: FrameTheme = { bg: theme.bg, fg: theme.fg, muted: theme.muted ?? theme.fg, accent: theme.accent ?? theme.fg };
   const frame = frameGeometry(layout.width, layout.height, title, ft, measure);
   if ("tooLarge" in frame) return frame;
-  const fit = fitScale(frame.width, frame.height, dpr);
+  const fit = fitScale(frame.width, frame.height, 2);
   if ("tooLarge" in fit) return fit;
   const code = layout.ops
     .filter((o) => o.t === "text")
     .map((o) => ({ ...o, x: o.x + frame.inset.x, y: o.y + frame.inset.y }));
-  return { width: frame.width, height: frame.height, cols: layout.cols, rows: layout.rows, ops: [...frameOps(frame), ...code], font: theme.font, size: theme.size, scale: fit.scale };
+  return { width: frame.width, height: frame.height, cols: layout.cols, rows: layout.rows, ops: [...frameOps(frame), ...code], font: theme.font, size: theme.size, ...(layout.charW ? { charW: layout.charW } : {}), scale: fit.scale };
+}
+
+/** Shadow blur/offset in device pixels for a canvas drawn at `scale` (ctx.shadow* ignores ctx.scale). */
+export function scaledShadow(shadow: Shadow, scale: number): Shadow {
+  return { blur: shadow.blur * scale, offsetY: shadow.offsetY * scale, color: shadow.color };
+}
+
+const FALLBACK = "ui-monospace, Menlo, monospace";
+
+/** Canvas font shorthand with a monospace fallback chain. */
+export function canvasFont(font: string, size: number, bold: boolean, italic: boolean): string {
+  const family = /[,"']/.test(font) ? font : `"${font}", ${FALLBACK}`;
+  return `${italic ? "italic " : ""}${bold ? "bold " : ""}${size}px ${family}`;
+}
+
+/** Distinct canvas font strings the ops need loaded (regular first, then bold, italic, bold-italic when used). */
+export function fontLoadSpecs(ops: DrawOp[], font: string, size: number): string[] {
+  const used = new Set<string>(["00"]);
+  for (const o of ops) if (o.t === "text") used.add(`${o.bold ? 1 : 0}${o.italic ? 1 : 0}`);
+  return ["00", "10", "01", "11"].filter((k) => used.has(k)).map((k) => canvasFont(font, size, k[0] === "1", k[1] === "1"));
+}
+
+/** One entry per drawn glyph at x + cell * charW (spaces occupy a cell but are not drawn). */
+export function glyphCells(text: string, x: number, charW: number): { ch: string; x: number }[] {
+  const out: { ch: string; x: number }[] = [];
+  let i = 0;
+  for (const ch of text) {
+    if (ch !== " ") out.push({ ch, x: x + i * charW });
+    i++;
+  }
+  return out;
 }

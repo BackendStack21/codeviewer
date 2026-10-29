@@ -48,6 +48,8 @@ export interface ImageLayout {
   /** Set on framed layouts so the renderer draws with the theme font. */
   font?: string;
   size?: number;
+  /** Grid cell width, so the renderer can draw each glyph in its own cell. */
+  charW?: number;
 }
 export type LayoutResult = ImageLayout | { tooLarge: true };
 export type ScaleResult = { scale: number } | { tooLarge: true };
@@ -113,5 +115,5 @@ export function layoutImage(lines: string[], tokens: Span[][], theme: ImageTheme
   if (cols > MAX_COLS) return { tooLarge: true };
   const width = 2 * padding + cols * charW;
   const height = 2 * padding + rows * lineH;
-  return { width, height, cols, rows, ops: [{ t: "rect", x: 0, y: 0, w: width, h: height, r: radius, fill: theme.bg }, ...text] };
+  return { width, height, cols, rows, charW, ops: [{ t: "rect", x: 0, y: 0, w: width, h: height, r: radius, fill: theme.bg }, ...text] };
 }

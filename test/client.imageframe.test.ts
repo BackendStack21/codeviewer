@@ -172,8 +172,8 @@ describe("frameImage (AC-9, AC-10, AC-16)", () => {
     expect(r.cols).toBe(5);
     expect(r.rows).toBe(2);
   });
-  test("scale follows min(dpr, 2)", () => {
-    expect(framed(layout(500, 200), 1).scale).toBe(1);
+  test("scale is always 2 when it fits the pixel cap, regardless of dpr (R-01)", () => {
+    expect(framed(layout(500, 200), 1).scale).toBe(2);
     expect(framed(layout(500, 200), 3).scale).toBe(2);
   });
   test("min width clamp applies to the outer size", () => {

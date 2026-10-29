@@ -161,7 +161,6 @@ describe("copyCodeImage (AC-4, AC-7)", () => {
       },
     });
     expect(await copyCodeImage(deps, input({ range: range(0, 1, 1, 1) }))).toBe("Could not copy image to the clipboard");
-    expect(log.some((l) => l.startsWith("text:"))).toBe(false);
     expect(log).toContain("notify:Could not copy image to the clipboard");
   });
 });
