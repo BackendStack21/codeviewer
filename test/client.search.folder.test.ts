@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { parseGlobs } from "../src/server/search.ts";
 import { FakeEvent, installDom, mockFetch, uninstallDom, type FakeElement } from "./helpers/fakedom.ts";
 
 let S: typeof import("../src/client/search.ts");
@@ -31,8 +32,11 @@ describe("folderGlob", () => {
 
   test("a comma never splits the include list", () => {
     const g = S.folderGlob("a,b");
-    expect(g).not.toContain(",");
-    expect(new Bun.Glob(g).match("a,b/f.ts")).toBe(true);
+    expect(g).toBe("a\\,b/**");
+    expect(parseGlobs(g)).toEqual(["a,b/**"]);
+    const glob = new Bun.Glob(parseGlobs(g)[0]!);
+    expect(glob.match("a,b/f.ts")).toBe(true);
+    expect(glob.match("a_b/f.ts")).toBe(false);
   });
 });
 
