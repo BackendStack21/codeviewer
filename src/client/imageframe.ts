@@ -94,7 +94,7 @@ export function frameOps(frame: Frame): DrawOp[] {
     { t: "rect", x: c.x, y: c.y, w: c.w, h: c.h, r: c.r, fill: c.fill, shadow: frame.shadow },
     ...frame.dots.map((d) => ({ t: "dot" as const, ...d })),
   ];
-  if (frame.title) ops.push({ t: "text", x: frame.title.x, y: frame.title.y, text: frame.title.text, fill: frame.title.fill, bold: false, italic: false });
+  if (frame.title) ops.push({ t: "text", x: frame.title.x, y: frame.title.y, text: frame.title.text, fill: frame.title.fill, bold: false, italic: false, whole: true });
   return ops;
 }
 
@@ -121,7 +121,7 @@ export interface FramedSnapshot {
   image: { x: number; y: number; w: number; h: number };
 }
 /** Frames an image of imgW x imgH CSS px (Markdown or native snapshot) in the card. */
-export function frameSnapshot(imgW: number, imgH: number, title: string, theme: ImageTheme, measure: Measure, dpr: number): FramedSnapshot | { tooLarge: true } {
+export function frameSnapshot(imgW: number, imgH: number, title: string, theme: ImageTheme, measure: Measure): FramedSnapshot | { tooLarge: true } {
   const ft: FrameTheme = { bg: theme.bg, fg: theme.fg, muted: theme.muted ?? theme.fg, accent: theme.accent ?? theme.fg };
   const frame = frameGeometry(imgW, imgH, title, ft, measure);
   if ("tooLarge" in frame) return frame;
@@ -151,13 +151,22 @@ export function fontLoadSpecs(ops: DrawOp[], font: string, size: number): string
   return ["00", "10", "01", "11"].filter((k) => used.has(k)).map((k) => canvasFont(font, size, k[0] === "1", k[1] === "1"));
 }
 
-/** One entry per drawn glyph at x + cell * charW (spaces occupy a cell but are not drawn). */
+/** One entry per drawn glyph cluster at x + cell * charW (spaces occupy a cell but are not drawn). A zero-width mark (accent, variation selector, ZWJ) is drawn with its base glyph, and a ZWJ also joins the glyph after it. */
 export function glyphCells(text: string, x: number, charW: number): { ch: string; x: number }[] {
   const out: { ch: string; x: number }[] = [];
   let i = 0;
+  let open = false; // the last entry can still take a combining mark
+  let join = false; // the previous code point was a ZWJ
   for (const ch of text) {
-    if (ch !== " ") out.push({ ch, x: x + i * charW });
-    i += charWidth(ch.codePointAt(0)!);
+    const w = charWidth(ch.codePointAt(0)!);
+    if (ch === " ") open = false;
+    else if (out.length && open && (w === 0 || join)) out[out.length - 1]!.ch += ch;
+    else {
+      out.push({ ch, x: x + i * charW });
+      open = true;
+    }
+    join = ch === "\u200d";
+    i += w;
   }
   return out;
 }

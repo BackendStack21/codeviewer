@@ -1,5 +1,5 @@
 // Thin browser glue for image copy (canvas, clipboard, native bridge). Verified manually.
-import { snapTracker, type CopyImageDeps, type SnapRect, type SnapshotDeps } from "./copyimage.ts";
+import { FrameTooLargeError, snapTracker, type CopyImageDeps, type SnapRect, type SnapshotDeps } from "./copyimage.ts";
 import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import { canvasFont, fontLoadSpecs, frameSnapshot, glyphCells, scaledShadow } from "./imageframe.ts";
 import type { DrawOp, ImageLayout, ImageTheme } from "./imagelayout.ts";
@@ -57,7 +57,8 @@ export async function renderLayoutPng(layout: ImageLayout, scale: number, font: 
       ctx.fillStyle = op.fill;
       // One glyph per grid cell: the editor disables ligatures, so the image must never form them.
       const charW = layout.charW ?? size * 0.6;
-      for (const g of glyphCells(op.text, op.x, charW)) ctx.fillText(g.ch, g.x, op.y);
+      if (op.whole) ctx.fillText(op.text, op.x, op.y);
+      else for (const g of glyphCells(op.text, op.x, charW)) ctx.fillText(g.ch, g.x, op.y);
     }
   }
   if (image) {
@@ -86,8 +87,8 @@ async function decodePng(png: Blob): Promise<HTMLImageElement> {
 
 /** Draws a snapshot PNG (cssW x cssH CSS px) inside the snippet card: backdrop, title bar, then the image. */
 export async function framePng(png: Blob, cssW: number, cssH: number, title: string, theme: ImageTheme, measure: (t: string) => number): Promise<Blob> {
-  const f = frameSnapshot(cssW, cssH, title, theme, measure, window.devicePixelRatio || 1);
-  if ("tooLarge" in f) throw new Error("too large");
+  const f = frameSnapshot(cssW, cssH, title, theme, measure);
+  if ("tooLarge" in f) throw new FrameTooLargeError();
   const bitmap = await decodePng(png);
   const layout: ImageLayout = { width: f.width, height: f.height, cols: 0, rows: 0, ops: f.ops as DrawOp[], font: theme.font, size: theme.size };
   const card = f.ops.find((o): o is Extract<DrawOp, { t: "rect" }> => o.t === "rect");

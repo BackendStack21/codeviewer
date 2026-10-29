@@ -9,7 +9,19 @@ export const MSG_TOO_LARGE = "Selection too large for an image";
 export const MSG_CLIPBOARD_FAILED = "Could not copy image to the clipboard";
 export const MSG_NO_SELECTION = "Nothing selected";
 
-export type CopyResult = "native" | "clipboard" | "failed";
+export type CopyResult = "native" | "clipboard" | "failed" | "tooLarge";
+
+/** Thrown when a framed image would exceed the pixel cap. */
+export class FrameTooLargeError extends Error {
+  constructor() {
+    super("framed image too large");
+  }
+}
+
+/** Toast message for a copy result. */
+export function messageFor(res: CopyResult | "snapshot"): string {
+  return res === "tooLarge" ? MSG_TOO_LARGE : res === "failed" ? MSG_CLIPBOARD_FAILED : MSG_OK;
+}
 
 export interface CopyImageDeps {
   renderPng(layout: ImageLayout, scale: number): Promise<Blob>;
@@ -49,14 +61,15 @@ export async function copyPng(deps: CopyImageDeps, png: Promise<Blob>): Promise<
       await png; // a render failure must not read as success even if write() ignored it
       return "clipboard";
     } catch {
-      return "failed";
+      // write() may wrap the render error: look at the PNG promise itself
+      return (await png.then(() => undefined, (e: unknown) => e)) instanceof FrameTooLargeError ? "tooLarge" : "failed";
     }
   }
   let blob: Blob;
   try {
     blob = await png;
-  } catch {
-    return "failed";
+  } catch (e) {
+    return e instanceof FrameTooLargeError ? "tooLarge" : "failed";
   }
   if (deps.native) {
     try {
@@ -82,7 +95,7 @@ export async function copyCodeImage(deps: CopyImageDeps, input: CopyImageInput):
   const framed = frameImage(layout, input.title ?? "", input.theme, measure, input.dpr);
   if ("tooLarge" in framed) return done(MSG_TOO_LARGE);
   const result = await copyPng(deps, deps.renderPng(framed, framed.scale));
-  return done(result === "failed" ? MSG_CLIPBOARD_FAILED : MSG_OK);
+  return done(messageFor(result));
 }
 
 export interface RectLike {
@@ -145,7 +158,7 @@ export function pngFromBase64(b64: string): Blob {
 }
 
 /** Tries the native snapshot of the selection rects (base64 PNG), frames it and writes it through the native pasteboard; true only when it all succeeded. Always restores the highlight. */
-export async function copyViaSnapshot(deps: SnapshotDeps, rects: RectLike[], vp: Viewport): Promise<boolean> {
+export async function copyViaSnapshot(deps: SnapshotDeps, rects: RectLike[], vp: Viewport): Promise<boolean | "tooLarge"> {
   const rect = deps.snapshot ? clampSnapRect(rects, vp) : null;
   if (!deps.snapshot || !rect) return false;
   const { compose, native } = deps;
@@ -163,8 +176,8 @@ export async function copyViaSnapshot(deps: SnapshotDeps, rects: RectLike[], vp:
   try {
     await native(await compose(pngFromBase64(b64), rect));
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    return e instanceof FrameTooLargeError ? "tooLarge" : false;
   }
 }
 
@@ -176,8 +189,9 @@ export async function copyPngOrSnapshot(
   vp: Viewport,
 ): Promise<CopyResult | "snapshot"> {
   const res = await copyPng(deps, png);
-  if (res === "failed" && (await copyViaSnapshot(deps, rects, vp))) return "snapshot";
-  return res;
+  if (res !== "failed") return res; // tooLarge would not fit through the snapshot either
+  const snap = await copyViaSnapshot(deps, rects, vp);
+  return snap === true ? "snapshot" : snap === "tooLarge" ? "tooLarge" : res;
 }
 
 export interface SnapTracker {

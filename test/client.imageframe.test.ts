@@ -141,7 +141,7 @@ describe("frameOps", () => {
     expect(ops[0]).toEqual({ t: "gradient", x: 0, y: 0, w: f.width, h: f.height, ...f.backdrop });
     expect(ops[1]).toEqual({ t: "rect", x: f.card.x, y: f.card.y, w: f.card.w, h: f.card.h, r: f.card.r, fill: "#101010", shadow: f.shadow });
     expect(ops.filter((o) => o.t === "dot")).toEqual(f.dots.map((d) => ({ t: "dot", ...d })));
-    expect(ops.find((o) => o.t === "text")).toEqual({ t: "text", x: f.title!.x, y: f.title!.y, text: "app.ts", fill: "#8a8a8a", bold: false, italic: false });
+    expect(ops.find((o) => o.t === "text")).toEqual({ t: "text", x: f.title!.x, y: f.title!.y, text: "app.ts", fill: "#8a8a8a", bold: false, italic: false, whole: true });
   });
 });
 

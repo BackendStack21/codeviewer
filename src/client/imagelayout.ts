@@ -39,7 +39,7 @@ export type DrawOp =
   | { t: "rect"; x: number; y: number; w: number; h: number; r: number; fill: string; shadow?: Shadow }
   | { t: "gradient"; x: number; y: number; w: number; h: number; x0: number; y0: number; x1: number; y1: number; stops: GradStop[] }
   | { t: "dot"; cx: number; cy: number; r: number; fill: string }
-  | { t: "text"; x: number; y: number; text: string; fill: string; bold: boolean; italic: boolean };
+  | { t: "text"; x: number; y: number; text: string; fill: string; bold: boolean; italic: boolean; /** Draw as one run (titles), not one glyph per grid cell. */ whole?: boolean };
 export interface ImageLayout {
   width: number;
   height: number;

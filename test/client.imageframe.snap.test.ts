@@ -46,14 +46,13 @@ describe("one column model for layout and drawing (R-05)", () => {
       { ch: "b", x: 30 },
     ]);
   });
-  test("glyphCells: wide CJK advances two cells, a combining mark none", () => {
+  test("glyphCells: wide CJK advances two cells, a combining mark joins its base glyph", () => {
     expect(glyphCells("中b", 0, 10)).toEqual([
       { ch: "中", x: 0 },
       { ch: "b", x: 20 },
     ]);
     expect(glyphCells("éx", 0, 10)).toEqual([
-      { ch: "e", x: 0 },
-      { ch: "́", x: 10 },
+      { ch: "e\u0301", x: 0 },
       { ch: "x", x: 10 },
     ]);
   });
