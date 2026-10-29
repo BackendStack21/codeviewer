@@ -144,10 +144,10 @@ export class CodeView {
     this.linesEl.addEventListener("mousedown", (e) => {
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
-      if (e.button || e.ctrlKey) return; // right/middle press or Ctrl+click (opens the menu) keeps the range
+      const n = Number(ln.dataset.n);
+      if (e.button || e.ctrlKey) return this.setActiveLine(n); // right/middle press or Ctrl+click (opens the menu) keeps the range
       this.sel = null;
       this.applied = null;
-      const n = Number(ln.dataset.n);
       if ((e.target as HTMLElement).classList.contains("g") && this.gitMarks[n]) {
         e.preventDefault();
         this.togglePeek(n, ln);
@@ -167,14 +167,16 @@ export class CodeView {
       e.preventDefault();
       e.clipboardData?.setData("text/plain", this.selectedText());
     });
-    this.scroller.addEventListener("contextmenu", (e) => {
-      if (this.sel) this.onContextMenu(e);
-    });
     document.addEventListener("selectionchange", () => this.readDomSelection());
+    // A primary press outside the lines (not on the context menu) makes the model range stale.
+    document.addEventListener("mousedown", (e) => {
+      const t = e.target as HTMLElement | null;
+      if (e.button || e.ctrlKey || !this.sel || this.linesEl.contains(t)) return;
+      if (t?.closest?.(".ctx-menu")) return;
+      this.sel = null;
+      this.applied = null;
+    });
   }
-
-  /** Set by the app: shows the Copy / Copy as Image menu (only called when a selection exists). */
-  onContextMenu: (e: MouseEvent) => void = () => {};
 
   // ───────────────────────────── selection (model range) ─────────────────────────────
 
@@ -259,6 +261,11 @@ export class CodeView {
     };
     const a = pos(ds.anchorNode, ds.anchorOffset);
     const f = pos(ds.focusNode, ds.focusOffset);
+    if (!a && !f) {
+      this.sel = null; // a real selection elsewhere replaces the stale range
+      this.applied = null;
+      return;
+    }
     if (!a || !f) return;
     const ap = this.applied;
     if (ap && a.line === ap.start.line && a.col === ap.start.col && f.line === ap.end.line && f.col === ap.end.col) return;
