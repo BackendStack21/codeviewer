@@ -30,3 +30,9 @@ export function searchKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): S
 export function normSideView(v: unknown): SideView {
   return v === "search" ? "search" : "explorer";
 }
+
+/** Cmd/Ctrl+Shift+C copies the selection as an image (not from the terminal, where Ctrl+Shift+C is its own copy). */
+export function copyImageKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): boolean {
+  const mod = o.isMac ? !!e.metaKey : !!e.ctrlKey;
+  return mod && !!e.shiftKey && !e.altKey && !o.inTerm && e.key.toLowerCase() === "c";
+}

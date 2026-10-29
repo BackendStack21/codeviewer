@@ -87,8 +87,17 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs |
 | ⌘= ⌘- ⌘0 | Font size |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changed files · next / previous change in file |
+| ⌘⇧C / Ctrl+Shift+C | Copy the selection as an image (PNG) |
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
+
+## Copy as Image
+
+Select code (or text in a Markdown preview) and choose **Copy as Image** from the right-click menu, the command
+palette (*Copy Selection as Image*), or press ⌘⇧C / Ctrl+Shift+C. Code is drawn with the current theme's syntax
+colours (no line numbers); a preview selection is rendered as it looks on screen. If the clipboard does not accept
+images the PNG is downloaded instead; if rendering fails the plain text is copied and a message says so. Very large
+selections are refused with "Selection too large for an image".
 
 ## Markdown
 

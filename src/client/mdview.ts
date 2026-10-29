@@ -28,9 +28,15 @@ export class MarkdownView {
     this.el.className = "md-view";
     this.setFontSize(fontSize);
     this.el.addEventListener("click", (e) => this.onClick(e));
+    this.el.addEventListener("contextmenu", (e) => {
+      if (this.selectionRange()) this.onContextMenu(e);
+    });
     this.build(text);
     if (opts.hash) this.scrollToFragment(opts.hash);
   }
+
+  /** Set by the app: shows the Copy / Copy as Image menu (only called when a selection exists). */
+  onContextMenu: (e: MouseEvent) => void = () => {};
 
   private onClick(e: MouseEvent) {
     const a = (e.target as Element | null)?.closest?.("a");
