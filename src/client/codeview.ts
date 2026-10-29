@@ -70,6 +70,8 @@ export class CodeView {
   private charW = 7.8;
   private gutterW = 48;
   private frame = 0;
+  private visible = true;
+  private off: (() => void)[] = [];
   private cache = new Map<number, string>();
   private changed: Uint8Array = new Uint8Array(0);
   private flash: { from: number; to: number; at: number } | null = null;
@@ -175,7 +177,11 @@ export class CodeView {
       e.preventDefault();
       this.selectAll();
     });
-    document.addEventListener("keydown", (e) => {
+    const on = <T extends EventTarget>(t: T, type: string, fn: (e: any) => void) => {
+      t.addEventListener(type, fn);
+      this.off.push(() => t.removeEventListener(type, fn));
+    };
+    on(document, "keydown", (e: KeyboardEvent) => {
       if (e.defaultPrevented || !this.active || !selectAllKey(e) || isEditable(e.target)) return;
       e.preventDefault();
       this.selectAll();
@@ -195,8 +201,8 @@ export class CodeView {
       e.preventDefault();
       e.clipboardData?.setData("text/plain", this.selectedText());
     });
-    document.addEventListener("copy", onCopy);
-    document.addEventListener("selectionchange", () => {
+    on(document, "copy", onCopy);
+    on(document, "selectionchange", () => {
       this.readDomSelection();
       this.syncBlame(); // a selection hides the label only while it exists
     });
@@ -205,13 +211,13 @@ export class CodeView {
       this.held = false;
       this.syncBlame();
     };
-    document.addEventListener("mouseup", release);
-    window.addEventListener("blur", release);
-    document.addEventListener("mousemove", (e) => {
+    on(document, "mouseup", release);
+    on(window, "blur", release);
+    on(document, "mousemove", (e: MouseEvent) => {
       if (this.held && e.buttons === 0) release(); // the button was released outside the page
     });
     // A primary press outside the whole view makes the model range stale.
-    document.addEventListener("mousedown", (e) => {
+    on(document, "mousedown", (e: MouseEvent) => {
       const t = e.target as Node | null;
       const inside = this.el.contains(t) || this.linesEl.contains(t);
       if (inside) current = this;
@@ -233,7 +239,7 @@ export class CodeView {
   private rev = false;
   /** This view was last used and keyboard focus is still in it (or nowhere in particular). */
   private get active() {
-    if (current !== this) return false;
+    if (current !== this || !this.visible || !this.el.isConnected) return false;
     const f = document.activeElement;
     return !f || f === document.body || this.el.contains(f);
   }
@@ -327,6 +333,19 @@ export class CodeView {
     this.applied = null;
     this.rev = f.line < a.line || (f.line === a.line && f.col < a.col);
     this.sel = normalize({ start: a, end: f });
+  }
+
+  /** Removes every document/window listener, drops global ownership and cancels a pending frame. */
+  dispose() {
+    for (const f of this.off.splice(0)) f();
+    if (current === this) current = null;
+    if (this.frame) cancelAnimationFrame(this.frame);
+    this.frame = 0;
+  }
+
+  /** Set by the editor when it shows or hides this view (tab switch, Markdown preview toggle). */
+  setVisible(visible: boolean) {
+    this.visible = visible;
   }
 
   get lineCount() {

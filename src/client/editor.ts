@@ -162,7 +162,7 @@ export class Editor {
         tab.md?.dispose();
         tab.md = undefined;
       }
-      if (!plan.code) tab.code = undefined;
+      if (!plan.code) this.dropCode(tab);
       if (f.kind === "text") {
         tab.eol = /\r\n/.test(f.text.slice(0, 10000)) ? "CRLF" : "LF";
         if (plan.view === "md") {
@@ -175,6 +175,7 @@ export class Editor {
         } else if (plan.reuse) tab.code!.setText(f.text);
         else {
           tab.el.replaceChildren();
+          tab.code?.dispose();
           tab.code = new CodeView(f.text, tab.lang, this.fontSize);
           const code = tab.code;
           const blame = debounce((line: number) => void this.loadBlame(tab, code, line), 180);
@@ -191,7 +192,7 @@ export class Editor {
               tab.el.prepend(
                 tooLargeNote(() => {
                   tab.forcePreview = true;
-                  tab.code = undefined;
+                  this.dropCode(tab);
                   void this.load(tab);
                 }),
               );
@@ -202,16 +203,16 @@ export class Editor {
       } else if (f.kind === "image") {
         if (tab.image && reload) tab.image.reload(tab.mtime);
         else {
-          tab.code = undefined;
+          this.dropCode(tab);
           tab.image = new ImageView(tab.path, tab.mtime, () => this.status());
           tab.el.replaceChildren(tab.image.el);
           if (tab.path.endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
         }
       } else if (f.kind === "binary") {
-        tab.code = undefined;
+        this.dropCode(tab);
         tab.el.replaceChildren(await binaryView(tab.path, f.size));
       } else {
-        tab.code = undefined;
+        this.dropCode(tab);
         tab.el.replaceChildren(h("div", { class: "notice" }, "This is a directory."));
       }
       tab.kind = f.kind;
@@ -222,7 +223,7 @@ export class Editor {
         return;
       }
       tab.kind = "error";
-      tab.code = undefined;
+      this.dropCode(tab);
       tab.md?.dispose();
       tab.md = undefined;
       tab.el.replaceChildren(h("div", { class: "notice error" }, h("strong", null, "Can't open file"), h("span", null, (e as Error).message)));
@@ -249,7 +250,7 @@ export class Editor {
       tab.asSource = next.asSource;
       tab.forcePreview = next.forcePreview; // an explicit request overrides the size gate
     } else tab.asSource = !tab.asSource; // SVG: image or source
-    tab.code = undefined;
+    this.dropCode(tab);
     tab.image = undefined;
     tab.md?.dispose();
     tab.md = undefined;
@@ -273,8 +274,10 @@ export class Editor {
 
   activate(tab: Tab) {
     if (this.active === tab) return;
+    this.active?.code?.setVisible(false);
     this.active = tab;
     this.body.replaceChildren(tab.el);
+    tab.code?.setVisible(true);
     tab.code?.schedule();
     if (tab.gitStale) void this.refreshGit(tab);
     this.render();
@@ -314,7 +317,13 @@ export class Editor {
     await this.load(tab);
   }
 
+  private dropCode(tab: Tab) {
+    tab.code?.dispose();
+    tab.code = undefined;
+  }
+
   private disposeTab(tab: Tab) {
+    tab.code?.dispose();
     tab.md?.dispose();
     tab.el.remove();
     tab.tabEl.remove();
