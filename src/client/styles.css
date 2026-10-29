@@ -854,6 +854,58 @@ svg {
   border-color: var(--accent);
 }
 
+/* ───────────────────────── markdown preview ───────────────────────── */
+.md-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 32px 64px;
+  background: var(--bg-editor);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  line-height: 1.6;
+}
+.md-doc {
+  max-width: 78ch;
+  margin: 0 auto;
+}
+.md-doc p {
+  margin: 0 0 1em;
+}
+.md-doc h1,
+.md-doc h2,
+.md-doc h3,
+.md-doc h4,
+.md-doc h5,
+.md-doc h6 {
+  color: var(--fg-strong);
+  line-height: 1.25;
+  margin: 1.4em 0 0.6em;
+}
+.md-doc h1 {
+  font-size: 2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border-strong);
+}
+.md-doc h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.md-doc h3 {
+  font-size: 1.25em;
+}
+.md-doc h4 {
+  font-size: 1em;
+}
+.md-doc h5 {
+  font-size: 0.875em;
+}
+.md-doc h6 {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+
 /* ───────────────────────── code view ───────────────────────── */
 .code {
   position: relative;

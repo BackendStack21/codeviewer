@@ -1,0 +1,23 @@
+[
+  { "name": "atx h1", "src": "# Title", "ast": [{ "type": "heading", "level": 1, "children": [{ "type": "text", "value": "Title" }] }] },
+  { "name": "atx h6", "src": "###### Deep", "ast": [{ "type": "heading", "level": 6, "children": [{ "type": "text", "value": "Deep" }] }] },
+  { "name": "atx closing hashes and trailing spaces", "src": "## Sub ##  ", "ast": [{ "type": "heading", "level": 2, "children": [{ "type": "text", "value": "Sub" }] }] },
+  { "name": "seven hashes is a paragraph", "src": "####### x", "ast": [{ "type": "paragraph", "children": [{ "type": "text", "value": "####### x" }] }] },
+  { "name": "hash without space is a paragraph", "src": "#nospace", "ast": [{ "type": "paragraph", "children": [{ "type": "text", "value": "#nospace" }] }] },
+  { "name": "paragraph", "src": "Hello world", "ast": [{ "type": "paragraph", "children": [{ "type": "text", "value": "Hello world" }] }] },
+  {
+    "name": "heading then two paragraphs",
+    "src": "# A\n\nfirst\n\n\nsecond\n",
+    "ast": [
+      { "type": "heading", "level": 1, "children": [{ "type": "text", "value": "A" }] },
+      { "type": "paragraph", "children": [{ "type": "text", "value": "first" }] },
+      { "type": "paragraph", "children": [{ "type": "text", "value": "second" }] }
+    ]
+  },
+  { "name": "empty", "src": "", "ast": [] },
+  { "name": "only blank lines", "src": "\n  \n\n", "ast": [] },
+  { "name": "crlf line endings", "src": "# A\r\n\r\nb\r\n", "ast": [
+      { "type": "heading", "level": 1, "children": [{ "type": "text", "value": "A" }] },
+      { "type": "paragraph", "children": [{ "type": "text", "value": "b" }] }
+  ] }
+]
