@@ -55,13 +55,14 @@ export class SearchView {
   private running = false;
   private ranQ = "";
   private started = false;
+  private sel = -1;
 
   constructor(opts: SearchViewOptions = {}) {
     this.debounce = opts.debounce ?? 250;
     this.input = h("input", { class: "sv-query", spellcheck: "false", placeholder: "Search", "aria-label": "Search in files" });
     this.include = h("input", { class: "sv-include", spellcheck: "false", placeholder: "files to include", "aria-label": "Files to include" });
     this.exclude = h("input", { class: "sv-exclude", spellcheck: "false", placeholder: "files to exclude", "aria-label": "Files to exclude" });
-    this.results = h("div", { class: "sv-results", role: "listbox" });
+    this.results = h("div", { class: "sv-results", role: "listbox", tabindex: "0" });
     this.progress = h("div", { class: "sv-progress", hidden: true });
     const tog = (opt: Opt, label: string, title: string, cls = "") => {
       const b = h("button", { class: `sv-toggle ${cls}`.trim(), "data-opt": opt, "aria-pressed": "false", title, type: "button" }, label);
@@ -79,7 +80,7 @@ export class SearchView {
       h(
         "div",
         { class: "sv-top" },
-        h("div", { class: "sv-field" }, this.input, tog("case", "Aa", "Match case"), tog("word", "ab", "Match whole word"), tog("regex", ".*", "Use regular expression")),
+        h("div", { class: "sv-field" }, this.input, tog("case", "Aa", "Match case"), tog("word", "ab", "Whole word"), tog("regex", ".*", "Regular expression")),
         this.include,
         this.exclude,
         tog("ignored", "Include ignored files", "Also search files excluded by .gitignore", "sv-wide"),
@@ -92,6 +93,23 @@ export class SearchView {
       if (e.key === "Enter" && this.input.value) {
         e.preventDefault();
         this.run();
+      } else if (e.key === "Escape" && this.input.value) {
+        e.preventDefault();
+        this.input.value = "";
+        this.reset();
+      }
+    });
+    this.results.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        this.move(e.key === "ArrowDown" ? 1 : -1);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const hit = this.flat[this.sel];
+        if (hit) this.onOpen(hit.path, hit.m.line, hit.m.col, hit.m.len);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this.input.focus();
       }
     });
     this.include.addEventListener("input", () => this.schedule(false));
@@ -114,6 +132,31 @@ export class SearchView {
     this.render();
   }
 
+  /** Index into the flat result list of the selected row, -1 when none. */
+  get selected(): number {
+    return this.sel;
+  }
+
+  /** Moves the selection by one row without opening it (clamped at both ends). */
+  move(dir: 1 | -1): void {
+    if (!this.flat.length) return;
+    this.sel = Math.max(0, Math.min(this.flat.length - 1, this.sel + dir));
+    this.render();
+    this.results.querySelector(".sv-row.sel")?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  /** Selects the next/previous result (wrapping) and opens it; false when there are no results. */
+  step(dir: 1 | -1): boolean {
+    const n = this.flat.length;
+    if (!n) return false;
+    this.sel = this.sel < 0 ? (dir === 1 ? 0 : n - 1) : (this.sel + dir + n) % n;
+    this.render();
+    this.results.querySelector(".sv-row.sel")?.scrollIntoView?.({ block: "nearest" });
+    const hit = this.flat[this.sel]!;
+    this.onOpen(hit.path, hit.m.line, hit.m.col, hit.m.len);
+    return true;
+  }
+
   focus() {
     this.input.focus();
     (this.input as unknown as { select?: () => void }).select?.();
@@ -127,7 +170,7 @@ export class SearchView {
   private schedule(now: boolean) {
     clearTimeout(this.timer);
     if (!this.input.value) return this.reset();
-    if (!this.eligible()) return;
+    if (!this.eligible()) return this.reset();
     if (now || this.debounce <= 0) this.run();
     else this.timer = window.setTimeout(() => this.run(), this.debounce);
   }
@@ -146,6 +189,7 @@ export class SearchView {
   private reset() {
     this.cancel();
     this.started = false;
+    this.sel = -1;
     this.groups = [];
     this.done = null;
     this.error = null;
@@ -161,6 +205,7 @@ export class SearchView {
     const g = this.gen;
     const ac = (this.ac = new AbortController());
     this.started = true;
+    this.sel = -1;
     this.groups = [];
     this.done = null;
     this.error = null;
@@ -235,7 +280,8 @@ export class SearchView {
         const i = this.flat.push({ path: g.path, m }) - 1;
         if (g.collapsed) continue;
         const pv = m.preview;
-        html += `<div class="sv-row" data-i="${i}" role="option"><span class="sv-ln">${m.line}</span><span class="sv-pv">${safe(pv.slice(0, m.pcol))}<mark>${safe(pv.slice(m.pcol, m.pcol + m.len))}</mark>${safe(pv.slice(m.pcol + m.len))}</span></div>`;
+        const on = i === this.sel;
+        html += `<div class="sv-row${on ? " sel" : ""}" data-i="${i}" role="option"${on ? ' aria-selected="true"' : ""}><span class="sv-ln">${m.line}</span><span class="sv-pv">${safe(pv.slice(0, m.pcol))}<mark>${safe(pv.slice(m.pcol, m.pcol + m.len))}</mark>${safe(pv.slice(m.pcol + m.len))}</span></div>`;
       }
     });
     const n = d ? d.matches : total;
