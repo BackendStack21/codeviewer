@@ -400,6 +400,9 @@ ab (whole word) and .* (regex), with the same labels and `aria-pressed`. Matchin
 rules as `codeview.ts`, so a hit in the project is a hit in the file.
 - There are optional include and exclude globs, comma-separated, matched with `Bun.Glob`.
 - Deferred: replace (never; the app is read-only), multiline regex, search history.
+- **Search in Folder…** (folder context menu in the Explorer) switches to Search and sets the
+  include field to `<folder>/**`, re-running any current query. Glob metacharacters in the folder
+  name are backslash-escaped, and commas (the list separator) become `?`, so the scope stays literal.
 
 **Engine (performance engineer).** Matching runs in the server, in a Bun `Worker`, using sync
 I/O into a buffer that is reused.
