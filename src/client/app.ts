@@ -395,6 +395,7 @@ class App {
     this.L.sideView = v;
     this.tree.el.hidden = v !== "explorer";
     this.search.el.hidden = v !== "search";
+    if (v === "search") this.search.onShown();
     this.sideTools.hidden = v !== "explorer";
     for (const [k, b] of this.sideTabs) {
       b.classList.toggle("active", k === v);
@@ -626,6 +627,7 @@ class App {
         };
         if (msg.t === "changed" && msg.paths) {
           if (msg.structural) this.palette.invalidate();
+          this.search.markStale(msg.paths, msg.many);
           if (msg.many) {
             void this.tree.reloadAll();
             this.editor.onChanged(this.editor.tabs.map((t) => t.path));

@@ -162,7 +162,17 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       wake = null;
       w?.();
     };
+    let started = false;
+    let ended = false;
+    let nFiles = 0;
+    let nMatches = 0;
     const emit = (e: SearchEvent) => {
+      started = true;
+      if (e.t === "done") ended = true;
+      else {
+        nFiles++;
+        nMatches += e.matches.length;
+      }
       lines.push(JSON.stringify(e) + "\n");
       poke();
     };
@@ -172,6 +182,8 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     })()
       .catch(() => {
         failed = true;
+        // Output already started: still end the stream with a final done line (fixed flag, no message).
+        if (started && !ended) emit({ t: "done", files: nFiles, matches: nMatches, skipped: 0, truncated: false, ms: 0, error: true });
       })
       .finally(() => {
         finished = true;
