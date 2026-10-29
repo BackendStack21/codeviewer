@@ -1,5 +1,5 @@
 // Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
-import type { CopyImageDeps, SnapRect, SnapshotDeps } from "./copyimage.ts";
+import { snapTracker, type CopyImageDeps, type SnapRect, type SnapshotDeps } from "./copyimage.ts";
 import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import type { ImageLayout } from "./imagelayout.ts";
 
@@ -74,8 +74,13 @@ export function browserDeps(opts: { font: string; size: number; bridge?: Bridge;
 }
 
 const SNAP_TIMEOUT = 3000;
+const tracker = snapTracker();
 let snapDone: ((ok: boolean) => void) | undefined;
-if (typeof window !== "undefined") (window as unknown as { __cvSnap?: (ok: boolean) => void }).__cvSnap = (ok) => snapDone?.(ok);
+if (typeof window !== "undefined") {
+  (window as unknown as { __cvSnap?: (id: unknown, ok: unknown) => void }).__cvSnap = (id, ok) => {
+    if (tracker.accept(id)) snapDone?.(ok === true);
+  };
+}
 
 /** Snapshot fallback deps: native takeSnapshot via the bridge (reply through window.__cvSnap) and a root class hiding ::selection. */
 export function snapshotDeps(bridge: Bridge): SnapshotDeps {
@@ -85,15 +90,20 @@ export function snapshotDeps(bridge: Bridge): SnapshotDeps {
     snapshot: bridge
       ? (r: SnapRect) =>
           new Promise<boolean>((res) => {
-            const timer = setTimeout(() => finish(false), SNAP_TIMEOUT);
+            const id = tracker.begin();
             const finish = (ok: boolean) => {
               clearTimeout(timer);
               snapDone = undefined;
               res(ok);
             };
+            const timer = setTimeout(() => {
+              const cancelled = tracker.cancel();
+              if (cancelled !== undefined) bridge.postMessage({ t: "snapshotcancel", id: cancelled });
+              finish(false);
+            }, SNAP_TIMEOUT);
             snapDone = finish;
             // Give the highlight removal one frame to paint before the native side captures.
-            requestAnimationFrame(() => requestAnimationFrame(() => bridge.postMessage({ t: "snapshotrect", ...r })));
+            requestAnimationFrame(() => requestAnimationFrame(() => bridge.postMessage({ t: "snapshotrect", id, ...r })));
           })
       : undefined,
   };

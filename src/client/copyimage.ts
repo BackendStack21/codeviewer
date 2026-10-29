@@ -162,3 +162,29 @@ export async function copyPngOrSnapshot(
   if (res === "failed" && (await copyViaSnapshot(deps, rects, vp))) return "snapshot";
   return res;
 }
+
+export interface SnapTracker {
+  /** Starts a request: returns a fresh id and makes it the only pending one. */
+  begin(): number;
+  /** True exactly once for the pending id; stale, unknown, repeated or non-number ids are ignored. */
+  accept(id: unknown): boolean;
+  /** Cancels the pending request (timeout): returns its id so the native side can be told, undefined when none. */
+  cancel(): number | undefined;
+}
+export function snapTracker(): SnapTracker {
+  let next = 1;
+  let pending: number | undefined;
+  return {
+    begin: () => (pending = next++),
+    accept(id) {
+      if (typeof id !== "number" || id !== pending) return false;
+      pending = undefined;
+      return true;
+    },
+    cancel() {
+      const id = pending;
+      pending = undefined;
+      return id;
+    },
+  };
+}
