@@ -342,7 +342,6 @@ svg {
 :root[data-native="macos"] .titlebar {
   padding-left: calc(var(--native-inset, 72px) + 12px);
   -webkit-user-select: none;
-  -webkit-user-select: none;
   user-select: none;
   cursor: default;
 }

@@ -42,7 +42,8 @@ describe("R-04 a held drag whose anchor row is destroyed is restored", () => {
     fireSelectionChange(env);
     const before = m.calls.length;
     m.sel.setBaseAndExtent(m.linesEl as never, 0, m.linesEl as never, 0);
-    scrollTo(env, m, 2400);
+    m.view.schedule(); // a full re-render of a stale window
+    env.flush();
     expect(m.calls.length).toBeGreaterThan(before);
     const last = m.calls[m.calls.length - 1]!;
     expect(rowOf(last.a)).toBe(150);

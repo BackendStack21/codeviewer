@@ -90,6 +90,10 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
 
+## Selection and copy
+
+Select code in the viewer as you would in any editor, dragging in either direction. Copy (Cmd/Ctrl+C or the context menu) puts the exact text on the clipboard, including parts scrolled out of view, and never includes line numbers or the blame label. Cmd/Ctrl+A selects the whole file. The blame label stays out of the way while you drag or have text selected.
+
 ## Markdown
 
 `.md` and `.markdown` files open as a rendered document; the **View source** button (or the command
