@@ -962,6 +962,31 @@ svg {
   margin: 0 0.5em 0 0;
   vertical-align: middle;
 }
+.md-notice {
+  margin: 0.5em 1em;
+  padding: 0.5em 0.8em;
+  color: var(--fg-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+.md-notice button {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.md-doc img {
+  max-width: 100%;
+}
+.md-img-remote {
+  display: inline-block;
+  padding: 0 0.5em;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
 .md-truncated {
   margin: 1em 0;
   padding: 0.5em 0.8em;

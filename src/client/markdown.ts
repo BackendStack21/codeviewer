@@ -557,8 +557,8 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
         const cur = listMarker(lines[i]!);
         if (!cur || cur.key !== m.key || isHr(lines[i]!)) break;
         const itemLines = [lines[i]!.slice(cur.offset)];
-        const task = /^\[([ xX])\][ \t]/.exec(itemLines[0]!);
-        if (task) itemLines[0] = itemLines[0]!.slice(4);
+        const task = /^\[([ xX])\](?:[ \t]|$)/.exec(itemLines[0]!);
+        if (task) itemLines[0] = itemLines[0]!.slice(3).replace(/^[ \t]/, "");
         const t: FenceTrack = { f: null };
         track(t, itemLines[0]!);
         i++;

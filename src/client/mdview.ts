@@ -1,9 +1,12 @@
-import { parseMarkdown } from "./markdown.ts";
+import { api } from "./api.ts";
+import { parseMarkdown, slugify } from "./markdown.ts";
 import { renderMarkdown } from "./mdrender.ts";
 
 export interface MarkdownViewOptions {
   /** Repo-relative path of the document; relative links resolve against its folder. */
   path?: string;
+  /** Fragment (without #) to scroll to once the document is built. */
+  hash?: string;
   /** Opens a resolved repo path; resolve/return false when the target does not exist. */
   onOpen?: (path: string, hash: string) => boolean | void | Promise<boolean | void>;
 }
@@ -15,6 +18,10 @@ export class MarkdownView {
   renders = 0;
   private text = "";
   private root: HTMLElement | null = null;
+  private noticeEl: HTMLElement | null = null;
+  /** Bumped on every rebuild and dispose; late image loads from an older epoch are dropped. */
+  private epoch = 0;
+  private blobs: string[] = [];
 
   constructor(text: string, fontSize = 13, private opts: MarkdownViewOptions = {}) {
     this.el = document.createElement("div");
@@ -22,6 +29,7 @@ export class MarkdownView {
     this.setFontSize(fontSize);
     this.el.addEventListener("click", (e) => this.onClick(e));
     this.build(text);
+    if (opts.hash) this.scrollToFragment(opts.hash);
   }
 
   private onClick(e: MouseEvent) {
@@ -33,6 +41,7 @@ export class MarkdownView {
       e.preventDefault();
       const done = (ok: boolean | void) => {
         if (ok === false) this.notice("File not found");
+        else this.clearNotice();
       };
       try {
         const r = this.opts.onOpen?.(path, a.getAttribute("data-md-hash") ?? "");
@@ -43,34 +52,74 @@ export class MarkdownView {
       }
     } else if (href.startsWith("#")) {
       e.preventDefault();
-      let frag = href.slice(1);
-      try {
-        frag = decodeURIComponent(frag);
-      } catch {
-        // use as written
-      }
-      const id = "md-" + frag.toLowerCase();
-      for (const hd of Array.from(this.el.querySelectorAll("h1,h2,h3,h4,h5,h6"))) {
-        if (hd.getAttribute("id") === id) {
-          hd.scrollIntoView({ block: "start" });
-          break;
-        }
+      this.clearNotice();
+      this.scrollToFragment(href.slice(1));
+    }
+  }
+
+  /** Scrolls to the heading a fragment names (slugified like GitHub); false when there is none. */
+  scrollToFragment(frag: string): boolean {
+    let f = frag;
+    try {
+      f = decodeURIComponent(f);
+    } catch {
+      // use as written
+    }
+    if (!f) return false;
+    const id = "md-" + slugify(f);
+    for (const hd of Array.from(this.el.querySelectorAll("h1,h2,h3,h4,h5,h6"))) {
+      if (hd.getAttribute("id") === id) {
+        hd.scrollIntoView({ block: "start" });
+        return true;
       }
     }
+    return false;
   }
 
   private notice(msg: string) {
     const n = document.createElement("div");
     n.className = "md-notice";
     n.textContent = msg;
+    this.noticeEl = n;
     if (this.root) this.el.replaceChildren(n, this.root);
   }
 
+  private clearNotice() {
+    if (!this.noticeEl) return;
+    this.noticeEl = null;
+    if (this.root) this.el.replaceChildren(this.root);
+  }
+
+  private revokeAll() {
+    this.epoch++;
+    for (const u of this.blobs) URL.revokeObjectURL(u);
+    this.blobs = [];
+  }
+
+  private loadImage(img: HTMLElement, path: string, alt: string, wrap: HTMLElement, epoch: number) {
+    api.rawBlobUrl(path).then(
+      (url) => {
+        if (epoch !== this.epoch) return void URL.revokeObjectURL(url);
+        this.blobs.push(url);
+        img.setAttribute("src", url);
+      },
+      () => {
+        if (epoch === this.epoch) wrap.replaceChildren(alt);
+      },
+    );
+  }
+
   private build(text: string) {
+    this.revokeAll();
+    const epoch = this.epoch;
     this.text = text;
     this.renders++;
+    this.noticeEl = null;
     const dir = this.opts.path ? this.opts.path.slice(0, Math.max(0, this.opts.path.lastIndexOf("/"))) : "";
-    this.root = renderMarkdown(parseMarkdown(text), { base: dir });
+    this.root = renderMarkdown(parseMarkdown(text), {
+      base: dir,
+      onImage: (img, path, alt, wrap) => this.loadImage(img, path, alt, wrap, epoch),
+    });
     this.el.replaceChildren(this.root);
   }
 
@@ -88,8 +137,10 @@ export class MarkdownView {
   }
 
   dispose() {
+    this.revokeAll();
     this.text = "";
     this.root = null;
+    this.noticeEl = null;
     this.el.replaceChildren();
   }
 }
