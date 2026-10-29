@@ -1,4 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
+import { HEAVY_DIRS } from "./index.ts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -127,6 +128,16 @@ export class Git {
 
   private async git(args: string[], maxBytes = MAX_OUT) {
     return run(this.bin, this.root, [...HARDEN, ...(await this.neutralize()), ...args], maxBytes, this.env);
+  }
+
+  /**
+   * Tracked plus untracked-but-not-ignored files under the root (root-relative, "/" separated),
+   * from `git ls-files -z --cached --others --exclude-standard --deduplicate -- .`; null on failure.
+   */
+  async listFiles(): Promise<string[] | null> {
+    const r = await this.git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate", "--", "."]);
+    if (r.code !== 0) return null;
+    return new TextDecoder().decode(r.out).split("\0").filter((f) => f && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
   }
 
   /** Current status; concurrent callers share one `git status` run. */
