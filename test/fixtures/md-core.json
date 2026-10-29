@@ -1,0 +1,871 @@
+[
+ {
+  "name": "setext h1",
+  "src": "Title\n=====",
+  "ast": [
+   {
+    "type": "heading",
+    "level": 1,
+    "children": [
+     {
+      "type": "text",
+      "value": "Title"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "setext h2",
+  "src": "Sub\n---",
+  "ast": [
+   {
+    "type": "heading",
+    "level": 2,
+    "children": [
+     {
+      "type": "text",
+      "value": "Sub"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "setext multi-line content",
+  "src": "a\nb\n===",
+  "ast": [
+   {
+    "type": "heading",
+    "level": 1,
+    "children": [
+     {
+      "type": "text",
+      "value": "a\nb"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "thematic breaks",
+  "src": "***\n\n___\n\n- - -",
+  "ast": [
+   {
+    "type": "hr"
+   },
+   {
+    "type": "hr"
+   },
+   {
+    "type": "hr"
+   }
+  ]
+ },
+ {
+  "name": "hr interrupts a paragraph",
+  "src": "a\n***\nb",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a"
+     }
+    ]
+   },
+   {
+    "type": "hr"
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "multi-line paragraph keeps a soft break",
+  "src": "a\nb",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a\nb"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "indented code",
+  "src": "    code\n    more",
+  "ast": [
+   {
+    "type": "code",
+    "lang": null,
+    "value": "code\nmore"
+   }
+  ]
+ },
+ {
+  "name": "indented code keeps inner blank lines",
+  "src": "    a\n\n    b",
+  "ast": [
+   {
+    "type": "code",
+    "lang": null,
+    "value": "a\n\nb"
+   }
+  ]
+ },
+ {
+  "name": "indented code cannot interrupt a paragraph",
+  "src": "a\n    b",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a\nb"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "fenced code with info",
+  "src": "```js\nlet x;\n```",
+  "ast": [
+   {
+    "type": "code",
+    "lang": "js",
+    "value": "let x;"
+   }
+  ]
+ },
+ {
+  "name": "tilde fence without info",
+  "src": "~~~\na\n~~~",
+  "ast": [
+   {
+    "type": "code",
+    "lang": null,
+    "value": "a"
+   }
+  ]
+ },
+ {
+  "name": "unclosed fence runs to the end",
+  "src": "```\na\n\nb",
+  "ast": [
+   {
+    "type": "code",
+    "lang": null,
+    "value": "a\n\nb"
+   }
+  ]
+ },
+ {
+  "name": "block quote",
+  "src": "> a\n> b",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a\nb"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "nested block quotes",
+  "src": "> a\n> > b",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     },
+     {
+      "type": "blockquote",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "lazy continuation",
+  "src": "> a\nb",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a\nb"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "lazy continuation in nested quotes",
+  "src": "> > a\nb",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "blockquote",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a\nb"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "blank line ends a quote",
+  "src": "> a\n\nb",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "fence inside a quote",
+  "src": "> ```\n> x\n> ```",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "code",
+      "lang": null,
+      "value": "x"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "tight bullet list",
+  "src": "- a\n- b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "ordered list keeps its start",
+  "src": "3. a\n4. b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": true,
+    "start": 3,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "ordered list with paren delimiter",
+  "src": "1) a\n2) b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": true,
+    "start": 1,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "ordered list may start at zero",
+  "src": "0. a",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": true,
+    "start": 0,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "loose list (blank line between items)",
+  "src": "- a\n\n- b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": false,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "loose list (blank line inside an item)",
+  "src": "- a\n\n  b\n- c",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": false,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       },
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "c"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "nested bullet list",
+  "src": "- a\n  - b\n- c",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       },
+       {
+        "type": "list",
+        "ordered": false,
+        "start": null,
+        "tight": true,
+        "items": [
+         {
+          "type": "item",
+          "children": [
+           {
+            "type": "paragraph",
+            "children": [
+             {
+              "type": "text",
+              "value": "b"
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "c"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "bullet nested in ordered",
+  "src": "1. a\n   - b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": true,
+    "start": 1,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       },
+       {
+        "type": "list",
+        "ordered": false,
+        "start": null,
+        "tight": true,
+        "items": [
+         {
+          "type": "item",
+          "children": [
+           {
+            "type": "paragraph",
+            "children": [
+             {
+              "type": "text",
+              "value": "b"
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a different bullet character starts a new list",
+  "src": "- a\n* b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a bullet list interrupts a paragraph",
+  "src": "a\n- b",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a"
+     }
+    ]
+   },
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "an ordered list not starting at 1 does not interrupt",
+  "src": "a\n2. b",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a\n2. b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "heading inside a list item",
+  "src": "- # h",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "heading",
+        "level": 1,
+        "children": [
+         {
+          "type": "text",
+          "value": "h"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "quote inside a list item",
+  "src": "- > q",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "blockquote",
+        "children": [
+         {
+          "type": "paragraph",
+          "children": [
+           {
+            "type": "text",
+            "value": "q"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "heading with inline content",
+  "src": "# *a* b",
+  "ast": [
+   {
+    "type": "heading",
+    "level": 1,
+    "children": [
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " b"
+     }
+    ]
+   }
+  ]
+ }
+]
