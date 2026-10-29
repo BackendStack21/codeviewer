@@ -92,7 +92,7 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 
 ## Selection and copy
 
-Select code in the viewer as you would in any editor, dragging in either direction. Copy (Cmd/Ctrl+C or the context menu) puts the exact text on the clipboard, including parts scrolled out of view, and never includes line numbers or the blame label. Cmd/Ctrl+A selects the whole file. The blame label stays out of the way while you drag or have text selected.
+Select code in the viewer as you would in any editor, dragging in either direction. Copy (Cmd/Ctrl+C or the context menu) puts the exact text on the clipboard, including parts scrolled out of view, and never includes line numbers, the blame label or the truncation label on very long lines. Cmd/Ctrl+A selects the whole file while focus is in the code view. The blame label stays out of the way while you drag or have text selected.
 
 ## Markdown
 

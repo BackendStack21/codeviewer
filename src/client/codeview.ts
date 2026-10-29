@@ -146,7 +146,7 @@ export class CodeView {
       }
     });
     this.linesEl.addEventListener("mousedown", (e) => {
-      this.held = false; // a new press supersedes a hold whose mouseup was lost
+      this.held = !e.button && !e.ctrlKey; // a new press supersedes a hold whose mouseup was lost
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
       const n = Number(ln.dataset.n);
@@ -155,13 +155,16 @@ export class CodeView {
       this.sel = null;
       this.applied = null;
       current = this;
-      this.held = true;
       if ((e.target as HTMLElement).classList.contains("g") && this.gitMarks[n]) {
         e.preventDefault();
         this.togglePeek(n, ln);
         return;
       }
       this.setActiveLine(n);
+    });
+    // A press in the scroller's blank area (beside short lines, below the text) also starts a drag.
+    this.scroller.addEventListener("mousedown", (e) => {
+      if (!e.button && !e.ctrlKey) this.held = true;
     });
     this.scroller.addEventListener("scroll", () => this.closePeek(), { passive: true });
     // Focus does not reliably sit on the scroller (a press on code text may leave it on <body>), so the
@@ -298,7 +301,16 @@ export class CodeView {
   /** Mirrors a user (mouse/keyboard) DOM selection inside the rows into the model range. */
   private readDomSelection() {
     const ds = window.getSelection?.();
-    if (!ds || ds.rangeCount === 0 || ds.isCollapsed || !ds.anchorNode || !ds.focusNode) return;
+    if (!ds || ds.rangeCount === 0 || !ds.anchorNode || !ds.focusNode) return;
+    if (ds.isCollapsed) {
+      // The user collapsed the selection inside the rows (arrow key, click): the model range is stale.
+      // Not while a render is pending, which is about to re-apply it.
+      if (this.sel && !this.frame && !this.held && this.linesEl.contains(ds.anchorNode)) {
+        this.sel = null;
+        this.applied = null;
+      }
+      return;
+    }
     const pos = (node: Node, off: number) => {
       const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
       const row = el?.closest<HTMLElement>(".ln");
@@ -423,7 +435,7 @@ export class CodeView {
   }
 
   private blameVisible(i: number): boolean {
-    return !!this.blame && this.blame.line === i && !this.held && window.getSelection?.()?.isCollapsed !== false;
+    return !!this.blame && this.blame.line === i && !this.held && !this.sel && window.getSelection?.()?.isCollapsed !== false;
   }
 
   private rowEl(i: number): HTMLElement | null {
