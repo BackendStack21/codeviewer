@@ -79,6 +79,12 @@ export class CodeView {
   private hunks: Hunk[] = [];
   private gitMarks: Uint8Array = new Uint8Array(0);
   private blame: { line: number; html: string } | null = null;
+  /** Primary button held on a code line (drag-selection in progress); the blame label waits for mouseup. */
+  private pressed = false;
+  /** Line whose row currently carries the .blame span (-1 = none); render() rebuilds it with the markup. */
+  private shownBlame = -1;
+  /** A non-collapsed selection existed at the last mouseup; no label then. */
+  private selHidesBlame = false;
   private peek: HTMLElement | null = null;
 
   // find state
@@ -153,7 +159,15 @@ export class CodeView {
         this.togglePeek(n, ln);
         return;
       }
+      this.pressed = true;
+      this.selHidesBlame = false;
       this.setActiveLine(n);
+    });
+    document.addEventListener("mouseup", () => {
+      if (!this.pressed) return;
+      this.pressed = false;
+      this.selHidesBlame = window.getSelection?.()?.isCollapsed === false;
+      this.syncBlame();
     });
     this.scroller.addEventListener("scroll", () => this.closePeek(), { passive: true });
     this.scroller.addEventListener("keydown", (e) => {
@@ -370,7 +384,26 @@ export class CodeView {
   /** Inline blame annotation shown at the end of the active line. */
   setBlame(line: number, html: string | null) {
     this.blame = html === null ? null : { line, html };
-    this.schedule();
+    this.syncBlame();
+  }
+
+  private blameVisible(i: number): boolean {
+    return !!this.blame && this.blame.line === i && !this.pressed && !this.selHidesBlame;
+  }
+
+  private rowEl(i: number): HTMLElement | null {
+    return this.linesEl.querySelector<HTMLElement>?.(`.ln[data-n="${i}"]`) ?? null;
+  }
+
+  /** Patches the single .blame span in place; rows are never rebuilt (that would break a drag-selection). */
+  private syncBlame() {
+    if (this.shownBlame >= 0) this.rowEl(this.shownBlame)?.querySelector?.(".blame")?.remove();
+    this.shownBlame = -1;
+    if (!this.blame || !this.blameVisible(this.blame.line)) return;
+    const row = this.rowEl(this.blame.line);
+    if (!row) return;
+    row.insertAdjacentHTML("beforeend", `<span class="blame">${this.blame.html}</span>`);
+    this.shownBlame = this.blame.line;
   }
 
   private hunkAt(line: number): Hunk | undefined {
@@ -481,11 +514,13 @@ export class CodeView {
         cls += " flash";
         style = ` style="animation-delay:${-(now - this.flash.at) | 0}ms"`;
       }
-      const blame = this.blame && this.blame.line === i ? `<span class="blame">${this.blame.html}</span>` : "";
+      const blame = this.blameVisible(i) ? `<span class="blame">${this.blame.html}</span>` : "";
       html += `<div class="${cls}" data-n="${i}"${style}><span class="g">${i + 1}</span><span class="tx">${this.lineHtml(i)}</span>${blame}</div>`;
     }
     this.linesEl.style.transform = `translateY(${first * this.lh}px)`;
     this.linesEl.innerHTML = html;
+    const bl = this.blame?.line ?? -1;
+    this.shownBlame = bl >= first && bl < last && this.blameVisible(bl) ? bl : -1;
     this.restoreSelection();
   }
 
@@ -539,9 +574,13 @@ export class CodeView {
   }
 
   setActiveLine(n: number) {
+    const old = this.activeLine;
     this.activeLine = n;
     this.onActiveLine(n);
-    this.schedule();
+    if (old !== n) {
+      if (old >= 0) this.rowEl(old)?.classList?.remove?.("active");
+      this.rowEl(n)?.classList?.add?.("active");
+    }
   }
 
   /** Scrolls so that 0-based `line` is visible (centered when far away). */
