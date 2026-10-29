@@ -1,6 +1,6 @@
 // Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
 import type { CopyImageDeps } from "./copyimage.ts";
-import { fontFaceUrls, pairTrees, snapSize, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
+import { fontFaceUrls, isInlinableImage, pruneToRange, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import type { ImageLayout } from "./imagelayout.ts";
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -109,19 +109,32 @@ export const markdownSnapDeps: SnapDeps = {
   },
 };
 
-// Same-origin faces declared in styles.css (@font-face); one face per family is embedded.
+// Same-origin faces declared in styles.css (@font-face).
+const FACES: Record<string, { weight: string; style: string }> = {
+  "/fonts/JetBrainsMono-Regular.woff2": { weight: "400", style: "normal" },
+  "/fonts/JetBrainsMono-Bold.woff2": { weight: "700", style: "normal" },
+  "/fonts/JetBrainsMono-Italic.woff2": { weight: "400", style: "italic" },
+  "/fonts/JetBrainsMono-BoldItalic.woff2": { weight: "700", style: "italic" },
+  "/fonts/InterVariable.woff2": { weight: "100 900", style: "normal" },
+};
 const FONT_TABLE: Record<string, string[]> = {
-  "JetBrains Mono": ["/fonts/JetBrainsMono-Regular.woff2"],
+  "JetBrains Mono": Object.keys(FACES).filter((u) => u.includes("JetBrains")),
   Inter: ["/fonts/InterVariable.woff2"],
 };
 const PAD = 12;
 
-const elChildren = (n: Node) => ({ node: n, children: Array.from(n.childNodes).filter((c) => c.nodeType === 1).map(elChildren) });
-type ElTree = ReturnType<typeof elChildren>;
+type LiveNode = PNode & { node: Node; children: LiveNode[] };
+const liveTree = (n: Node, map: Map<Node, LiveNode>): LiveNode => {
+  const t: LiveNode = { node: n, children: [], ...(n.nodeType === 3 ? { text: n.nodeValue ?? "" } : {}) };
+  map.set(n, t);
+  if (n.nodeType === 1) for (const c of Array.from(n.childNodes)) if (c.nodeType === 1 || c.nodeType === 3) t.children.push(liveTree(c, map));
+  return t;
+};
 
 async function inlineImage(img: HTMLImageElement, live: HTMLImageElement) {
   try {
     const src = live.currentSrc || live.src;
+    if (!isInlinableImage(src, location.href)) throw new Error("cross-origin image");
     img.setAttribute("src", await blobToDataUri(await (await fetch(src)).blob()));
     img.removeAttribute("srcset");
   } catch {
@@ -130,40 +143,23 @@ async function inlineImage(img: HTMLImageElement, live: HTMLImageElement) {
   }
 }
 
-/** Clones the live subtree under the range's common ancestor, pruned to the range, as a fragment for snapshotMarkdown. */
+/** Builds a pruned copy of the live subtree under the range's common ancestor as a fragment for snapshotMarkdown. */
 export async function fragmentFromRange(range: Range, host: HTMLElement, bg: string): Promise<SnapFragment> {
   let root: Node = range.commonAncestorContainer;
   if (root.nodeType !== 1) root = root.parentNode ?? host;
-  const liveRoot = root as Element;
-  const cloneRoot = liveRoot.cloneNode(true) as Element;
-  const pairs = pairTrees(elChildren(liveRoot), elChildren(cloneRoot)) as [ElTree, ElTree][];
-  const liveOf = new Map<Node, Node>(pairs.map(([l, c]) => [c.node, l.node]));
-  // trim the partially selected boundary text nodes in the clone
-  const textClone = (liveText: Node): Text | null => {
-    const parent = liveText.parentNode && pairs.find(([l]) => l.node === liveText.parentNode)?.[1].node;
-    const idx = liveText.parentNode ? Array.prototype.indexOf.call(liveText.parentNode.childNodes, liveText) : -1;
-    return parent && idx >= 0 ? ((parent.childNodes[idx] as Text) ?? null) : null;
+  const map = new Map<Node, LiveNode>();
+  const tree = liveTree(root, map);
+  const pt = (node: Node, offset: number) => ({ node: map.get(node) ?? tree, offset });
+  const pruned = pruneToRange(tree, pt(range.startContainer, range.startOffset), pt(range.endContainer, range.endOffset));
+  const liveOf = new Map<Node, Node>();
+  const build = (p: PrunedNode<LiveNode>): Node => {
+    if (p.text !== undefined) return document.createTextNode(p.text);
+    const c = p.src.node.cloneNode(false);
+    liveOf.set(c, p.src.node);
+    for (const k of p.children) c.appendChild(build(k));
+    return c;
   };
-  const { startContainer: sc, endContainer: ec } = range;
-  if (ec.nodeType === 3) {
-    const t = textClone(ec);
-    if (t) t.data = t.data.slice(0, range.endOffset);
-  }
-  if (sc.nodeType === 3) {
-    const t = textClone(sc);
-    if (t) t.data = t.data.slice(range.startOffset);
-  }
-  // prune clone elements/text outside the range (children first so removal is safe)
-  for (const [l, c] of [...pairs].reverse()) {
-    if (c.node !== cloneRoot && !range.intersectsNode(l.node)) (c.node as Element).remove();
-  }
-  for (const [l, c] of pairs) {
-    for (const t of Array.from(c.node.childNodes)) {
-      if (t.nodeType !== 3) continue;
-      const lt = l.node.childNodes[Array.prototype.indexOf.call(c.node.childNodes, t)];
-      if (lt && !range.intersectsNode(lt)) c.node.removeChild(t);
-    }
-  }
+  const cloneRoot = build(pruned) as Element;
   const wrap = document.createElement("div");
   wrap.appendChild(cloneRoot);
   const kept = [wrap, ...Array.from(wrap.querySelectorAll("*"))];
@@ -180,12 +176,12 @@ export async function fragmentFromRange(range: Range, host: HTMLElement, bg: str
   await Promise.all(imgs);
   const size = snapSize(Array.from(range.getClientRects()), PAD);
   const faces = fontFaceUrls(`${getComputedStyle(host).fontFamily},JetBrains Mono,Inter`, FONT_TABLE);
-  const fontUrls: Record<string, string> = {};
-  for (const f of faces) fontUrls[f.family] ??= f.url;
+  const fontFaces = faces.map((f) => ({ ...f, ...FACES[f.url] }));
   return {
     html: new XMLSerializer().serializeToString(wrap),
     elements,
-    fontUrls,
+    fontUrls: {},
+    faces: fontFaces,
     width: Math.ceil(Math.max(size.width, 1)),
     height: Math.ceil(Math.max(size.height, 1)),
     bg,

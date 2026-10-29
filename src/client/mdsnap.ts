@@ -3,6 +3,8 @@
 export interface FontFace {
   family: string;
   uri: string;
+  weight?: string;
+  style?: string;
 }
 export interface SvgInput {
   html: string;
@@ -22,6 +24,8 @@ export interface SnapFragment {
   html: string;
   elements: unknown[];
   fontUrls: Record<string, string>;
+  /** Extra faces of the same families (weight/style variants), embedded alongside `fontUrls`. */
+  faces?: { family: string; url: string; weight?: string; style?: string }[];
   width: number;
   height: number;
   bg: string;
@@ -31,7 +35,7 @@ export interface SnapFragment {
 const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function buildSvg(i: SvgInput): string {
-  const faces = i.fonts.map((f) => `@font-face{font-family:"${esc(f.family)}";src:url("${esc(f.uri)}")}`).join("");
+  const faces = i.fonts.map((f) => `@font-face{font-family:"${esc(f.family)}";src:url("${esc(f.uri)}")${f.weight ? `;font-weight:${esc(f.weight)}` : ""}${f.style ? `;font-style:${esc(f.style)}` : ""}}`).join("");
   const rules = Object.entries(i.styles)
     .map(([k, css]) => `${/^\d+$/.test(k) ? `[data-snap="${k}"]` : esc(k)}{${esc(cssSafe(css))}}`)
     .join("");
@@ -58,6 +62,15 @@ export async function snapshotMarkdown(deps: SnapDeps, f: SnapFragment): Promise
           fonts.push({ family, uri: await deps.loadFont(url) });
         } catch {
           /* render with a fallback font */
+        }
+      }),
+    );
+    await Promise.all(
+      (f.faces ?? []).map(async (face) => {
+        try {
+          fonts.push({ family: face.family, uri: await deps.loadFont(face.url), weight: face.weight, style: face.style });
+        } catch {
+          /* render with a fallback face */
         }
       }),
     );
@@ -114,4 +127,72 @@ export function pairTrees<T extends TreeNode, U extends TreeNode>(live: T, clone
 /** Makes CSS text safe to place in a rule body: no braces, no markup openers. */
 export function cssSafe(css: string): string {
   return css.replace(/[{}<]/g, "");
+}
+
+/** Abstract node: a text node has `text`, an element has `children` (empty for leaves such as img/br). */
+export interface PNode {
+  text?: string;
+  children: PNode[];
+}
+export interface RangePoint<N> {
+  node: N;
+  offset: number;
+}
+export interface PrunedNode<N> {
+  src: N;
+  /** Trimmed text, for text nodes only. */
+  text?: string;
+  children: PrunedNode<N>[];
+}
+
+/**
+ * Pure: computes which nodes of the tree under `root` lie inside the range, from the original (unmutated) tree.
+ * Text at the boundaries is trimmed; elements with no kept descendants are dropped; the root is always kept.
+ */
+export function pruneToRange<N extends PNode>(root: N, start: RangePoint<N>, end: RangePoint<N>): PrunedNode<N> {
+  // pre-order index of every node, plus the index just past each subtree
+  const index = new Map<PNode, number>();
+  const after = new Map<PNode, number>();
+  let counter = 0;
+  const walk = (n: PNode) => {
+    index.set(n, counter++);
+    for (const c of n.children) walk(c);
+    after.set(n, counter);
+  };
+  walk(root);
+  // a boundary is (node index, offset inside that node); element offsets are child indexes
+  const point = (p: RangePoint<N>): [number, number] => {
+    if (p.node.text !== undefined) return [index.get(p.node) ?? 0, p.offset];
+    const child = p.node.children[p.offset];
+    return [child ? index.get(child)! : after.get(p.node)!, 0];
+  };
+  const [si, so] = point(start);
+  const [ei, eo] = point(end);
+  const build = (n: N, isRoot: boolean): PrunedNode<N> | null => {
+    const i = index.get(n)!;
+    if (n.text !== undefined) {
+      const from = i < si ? Infinity : i === si ? so : 0;
+      const to = i > ei ? -Infinity : i === ei ? eo : n.text.length;
+      const text = n.text.slice(Math.max(from, 0), Math.max(to, 0));
+      return from < to && text ? { src: n, text, children: [] } : null;
+    }
+    if (n.children.length === 0) {
+      const inside = (i > si || (i === si && so === 0)) && (i < ei || (i === ei && eo > 0));
+      return inside || isRoot ? { src: n, children: [] } : null;
+    }
+    const kids = n.children.map((c) => build(c as N, false)).filter((k): k is PrunedNode<N> => k !== null);
+    return kids.length > 0 || isRoot ? { src: n, children: kids } : null;
+  };
+  return build(root, true)!;
+}
+
+/** True when `src` resolves (against `base`) to the page origin or is an inline data: URI; anything else is not fetched. */
+export function isInlinableImage(src: string, base: string): boolean {
+  try {
+    const u = new URL(src, base);
+    if (u.protocol === "data:") return true;
+    return (u.protocol === "http:" || u.protocol === "https:") && u.origin === new URL(base).origin;
+  } catch {
+    return false;
+  }
 }
