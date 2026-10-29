@@ -1207,6 +1207,7 @@ svg {
   }
 }
 .trunc {
+  user-select: none;
   color: var(--fg-faint);
   font-style: italic;
 }
