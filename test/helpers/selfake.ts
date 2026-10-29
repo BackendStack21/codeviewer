@@ -125,6 +125,7 @@ export async function loadCodeView(): Promise<Env> {
     disconnect() {}
   };
   g.requestAnimationFrame = (cb: () => void) => (raf.push(cb), raf.length);
+  g.cancelAnimationFrame = (id: number) => void (raf[id - 1] = () => {});
   g.getComputedStyle = () => ({ getPropertyValue: () => "monospace" });
   const make = dom.document.createElement.bind(dom.document);
   dom.document.createElement = (tag: string) => {
