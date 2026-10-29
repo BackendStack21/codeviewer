@@ -49,7 +49,7 @@ export class SearchView {
   private gen = 0;
   private ac: AbortController | null = null;
   private groups: Group[] = [];
-  private flat: { path: string; m: SearchMatch }[] = [];
+  private flat: { path: string; m: SearchMatch; g: number }[] = [];
   private done: Extract<SearchEvent, { t: "done" }> | null = null;
   private error: string | null = null;
   private running = false;
@@ -105,7 +105,7 @@ export class SearchView {
         this.move(e.key === "ArrowDown" ? 1 : -1);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        const hit = this.flat[this.sel];
+        const hit = this.visible(this.sel) ? this.flat[this.sel] : undefined;
         if (hit) this.onOpen(hit.path, hit.m.line, hit.m.col, hit.m.len);
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -126,6 +126,7 @@ export class SearchView {
       const g = head ? this.groups[Number(head.dataset.f)] : null;
       if (g) {
         g.collapsed = !g.collapsed;
+        if (g.collapsed && this.flat[this.sel]?.g === Number(head!.dataset.f)) this.sel = this.nearestVisible(this.sel);
         this.render();
       }
     });
@@ -139,10 +140,28 @@ export class SearchView {
 
   /** Moves the selection by one row without opening it (clamped at both ends). */
   move(dir: 1 | -1): void {
-    if (!this.flat.length) return;
-    this.sel = Math.max(0, Math.min(this.flat.length - 1, this.sel + dir));
+    const vis: number[] = [];
+    this.flat.forEach((_, i) => this.visible(i) && vis.push(i));
+    if (!vis.length) return;
+    const at = vis.indexOf(this.sel);
+    this.sel = at < 0 ? (dir === 1 ? vis[0]! : vis[vis.length - 1]!) : vis[Math.max(0, Math.min(vis.length - 1, at + dir))]!;
     this.render();
     this.results.querySelector(".sv-row.sel")?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  private visible(i: number): boolean {
+    const f = this.flat[i];
+    return !!f && !this.groups[f.g]!.collapsed;
+  }
+
+  /** The visible row closest to `i` (earlier one on a tie), or -1 when no row is visible. */
+  private nearestVisible(i: number): number {
+    let best = -1;
+    for (let k = 0; k < this.flat.length; k++) {
+      if (!this.visible(k)) continue;
+      if (best < 0 || Math.abs(k - i) < Math.abs(best - i)) best = k;
+    }
+    return best;
   }
 
   /** Selects the next/previous result (wrapping) and opens it; false when there are no results. */
@@ -152,6 +171,11 @@ export class SearchView {
     this.sel = this.sel < 0 ? (dir === 1 ? 0 : n - 1) : (this.sel + dir + n) % n;
     this.render();
     this.results.querySelector(".sv-row.sel")?.scrollIntoView?.({ block: "nearest" });
+    const grp = this.groups[this.flat[this.sel]!.g]!;
+    if (grp.collapsed) {
+      grp.collapsed = false;
+      this.render();
+    }
     const hit = this.flat[this.sel]!;
     this.onOpen(hit.path, hit.m.line, hit.m.col, hit.m.len);
     return true;
@@ -277,7 +301,7 @@ export class SearchView {
       total += count;
       html += `<div class="sv-file${g.collapsed ? " collapsed" : ""}" data-f="${gi}" aria-expanded="${!g.collapsed}"><span class="sv-name">${safe(g.path.slice(slash + 1))}</span>${dir}<span class="sv-count">${count}</span></div>`;
       for (const m of g.matches) {
-        const i = this.flat.push({ path: g.path, m }) - 1;
+        const i = this.flat.push({ path: g.path, m, g: gi }) - 1;
         if (g.collapsed) continue;
         const pv = m.preview;
         const on = i === this.sel;
