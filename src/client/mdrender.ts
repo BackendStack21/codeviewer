@@ -20,7 +20,7 @@ function plainText(nodes: Inline[]): string {
   let out = "";
   for (const n of nodes) {
     if (n.type === "text" || n.type === "codespan") out += n.value;
-    else if (n.type === "em" || n.type === "strong" || n.type === "link") out += plainText(n.children);
+    else if (n.type === "em" || n.type === "strong" || n.type === "del" || n.type === "link") out += plainText(n.children);
     else if (n.type === "image") out += n.alt;
   }
   return out;
@@ -59,7 +59,8 @@ function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
         parent.append(n.value);
         break;
       case "em":
-      case "strong": {
+      case "strong":
+      case "del": {
         const el = document.createElement(n.type);
         parent.append(el);
         inline(el, n.children, b);
@@ -122,6 +123,31 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
         blocks(el, blk.children, b);
         break;
       }
+      case "table": {
+        const table = document.createElement("table");
+        parent.append(table);
+        const thead = document.createElement("thead");
+        const tbody = document.createElement("tbody");
+        table.append(thead, tbody);
+        const row = (host: HTMLElement, cells: Inline[][], tag: "th" | "td") => {
+          const tr = document.createElement("tr");
+          host.append(tr);
+          for (let k = 0; k < cells.length; k++) {
+            if (!b.take(2)) return;
+            const c = document.createElement(tag);
+            const a = blk.align[k];
+            if (a) c.className = "md-align-" + a;
+            tr.append(c);
+            inline(c, cells[k]!, b);
+          }
+        };
+        row(thead, blk.head, "th");
+        for (const r of blk.rows) {
+          if (b.over || !b.take()) break;
+          row(tbody, r, "td");
+        }
+        break;
+      }
       case "list": {
         const el = document.createElement(blk.ordered ? "ol" : "ul");
         if (blk.ordered && blk.start !== 1 && blk.start !== null) el.setAttribute("start", String(blk.start));
@@ -130,6 +156,15 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
           if (!b.take()) return;
           const li = document.createElement("li");
           el.append(li);
+          if (item.checked !== undefined) {
+            li.className = "md-task";
+            const box = document.createElement("input");
+            box.setAttribute("type", "checkbox");
+            box.setAttribute("disabled", "");
+            if (item.checked) box.setAttribute("checked", "");
+            li.append(box);
+            b.take();
+          }
           blocks(li, item.children, b, blk.tight);
         }
         break;

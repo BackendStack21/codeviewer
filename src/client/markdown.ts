@@ -7,7 +7,7 @@ export interface Text {
   value: string;
 }
 export interface Emphasis {
-  type: "em" | "strong";
+  type: "em" | "strong" | "del";
   children: Inline[];
 }
 export interface CodeSpan {
@@ -54,6 +54,8 @@ export interface BlockQuote {
 }
 export interface ListItem {
   type: "item";
+  /** GFM task list state: true for `[x]`, false for `[ ]`, absent for a plain item. */
+  checked?: boolean;
   children: Block[];
 }
 export interface List {
@@ -64,7 +66,14 @@ export interface List {
   tight: boolean;
   items: ListItem[];
 }
-export type Block = Heading | Paragraph | ThematicBreak | CodeBlock | BlockQuote | List;
+/** GFM table: `head` and every row have exactly `align.length` cells. */
+export interface Table {
+  type: "table";
+  align: ("left" | "center" | "right" | null)[];
+  head: Inline[][];
+  rows: Inline[][][];
+}
+export type Block = Heading | Paragraph | ThematicBreak | CodeBlock | BlockQuote | List | Table;
 
 /** True for `.md` / `.markdown` paths, case-insensitive. */
 export function isMarkdown(path: string): boolean {
@@ -78,6 +87,7 @@ const MAX_LINE = 10_000; // inline characters per line before the text is left l
 const MAX_DEFS = 10_000; // link reference definitions
 const MAX_SCAN = 1500; // characters scanned for a link destination/title
 const MAX_LABEL = 999;
+const MAX_COLS = 200; // table columns; wider tables stay a paragraph
 
 const isWs = (c: string | undefined) => c === " " || c === "\t";
 
@@ -333,12 +343,52 @@ function parseDef(line: string): { label: string; href: string; title: string | 
 // Block pass
 
 interface Pending {
-  node: Heading | Paragraph;
+  set: (children: Inline[]) => void;
   text: string;
 }
 interface Ctx {
   defs: Defs;
   pending: Pending[];
+}
+
+/** Splits a table row on unescaped `|`; `\|` becomes `|`. Stops after MAX_COLS + 1 cells. */
+function splitRow(line: string): string[] {
+  let s = line.trim();
+  if (s[0] === "|") s = s.slice(1);
+  const cells: string[] = [];
+  let cur = "";
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i]!;
+    if (c === "\\" && i + 1 < s.length) {
+      cur += s[i + 1] === "|" ? "|" : c + s[i + 1];
+      i += 2;
+      continue;
+    }
+    if (c === "|") {
+      cells.push(cur.trim());
+      cur = "";
+      if (cells.length > MAX_COLS) return cells;
+    } else cur += c;
+    i++;
+  }
+  if (cur.trim() || !s.endsWith("|") || s.endsWith("\\|")) cells.push(cur.trim());
+  return cells;
+}
+
+/** Column alignments of a GFM delimiter row, or null if the line is not one. */
+function delimRow(line: string): Table["align"] | null {
+  if (indent(line) > 3 || !/^[-:| \t]+$/.test(line) || !line.includes("-")) return null;
+  const cells = splitRow(line);
+  if (!cells.length || cells.length > MAX_COLS) return null;
+  const align: Table["align"] = [];
+  for (const c of cells) {
+    if (!/^:?-+:?$/.test(c)) return null;
+    const l = c[0] === ":";
+    const r = c[c.length - 1] === ":";
+    align.push(l && r ? "center" : l ? "left" : r ? "right" : null);
+  }
+  return align;
 }
 
 interface FenceTrack {
@@ -365,7 +415,7 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
     blocks.push(b);
   };
   const addText = (b: Heading | Paragraph, text: string) => {
-    ctx.pending.push({ node: b, text });
+    ctx.pending.push({ set: (c) => (b.children = c), text });
     blocks.push(b);
   };
   const flush = () => {
@@ -405,6 +455,32 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
         para = [];
         i++;
         continue;
+      }
+      const al = delimRow(line);
+      if (al) {
+        const head = splitRow(para[para.length - 1]!);
+        if (head.length === al.length) {
+          para.pop();
+          if (para.length) flush();
+          else if (paraBlank && blocks.length) gap = true;
+          const tbl: Table = { type: "table", align: al, head: [], rows: [] };
+          const cell = (txt: string, into: Inline[][]) => {
+            const k = into.length;
+            into.push([]);
+            ctx.pending.push({ set: (c) => (into[k] = c), text: txt });
+          };
+          for (const h of head) cell(h, tbl.head);
+          i++;
+          while (i < n && !isBlank(lines[i]!) && !startsBlock(lines[i]!, canNest)) {
+            const cells = splitRow(lines[i]!);
+            const row: Inline[][] = [];
+            for (let k = 0; k < al.length; k++) cell(cells[k] ?? "", row);
+            tbl.rows.push(row);
+            i++;
+          }
+          blocks.push(tbl);
+          continue;
+        }
       }
       if (!startsBlock(line, canNest)) {
         para.push(line.trimStart());
@@ -481,6 +557,8 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
         const cur = listMarker(lines[i]!);
         if (!cur || cur.key !== m.key || isHr(lines[i]!)) break;
         const itemLines = [lines[i]!.slice(cur.offset)];
+        const task = /^\[([ xX])\][ \t]/.exec(itemLines[0]!);
+        if (task) itemLines[0] = itemLines[0]!.slice(4);
         const t: FenceTrack = { f: null };
         track(t, itemLines[0]!);
         i++;
@@ -505,7 +583,7 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
         }
         const r = parseBlocks(itemLines, depth + 1, ctx);
         if (r.gap) loose = true;
-        items.push({ type: "item", children: r.blocks });
+        items.push(task ? { type: "item", checked: task[1] !== " ", children: r.blocks } : { type: "item", children: r.blocks });
         const nxt = i < n ? listMarker(lines[i]!) : null;
         if (nxt && nxt.key === m.key && !isHr(lines[i]!)) {
           if (blanks > 0) loose = true;
@@ -766,8 +844,8 @@ function parseInline(s: string, defs: Defs): Inline[] {
         const d = depthOf(kids);
         if (d + 1 > MAX_DEPTH) found = null;
         else {
-          const use = closer.n >= 2 && found.n >= 2 ? 2 : 1;
-          const en = nodeOf({ type: use === 2 ? "strong" : "em", children: toInline(kids) }, d + 1);
+          const use = closer.ch === "~" || (closer.n >= 2 && found.n >= 2) ? 2 : 1;
+          const en = nodeOf({ type: closer.ch === "~" ? "del" : use === 2 ? "strong" : "em", children: toInline(kids) }, d + 1);
           found.next = en;
           en.prev = found;
           en.next = closer;
@@ -871,9 +949,15 @@ function parseInline(s: string, defs: Defs): Inline[] {
         break;
       }
       case 42:
-      case 95: {
+      case 95:
+      case 126: {
+        // `~~` (exactly two) is a strikethrough delimiter with the same flanking rules as `*`.
         let e = i;
         while (s.charCodeAt(e) === c) e++;
+        if (c === 126 && e - i !== 2) {
+          i = e;
+          break;
+        }
         flush(i);
         const prev = i > 0 ? s[i - 1]! : "\n";
         const next = e < len ? s[e]! : "\n";
@@ -884,10 +968,10 @@ function parseInline(s: string, defs: Defs): Inline[] {
         const left = !wsN && (!puN || wsP || puP);
         const right = !wsP && (!puP || wsN || puN);
         const x = mk(2);
-        x.ch = c === 42 ? "*" : "_";
+        x.ch = c === 42 ? "*" : c === 95 ? "_" : "~";
         x.n = x.orig = e - i;
-        x.open = c === 42 ? left : left && (!right || puP);
-        x.close = c === 42 ? right : right && (!left || puN);
+        x.open = c !== 95 ? left : left && (!right || puP);
+        x.close = c !== 95 ? right : right && (!left || puN);
         append(x);
         x.dprev = dtail;
         if (dtail) dtail.dnext = x;
@@ -1036,8 +1120,8 @@ export function parseMarkdown(src: string): Block[] {
   const lines = src.split(/\r\n|\r|\n/).map(expandTabs);
   const ctx: Ctx = { defs: new Map(), pending: [] };
   const { blocks } = parseBlocks(lines, 0, ctx);
-  for (const { node, text } of ctx.pending) {
-    node.children = !text ? [] : tooLong(text) ? [{ type: "text", value: text }] : parseInline(text, ctx.defs);
+  for (const { set, text } of ctx.pending) {
+    set(!text ? [] : tooLong(text) ? [{ type: "text", value: text }] : parseInline(text, ctx.defs));
   }
   return blocks;
 }
