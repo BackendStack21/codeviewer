@@ -97,3 +97,92 @@ export function matchText(text: string, re: RegExp, maxPerFile = 100): MatchResu
   }
   return { matches, more };
 }
+
+// ───────────── SL02 scaffolding: scanner + worker + endpoint (stubs, filled in by implement) ─────────────
+
+/** Wall-clock budget for one search before the worker is terminated. */
+export const SEARCH_DEADLINE_MS = 10_000;
+/** Total matches streamed before the search stops with truncated === "matches". */
+export const MAX_TOTAL_MATCHES = 2000;
+
+export type SearchEvent =
+  | { t: "file"; path: string; matches: SearchMatch[]; more?: number }
+  | { t: "done"; files: number; matches: number; skipped: number; truncated: false | "matches" | "time"; ms: number };
+
+export interface ScanRequest {
+  root: string;
+  files: string[];
+  q: string;
+  opts: SearchOptions;
+}
+
+/** Runs one search, emitting events; resolves when finished or cancelled. Injectable for tests. */
+export type Scanner = (req: ScanRequest, signal: AbortSignal, emit: (e: SearchEvent) => void) => Promise<void>;
+
+/** Messages the worker posts back to the main thread. */
+export type WorkerMsg =
+  | { t: "file"; path: string; matches: SearchMatch[]; more?: number }
+  | { t: "skip" }
+  | { t: "done"; files: number; matches: number; skipped: number; truncated: false | "matches" };
+
+export interface WorkerJob {
+  req: ScanRequest;
+  /** Int32Array over this buffer: element 0 becomes 1 when the search is cancelled. */
+  cancel: SharedArrayBuffer;
+}
+
+/**
+ * Real scanner: every pattern runs in a fresh Worker, so a runaway regex can be killed with
+ * terminate() and never touches the main thread. Resolves when finished, cancelled or timed out.
+ */
+export function createWorkerScanner(deadlineMs: number = SEARCH_DEADLINE_MS): Scanner {
+  return (req, signal, emit) =>
+    new Promise<void>((resolve, reject) => {
+      if (signal.aborted) return resolve();
+      const t0 = performance.now();
+      const cancel = new SharedArrayBuffer(4);
+      const flag = new Int32Array(cancel);
+      const worker = new Worker(new URL("./search.worker.ts", import.meta.url));
+      let files = 0;
+      let matches = 0;
+      let skipped = 0;
+      let settled = false;
+      const finish = (err?: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        signal.removeEventListener("abort", onAbort);
+        worker.terminate();
+        if (err) reject(new Error("search failed"));
+        else resolve();
+      };
+      const deadline = setTimeout(() => {
+        if (settled) return;
+        emit({ t: "done", files, matches, skipped, truncated: "time", ms: Math.round(performance.now() - t0) });
+        finish();
+      }, deadlineMs);
+      const onAbort = () => {
+        Atomics.store(flag, 0, 1);
+        finish();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      worker.onmessage = (e: MessageEvent<WorkerMsg>) => {
+        if (settled) return;
+        const m = e.data;
+        if (m.t === "file") {
+          files++;
+          matches += m.matches.length;
+          emit(m.more ? { t: "file", path: m.path, matches: m.matches, more: m.more } : { t: "file", path: m.path, matches: m.matches });
+        } else if (m.t === "skip") skipped++;
+        else if (m.t === "done") {
+          emit({ ...m, ms: Math.round(performance.now() - t0) });
+          finish();
+        }
+      };
+      worker.onerror = (ev) => {
+        ev.preventDefault?.();
+        finish(new Error("worker"));
+      };
+      worker.postMessage({ req, cancel } satisfies WorkerJob);
+    });
+}

@@ -10,6 +10,7 @@ import { loadAssets, FONTS, type Asset } from "./assets.ts";
 import { Settings } from "./settings.ts";
 import { Git } from "./git.ts";
 import { Updater } from "./update.ts";
+import { compileQuery, createWorkerScanner, type SearchEvent } from "./search.ts";
 
 import pkg from "../../package.json" with { type: "json" };
 
@@ -27,6 +28,10 @@ export interface ServeOptions {
   relaunch?: { available(): boolean; run(): void };
   /** Injected for tests; defaults to the real updater. */
   updater?: Updater;
+  /** Injected for tests: replaces the worker-backed search scanner. */
+  searchScanner?: import("./search.ts").Scanner;
+  /** Injected for tests: overrides SEARCH_DEADLINE_MS. */
+  searchDeadlineMs?: number;
 }
 
 type EventsSocketData = { kind: "events" };
@@ -123,6 +128,71 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       return new Response(a.gzip as BodyInit, { headers: h });
     }
     return new Response(a.body, { headers: h });
+  };
+
+  const scanner = opts.searchScanner ?? createWorkerScanner(opts.searchDeadlineMs);
+  let activeSearch: AbortController | null = null;
+
+  /** GET /api/search: NDJSON stream; the newest search cancels the one before it. */
+  const search = async (req: Request, url: URL): Promise<Response> => {
+    const sp = url.searchParams;
+    const q = sp.get("q") ?? "";
+    const o = { regex: sp.get("regex") === "1", case: sp.get("case") === "1", word: sp.get("word") === "1" };
+    const c = compileQuery(q, o);
+    if (!c.ok) return fail(400, c.error);
+
+    activeSearch?.abort();
+    const ac = new AbortController();
+    activeSearch = ac;
+    const onReqAbort = () => ac.abort();
+    req.signal.addEventListener("abort", onReqAbort, { once: true });
+
+    const lines: string[] = [];
+    let finished = false;
+    let failed = false;
+    let wake: (() => void) | null = null;
+    const poke = () => {
+      const w = wake;
+      wake = null;
+      w?.();
+    };
+    const emit = (e: SearchEvent) => {
+      lines.push(JSON.stringify(e) + "\n");
+      poke();
+    };
+    const run = (async () => {
+      const list = (await index.get()).split("\n").filter(Boolean);
+      await scanner({ root: opts.root, files: list, q, opts: o }, ac.signal, emit);
+    })()
+      .catch(() => {
+        failed = true;
+      })
+      .finally(() => {
+        finished = true;
+        if (activeSearch === ac) activeSearch = null;
+        req.signal.removeEventListener("abort", onReqAbort);
+        poke();
+      });
+
+    // A failure before any output becomes a clean 500 with a fixed string.
+    while (!lines.length && !finished) await new Promise<void>((r) => (wake = r));
+    if (!lines.length && failed) return fail(500, "search failed");
+
+    const enc = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async pull(ctl) {
+        while (!lines.length && !finished) await new Promise<void>((r) => (wake = r));
+        if (lines.length) return ctl.enqueue(enc.encode(lines.splice(0).join("")));
+        ctl.close();
+      },
+      cancel() {
+        ac.abort();
+      },
+    });
+    void run;
+    return new Response(stream, {
+      headers: securityHeaders(new Headers({ "content-type": "application/x-ndjson", "cache-control": "no-store" })),
+    });
   };
 
   const relParam = (url: URL) => url.searchParams.get("path") ?? "";
@@ -256,6 +326,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           h.set("content-length", String(size));
           return new Response(stream, { headers: h });
         }
+
+        case "/api/search":
+          return search(req, url);
 
         case "/api/index":
           return new Response(await index.get(), {
