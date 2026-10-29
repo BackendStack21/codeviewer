@@ -158,3 +158,15 @@ export function dismissable(
     window.removeEventListener("wheel", onAway, true);
   };
 }
+
+/** Control characters and bidi overrides that must never be shown raw (Trojan Source). */
+// eslint-disable-next-line no-control-regex
+export const HIDDEN = /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g;
+
+/** Replaces every HIDDEN character with a visible `\xNN` / `\uNNNN` escape. */
+export function showHidden(s: string): string {
+  return s.replace(HIDDEN, (c) => {
+    const n = c.charCodeAt(0);
+    return n < 256 ? `\\x${n.toString(16).padStart(2, "0")}` : `\\u${n.toString(16).padStart(4, "0")}`;
+  });
+}
