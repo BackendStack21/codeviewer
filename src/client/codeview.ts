@@ -171,7 +171,7 @@ export class CodeView {
     // A primary press outside the lines (not on the context menu) makes the model range stale.
     document.addEventListener("mousedown", (e) => {
       const t = e.target as HTMLElement | null;
-      if (e.button || e.ctrlKey || !this.sel || this.linesEl.contains(t)) return;
+      if (e.button || e.ctrlKey || !this.sel || this.el.contains(t) || this.linesEl.contains(t)) return;
       if (t?.closest?.(".ctx-menu")) return;
       this.sel = null;
       this.applied = null;
@@ -262,6 +262,7 @@ export class CodeView {
     const a = pos(ds.anchorNode, ds.anchorOffset);
     const f = pos(ds.focusNode, ds.focusOffset);
     if (!a && !f) {
+      if (this.el.contains(ds.anchorNode) || this.el.contains(ds.focusNode)) return; // still inside the view (e.g. rows re-rendered)
       this.sel = null; // a real selection elsewhere replaces the stale range
       this.applied = null;
       return;
