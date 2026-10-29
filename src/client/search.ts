@@ -57,6 +57,7 @@ export class SearchView {
   private started = false;
   private sel = -1;
   private stale = false;
+  private pending = new Set<string>();
   private staleBar: HTMLElement;
 
   constructor(opts: SearchViewOptions = {}) {
@@ -189,8 +190,13 @@ export class SearchView {
 
   /** A file changed on disk: when it is in the results (or `many` changed), offer a Refresh. */
   markStale(paths: string[], many = false): void {
-    if (!this.started || this.error || this.running) return;
-    if (!many && !this.groups.some((g) => paths.includes(g.path))) return;
+    if (!this.started || this.error) return;
+    if (many || this.groups.some((g) => paths.includes(g.path))) return this.showStale();
+    // Still streaming: the path may arrive later in this stream, so remember it until the end.
+    if (this.running) for (const p of paths) this.pending.add(p);
+  }
+
+  private showStale() {
     this.stale = true;
     this.staleBar.hidden = false;
   }
@@ -201,6 +207,7 @@ export class SearchView {
   }
 
   private clearStale() {
+    this.pending.clear();
     this.stale = false;
     this.staleBar.hidden = true;
   }
@@ -294,6 +301,8 @@ export class SearchView {
         clearTimeout(this.renderTimer);
         this.renderTimer = 0;
         this.progress.hidden = true;
+        if (!this.error && this.groups.some((g) => this.pending.has(g.path))) this.showStale();
+        this.pending.clear();
         this.render();
       }
     }
@@ -314,7 +323,9 @@ export class SearchView {
     if (!this.groups.length) {
       this.results.innerHTML = this.running
         ? `<div class="sv-msg">Searching…</div>`
-        : `<div class="sv-msg">No results for "${safe(this.ranQ)}"</div>${skipped}`;
+        : d
+          ? `<div class="sv-msg">No results for "${safe(this.ranQ)}"</div>${skipped}`
+          : `<div class="sv-msg">Search ended early - no results</div>`;
       return;
     }
     let total = 0;
