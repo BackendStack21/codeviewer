@@ -64,17 +64,19 @@ export function layoutImage(lines: string[], tokens: Span[][], theme: ImageTheme
     const line = lines[n] ?? "";
     const toks: (string | undefined)[] = [];
     for (const [a, b, t] of tokens[n] ?? []) for (let k = a; k < b; k++) toks[k] = t;
-    const c0 = row === 0 ? start.col : 0;
-    const c1 = row === rows - 1 ? end.col : line.length;
+    const c0 = Math.min(row === 0 ? start.col : 0, line.length);
+    const c1 = Math.min(row === rows - 1 ? end.col : line.length, line.length);
     const y = padding + row * lineH;
     let col = 0;
+    for (let i = 0; i < c0; i++) col += line[i] === "\t" ? tabSize - (col % tabSize) : 1;
+    const base = col;
     let run = "";
     let runCol = 0;
     let runTok: string | undefined;
     const flush = () => {
       if (!run) return;
       const st = (runTok && theme.tokenStyles?.[runTok]) || {};
-      text.push({ t: "text", x: padding + runCol * charW, y, text: run, fill: (runTok && theme.tokenColors[runTok]) || theme.fg, bold: !!st.bold, italic: !!st.italic });
+      text.push({ t: "text", x: padding + (runCol - base) * charW, y, text: run, fill: (runTok && theme.tokenColors[runTok]) || theme.fg, bold: !!st.bold, italic: !!st.italic });
       run = "";
     };
     for (let i = c0; i < c1; i++) {
@@ -88,7 +90,7 @@ export function layoutImage(lines: string[], tokens: Span[][], theme: ImageTheme
       col += w;
     }
     flush();
-    cols = Math.max(cols, col);
+    cols = Math.max(cols, col - base);
   }
   if (cols > MAX_COLS) return { tooLarge: true };
   const width = 2 * padding + cols * charW;
