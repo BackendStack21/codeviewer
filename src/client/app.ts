@@ -221,6 +221,19 @@ class App {
       if (t) this.trackRecent(t.path);
     };
     this.editor.onStatus = (s) => this.renderStatus(s);
+    this.editor.onOpenLink = async (p) => {
+      const type = await api.stat(p);
+      if (type === "file") {
+        await this.openFile(p, { pin: true });
+        return true;
+      }
+      if (type === "dir") {
+        if (!this.L.sidebar) this.toggleSidebar(true);
+        await this.tree.reveal(p + "/");
+        return true;
+      }
+      return false;
+    };
     this.editor.onReveal = (p) => {
       if (!L.sidebar) this.toggleSidebar();
       void this.tree.reveal(p);

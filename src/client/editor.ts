@@ -68,6 +68,11 @@ export class Editor {
   onActive: (tab: Tab | null) => void = () => {};
   onStatus: (s: StatusInfo | null) => void = () => {};
   onReveal: (path: string) => void = () => {};
+  /** Opens a repo-relative link from a Markdown preview; false when the target does not exist. */
+  onOpenLink: (path: string) => Promise<boolean> = async (p) => {
+    await this.open(p, { pin: true });
+    return true;
+  };
   /** Called whenever the set of tabs or the active tab changes. */
   onChange: () => void = () => {};
   git: GitState | null = null;
@@ -156,7 +161,7 @@ export class Editor {
         if (plan.view === "md") {
           if (plan.reuse) tab.md!.setText(f.text);
           else {
-            tab.md = new MarkdownView(f.text, this.fontSize);
+            tab.md = new MarkdownView(f.text, this.fontSize, { path: tab.path, onOpen: (p) => this.onOpenLink(p) });
             tab.el.replaceChildren(tab.md.el);
             tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
           }

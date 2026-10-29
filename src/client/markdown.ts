@@ -649,6 +649,44 @@ function labelEnd(s: string, p: number): number {
   return -1;
 }
 
+/** `<scheme:...>` or `<user@host>` starting at s[i] === "<". */
+function angleAutolink(s: string, i: number): { href: string; label: string; end: number } | null {
+  const lim = Math.min(s.length, i + 2000);
+  let k = i + 1;
+  while (k < lim && s[k] !== ">" && s[k] !== "<" && s[k]! > " ") k++;
+  if (s[k] !== ">" || k === i + 1) return null;
+  const body = s.slice(i + 1, k);
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]{1,31}:/.test(body)) return { href: body, label: body, end: k + 1 };
+  if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(body)) return { href: "mailto:" + body, label: body, end: k + 1 };
+  return null;
+}
+
+/** A bare http(s) URL at s[i], without trailing punctuation; null when there is none. */
+function bareUrl(s: string, i: number): string | null {
+  const m = /^https?:\/\//i.exec(s.slice(i, i + 8));
+  if (!m) return null;
+  const lim = Math.min(s.length, i + 2000);
+  let k = i + m[0].length;
+  while (k < lim && s[k]! > " " && s[k] !== "<") k++;
+  let end = k;
+  for (;;) {
+    const ch = s[end - 1]!;
+    if (end - 1 < i + m[0].length) return null;
+    if ("?!.,:*_~'\";".includes(ch)) end--;
+    else if (ch === ")") {
+      let open = 0;
+      let close = 0;
+      for (let q = i; q < end; q++) {
+        if (s[q] === "(") open++;
+        else if (s[q] === ")") close++;
+      }
+      if (close > open) end--;
+      else break;
+    } else break;
+  }
+  return end > i + m[0].length ? s.slice(i, end) : null;
+}
+
 function parseInline(s: string, defs: Defs): Inline[] {
   let head: N | null = null;
   let tail: N | null = null;
@@ -930,6 +968,29 @@ function parseInline(s: string, defs: Defs): Inline[] {
         i = run = i + 1;
         break;
       }
+      case 60: {
+        const a = brackets.length ? null : angleAutolink(s, i);
+        if (!a) {
+          i++;
+          break;
+        }
+        flush(i);
+        append(nodeOf({ type: "link", href: a.href, title: null, children: [{ type: "text", value: a.label }] }, 1));
+        i = run = a.end;
+        break;
+      }
+      case 104:
+      case 72: {
+        const u = brackets.length || (i > 0 && /[\p{L}\p{N}_]/u.test(s[i - 1]!)) ? null : bareUrl(s, i);
+        if (!u) {
+          i++;
+          break;
+        }
+        flush(i);
+        append(nodeOf({ type: "link", href: u, title: null, children: [{ type: "text", value: u }] }, 1));
+        i = run = i + u.length;
+        break;
+      }
       case 38: {
         const e = decodeEntity(s, i);
         if (e) {
@@ -979,4 +1040,99 @@ export function parseMarkdown(src: string): Block[] {
     node.children = !text ? [] : tooLong(text) ? [{ type: "text", value: text }] : parseInline(text, ctx.defs);
   }
   return blocks;
+}
+
+/** A link target that passed the allowlist. `repo` is a relative path inside the viewed repository. */
+export interface SafeHref {
+  kind: "external" | "fragment" | "repo";
+  href: string;
+}
+
+/** Allowlist for link URLs (http, https, mailto, #fragment, relative); null for anything else. */
+export function safeHref(raw: string): SafeHref | null {
+  if (raw.length > 4000) return null;
+  let dec = "";
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === "&") {
+      const e = decodeEntity(raw, i);
+      if (e) {
+        dec += e.str;
+        i += e.len - 1;
+        continue;
+      }
+    }
+    dec += raw[i];
+  }
+  const out = dec.replace(INVISIBLE, "").trim();
+  const probe = dec.replace(PROBE_STRIP, "");
+  if (!probe || out.includes("\\") || probe.includes("\\")) return null;
+  if (probe.startsWith("//")) return null;
+  if (probe.startsWith("#")) return { kind: "fragment", href: out };
+  const m = /^([a-z][a-z0-9+.-]*):/i.exec(probe);
+  if (m) {
+    const sch = m[1]!.toLowerCase();
+    return sch === "http" || sch === "https" || sch === "mailto" ? { kind: "external", href: probe } : null;
+  }
+  return { kind: "repo", href: out };
+}
+
+const INVISIBLE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g;
+const PROBE_STRIP = /[\s\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202f\u2060-\u206f\ufeff]/g;
+
+/** A repo-relative path with the query (no `?`) and fragment (no `#`) split off. */
+export interface RepoPath {
+  path: string;
+  query: string;
+  hash: string;
+}
+
+/** Resolves `rel` against the folder `base`; null when it would escape the repository root. */
+export function resolveRepoPath(base: string, rel: string): RepoPath | null {
+  if (!rel || rel.length > 4000 || /[\u0000-\u001f\u007f\\]/.test(rel) || /^[a-z][a-z0-9+.-]*:/i.test(rel)) return null;
+  let rest = rel;
+  let hash = "";
+  let query = "";
+  const h = rest.indexOf("#");
+  if (h >= 0) {
+    hash = rest.slice(h + 1);
+    rest = rest.slice(0, h);
+  }
+  const qi = rest.indexOf("?");
+  if (qi >= 0) {
+    query = rest.slice(qi + 1);
+    rest = rest.slice(0, qi);
+  }
+  try {
+    rest = decodeURIComponent(rest);
+  } catch {
+    // keep the raw text when it is not valid percent-encoding
+  }
+  if (/[\u0000-\u001f\u007f\\]/.test(rest)) return null;
+  const segs: string[] = rest.startsWith("/") ? [] : base.split("/").filter(Boolean);
+  for (const seg of rest.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      if (!segs.length) return null;
+      segs.pop();
+    } else segs.push(seg);
+  }
+  if (!segs.length) return null;
+  return { path: segs.join("/"), query, hash };
+}
+
+/** GitHub-style heading slug; `seen` de-duplicates repeats with `-1`, `-2`. */
+export function slugify(text: string, seen?: Map<string, number>): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}\s_-]/gu, "")
+    .trim()
+    .replace(/\s+/g, "-");
+  if (!seen) return slug;
+  const n = seen.get(slug);
+  if (n === undefined) {
+    seen.set(slug, 0);
+    return slug;
+  }
+  seen.set(slug, n + 1);
+  return `${slug}-${n + 1}`;
 }
