@@ -921,6 +921,47 @@ svg {
   background: none;
   padding: 0;
 }
+.md-doc table {
+  border-collapse: collapse;
+  margin: 0 0 1em;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.md-doc th,
+.md-doc td {
+  padding: 0.35em 0.8em;
+  border: 1px solid var(--border-strong);
+}
+.md-doc th {
+  color: var(--fg-strong);
+  background: var(--bg-elev);
+  font-weight: 600;
+}
+.md-doc tbody tr:nth-child(even) {
+  background: var(--bg-hover);
+}
+.md-align-left {
+  text-align: left;
+}
+.md-align-center {
+  text-align: center;
+}
+.md-align-right {
+  text-align: right;
+}
+.md-doc del {
+  color: var(--fg-muted);
+  text-decoration: line-through;
+}
+.md-doc li.md-task {
+  list-style: none;
+  margin-left: -1.4em;
+}
+.md-doc li.md-task > input {
+  margin: 0 0.5em 0 0;
+  vertical-align: middle;
+}
 .md-truncated {
   margin: 1em 0;
   padding: 0.5em 0.8em;

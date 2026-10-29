@@ -1,0 +1,807 @@
+[
+ {
+  "name": "basic table",
+  "src": "| a | b |\n| --- | --- |\n| 1 | 2 |",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null,
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "b"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "2"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "table without outer pipes",
+  "src": "a|b\n-|-\n1|2",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null,
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "b"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "2"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "alignment row sets left, center, right and none",
+  "src": "| a | b | c | d |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     "left",
+     "center",
+     "right",
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "b"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "c"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "d"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "2"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "3"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "4"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "escaped pipe stays in the cell",
+  "src": "| a |\n| - |\n| x \\| y |",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "x | y"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "short rows are padded and long rows truncated to the header width",
+  "src": "| a | b |\n| - | - |\n| 1 |\n| 1 | 2 | 3 |",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null,
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ],
+     [
+      {
+       "type": "text",
+       "value": "b"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ],
+      []
+     ],
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ],
+      [
+       {
+        "type": "text",
+        "value": "2"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "inline syntax inside cells",
+  "src": "| h |\n| - |\n| **b** `c` |",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "h"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "strong",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       },
+       {
+        "type": "text",
+        "value": " "
+       },
+       {
+        "type": "codespan",
+        "value": "c"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "header only table has no body rows",
+  "src": "| a |\n| - |",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ]
+    ],
+    "rows": []
+   }
+  ]
+ },
+ {
+  "name": "table ends at a blank line",
+  "src": "| a |\n| - |\n| 1 |\n\ntext",
+  "ast": [
+   {
+    "type": "table",
+    "align": [
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ]
+     ]
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "text"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "table interrupts a paragraph",
+  "src": "intro\n| a |\n| - |\n| 1 |",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "intro"
+     }
+    ]
+   },
+   {
+    "type": "table",
+    "align": [
+     null
+    ],
+    "head": [
+     [
+      {
+       "type": "text",
+       "value": "a"
+      }
+     ]
+    ],
+    "rows": [
+     [
+      [
+       {
+        "type": "text",
+        "value": "1"
+       }
+      ]
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "name": "header and delimiter column counts must match",
+  "src": "| a | b |\n| - |\n| 1 | 2 |",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "| a | b |\n| - |\n| 1 | 2 |"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a delimiter row with no pipe and a dash line is a setext heading, not a table",
+  "src": "a\n---",
+  "ast": [
+   {
+    "type": "heading",
+    "level": 2,
+    "children": [
+     {
+      "type": "text",
+      "value": "a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "table inside a block quote",
+  "src": "> | a |\n> | - |\n> | 1 |",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "table",
+      "align": [
+       null
+      ],
+      "head": [
+       [
+        {
+         "type": "text",
+         "value": "a"
+        }
+       ]
+      ],
+      "rows": [
+       [
+        [
+         {
+          "type": "text",
+          "value": "1"
+         }
+        ]
+       ]
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "checked task",
+  "src": "- [x] a",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ],
+      "checked": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unchecked task",
+  "src": "- [ ] b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ],
+      "checked": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "uppercase X is checked",
+  "src": "- [X] a",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ],
+      "checked": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "mixed task and plain items",
+  "src": "- [x] a\n- [ ] b\n- c",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ],
+      "checked": true
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ],
+      "checked": false
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "c"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "brackets without a following space are not a task",
+  "src": "- [x]a\n- [] b\n- [xx] c",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "[x]a"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "[] b"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "[xx] c"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "ordered task list",
+  "src": "1. [x] a",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": true,
+    "start": 1,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ],
+      "checked": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "task marker only counts at the start of the item",
+  "src": "- a [x] b",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a [x] b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "strikethrough",
+  "src": "~~x~~",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "del",
+      "children": [
+       {
+        "type": "text",
+        "value": "x"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "strikethrough with surrounding text and nested emphasis",
+  "src": "a ~~b *c*~~ d",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a "
+     },
+     {
+      "type": "del",
+      "children": [
+       {
+        "type": "text",
+        "value": "b "
+       },
+       {
+        "type": "em",
+        "children": [
+         {
+          "type": "text",
+          "value": "c"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " d"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "single tilde is literal",
+  "src": "~x~ ~~ y ~~",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "~x~ ~~ y ~~"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unclosed strikethrough is literal",
+  "src": "~~x",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "~~x"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "strikethrough is literal inside a code span",
+  "src": "`~~x~~`",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "codespan",
+      "value": "~~x~~"
+     }
+    ]
+   }
+  ]
+ }
+]
