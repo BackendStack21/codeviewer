@@ -1,7 +1,59 @@
-import { resolveRepoPath, safeHref, slugify, type Block, type Inline } from "./markdown.ts";
+import { languageFor, lexLine, type Span } from "./highlight.ts";
+import { showHidden } from "./util.ts";
+import {
+  resolveRepoPath,
+  safeHref,
+  slugify,
+  type Block,
+  type Inline,
+} from "./markdown.ts";
 
 /** Rendering stops once this many DOM nodes exist. */
 const MAX_NODES = 200_000;
+/** Fences beyond these limits render as plain text. */
+const MAX_FENCE_LINES = 2000;
+const MAX_FENCE_CHARS = 200 * 1024;
+
+/** Builds the <pre><code> for a block; `lang` is only a lookup key, never emitted. */
+function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
+  const pre = document.createElement("pre");
+  pre.setAttribute("dir", "auto");
+  const code = document.createElement("code");
+  pre.append(code);
+  let id = "text";
+  if (lang && /^[a-z0-9+#-]{1,20}$/.test(lang)) id = languageFor("x." + lang);
+  const lines = value.split("\n");
+  if (
+    id === "text" ||
+    lines.length > MAX_FENCE_LINES ||
+    value.length > MAX_FENCE_CHARS
+  ) {
+    code.textContent = lines.map(showHidden).join("\n");
+    b.take(2);
+    return pre;
+  }
+  let state = 0;
+  const spans: Span[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (i) code.append("\n");
+    spans.length = 0;
+    state = line.length > 10_000 ? 0 : lexLine(id, line, state, spans);
+    let at = 0;
+    for (const [s, e, t] of spans) {
+      if (s < at || e <= s) continue;
+      if (s > at) code.append(showHidden(line.slice(at, s)));
+      const sp = document.createElement("span");
+      sp.className = "tok-" + t;
+      sp.textContent = showHidden(line.slice(s, e));
+      code.append(sp);
+      at = e;
+    }
+    if (at < line.length) code.append(showHidden(line.slice(at)));
+    if (!b.take(spans.length + 1)) break;
+  }
+  return pre;
+}
 
 class Budget {
   readonly seen = new Map<string, number>();
@@ -20,13 +72,23 @@ function plainText(nodes: Inline[]): string {
   let out = "";
   for (const n of nodes) {
     if (n.type === "text" || n.type === "codespan") out += n.value;
-    else if (n.type === "em" || n.type === "strong" || n.type === "del" || n.type === "link") out += plainText(n.children);
+    else if (
+      n.type === "em" ||
+      n.type === "strong" ||
+      n.type === "del" ||
+      n.type === "link"
+    )
+      out += plainText(n.children);
     else if (n.type === "image") out += n.alt;
   }
   return out;
 }
 
-function link(parent: HTMLElement, n: Extract<Inline, { type: "link" }>, b: Budget) {
+function link(
+  parent: HTMLElement,
+  n: Extract<Inline, { type: "link" }>,
+  b: Budget,
+) {
   const safe = safeHref(n.href);
   let a: HTMLElement | null = null;
   if (safe) {
@@ -46,7 +108,7 @@ function link(parent: HTMLElement, n: Extract<Inline, { type: "link" }>, b: Budg
       } else a = null;
     }
   }
-  if (a && n.title) a.setAttribute("title", n.title);
+  if (a && n.title) a.setAttribute("title", showHidden(n.title));
   if (a) parent.append(a);
   inline(a ?? parent, n.children, b);
 }
@@ -68,7 +130,7 @@ function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
       }
       case "codespan": {
         const el = document.createElement("code");
-        el.textContent = n.value;
+        el.textContent = showHidden(n.value);
         parent.append(el);
         break;
       }
@@ -109,12 +171,7 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
         parent.append(document.createElement("hr"));
         break;
       case "code": {
-        const pre = document.createElement("pre");
-        const code = document.createElement("code");
-        code.textContent = blk.value;
-        pre.append(code);
-        parent.append(pre);
-        b.take(2);
+        parent.append(codeBlock(blk.value, blk.lang, b));
         break;
       }
       case "blockquote": {
@@ -129,7 +186,11 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
         const thead = document.createElement("thead");
         const tbody = document.createElement("tbody");
         table.append(thead, tbody);
-        const row = (host: HTMLElement, cells: Inline[][], tag: "th" | "td") => {
+        const row = (
+          host: HTMLElement,
+          cells: Inline[][],
+          tag: "th" | "td",
+        ) => {
           const tr = document.createElement("tr");
           host.append(tr);
           for (let k = 0; k < cells.length; k++) {
@@ -150,7 +211,8 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
       }
       case "list": {
         const el = document.createElement(blk.ordered ? "ol" : "ul");
-        if (blk.ordered && blk.start !== 1 && blk.start !== null) el.setAttribute("start", String(blk.start));
+        if (blk.ordered && blk.start !== 1 && blk.start !== null)
+          el.setAttribute("start", String(blk.start));
         parent.append(el);
         for (const item of blk.items) {
           if (!b.take()) return;
@@ -174,7 +236,10 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
 }
 
 /** Turns the AST into DOM using createElement/textContent only; never innerHTML. */
-export function renderMarkdown(list: Block[], opts: { base?: string } = {}): HTMLElement {
+export function renderMarkdown(
+  list: Block[],
+  opts: { base?: string } = {},
+): HTMLElement {
   const root = document.createElement("div");
   root.className = "md-doc";
   const b = new Budget(opts.base);
