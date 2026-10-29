@@ -3,17 +3,19 @@ import type { Command } from "./palette.ts";
 import type { MenuItem } from "./menu.ts";
 
 export interface SelectionHost {
-  hasSelection(): boolean;
-  copy(): void;
-  copyImage(): void;
+  hasSelection(snap?: unknown): boolean;
+  copy(snap?: unknown): void;
+  copyImage(snap?: unknown): void;
+  /** Called on contextmenu: the selection to keep for the menu items (the live one may collapse before a click). */
+  capture?(): unknown;
 }
 
 /** ["Copy", "Copy as Image"] when something is selected, otherwise no items. */
-export function selectionMenuItems(host: SelectionHost): MenuItem[] {
-  if (!host.hasSelection()) return [];
+export function selectionMenuItems(host: SelectionHost, snap?: unknown): MenuItem[] {
+  if (!host.hasSelection(snap)) return [];
   return [
-    { label: "Copy", run: () => host.copy() },
-    { label: "Copy as Image", run: () => host.copyImage() },
+    { label: "Copy", run: () => host.copy(snap) },
+    { label: "Copy as Image", run: () => host.copyImage(snap) },
   ];
 }
 
@@ -29,7 +31,8 @@ export function bindSelectionMenu(
   show: (e: MouseEvent, items: MenuItem[]) => void,
 ): void {
   el.addEventListener("contextmenu", (e) => {
-    const items = selectionMenuItems(host);
+    const snap = host.capture?.();
+    const items = selectionMenuItems(host, snap);
     if (items.length) show(e, items);
   });
 }
@@ -46,4 +49,13 @@ export function selectionSnapshot<T>(read: () => T | null): { take(): void; valu
       snap = null;
     },
   };
+}
+
+/** The one place that decides which element and which host the selection context menu is bound to. */
+export function bindEditorSelectionMenu(
+  editor: { el: { addEventListener(t: string, f: (e: MouseEvent) => void): void } },
+  host: SelectionHost,
+  show: (e: MouseEvent, items: MenuItem[]) => void,
+): void {
+  bindSelectionMenu(editor.el, host, show);
 }
