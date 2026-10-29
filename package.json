@@ -1,6 +1,6 @@
 {
   "name": "codeviewer",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "A fast, read-only code viewer with a real built-in terminal and live git indicators. Zero dependencies.",
   "license": "MIT",
   "author": "21no.de",
