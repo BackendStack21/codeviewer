@@ -5,7 +5,7 @@ import { fileIcon, icons } from "./icons.ts";
 import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
 import { decidePreview, tooLargeNote } from "./mdgate.ts";
-import { planView } from "./viewstate.ts";
+import { planView, toggleLabel, toggleMode, viewMode } from "./viewstate.ts";
 import { basename, debounce, esc, formatBytes, h, MOD } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
 
@@ -153,9 +153,10 @@ export class Editor {
       tab.truncated = f.truncated;
       tab.encoding = f.encoding;
       tab.deleted = false;
-      const md = f.kind === "text" && isMarkdown(tab.path) && !tab.asSource;
-      const tooLarge = md && decidePreview(f.size, f.truncated, !!tab.forcePreview).tooLarge;
-      const plan = planView({ kind: f.kind, path: tab.path, asSource: tab.asSource || tooLarge, reload, hasMd: !!tab.md, hasCode: !!tab.code });
+      const mode = { asSource: tab.asSource, forcePreview: !!tab.forcePreview };
+      const showSource = viewMode(tab.path, f.size, f.truncated, mode) === "source";
+      const tooLarge = f.kind === "text" && isMarkdown(tab.path) && !tab.asSource && decidePreview(f.size, f.truncated, mode.forcePreview).tooLarge;
+      const plan = planView({ kind: f.kind, path: tab.path, asSource: showSource, reload, hasMd: !!tab.md, hasCode: !!tab.code });
       // The tab keeps only the views the plan names, so a Markdown tab that goes binary/dir/image can't get stuck.
       if (!plan.md) {
         tab.md?.dispose();
@@ -169,7 +170,7 @@ export class Editor {
           else {
             tab.md = new MarkdownView(f.text, this.fontSize, { path: tab.path, onOpen: (p, hash) => this.onOpenLink(p, hash) });
             tab.el.replaceChildren(tab.md.el);
-            tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
+            tab.el.prepend(this.viewToggle(tab, toggleLabel("preview"), icons.code));
           }
         } else if (plan.reuse) tab.code!.setText(f.text);
         else {
@@ -185,7 +186,7 @@ export class Editor {
           tab.el.append(tab.code.el);
           if (tab.path.endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "Preview image", icons.image));
           else if (isMarkdown(tab.path)) {
-            tab.el.prepend(this.viewToggle(tab, "Preview", icons.image));
+            tab.el.prepend(this.viewToggle(tab, toggleLabel("source"), icons.image));
             if (tooLarge) {
               tab.el.prepend(
                 tooLargeNote(() => {
@@ -243,8 +244,11 @@ export class Editor {
   }
 
   private flip(tab: Tab) {
-    tab.asSource = !tab.asSource;
-    if (!tab.asSource) tab.forcePreview = true; // an explicit request overrides the size gate
+    if (isMarkdown(tab.path)) {
+      const next = toggleMode(tab.path, tab.size, tab.truncated, { asSource: tab.asSource, forcePreview: !!tab.forcePreview });
+      tab.asSource = next.asSource;
+      tab.forcePreview = next.forcePreview; // an explicit request overrides the size gate
+    } else tab.asSource = !tab.asSource; // SVG: image or source
     tab.code = undefined;
     tab.image = undefined;
     tab.md?.dispose();
