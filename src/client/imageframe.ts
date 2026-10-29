@@ -1,4 +1,5 @@
 // Pure geometry of the snippet frame (backdrop, window card, title bar). No DOM access.
+import { charWidth } from "./term/width.ts";
 import { fitScale, MAX_PIXELS, type DrawOp, type GradStop, type ImageLayout, type ImageTheme, type Shadow } from "./imagelayout.ts";
 
 export const BACKDROP_PAD = 56;
@@ -110,6 +111,26 @@ export function frameImage(layout: ImageLayout, title: string, theme: ImageTheme
   return { width: frame.width, height: frame.height, cols: layout.cols, rows: layout.rows, ops: [...frameOps(frame), ...code], font: theme.font, size: theme.size, ...(layout.charW ? { charW: layout.charW } : {}), scale: fit.scale };
 }
 
+export interface FramedSnapshot {
+  width: number;
+  height: number;
+  scale: number;
+  /** Backdrop, card and title-bar ops (the same as the code frame). */
+  ops: DrawOp[];
+  /** Where the snapshot image is drawn, in outer CSS px. */
+  image: { x: number; y: number; w: number; h: number };
+}
+/** Frames an image of imgW x imgH CSS px (Markdown or native snapshot) in the card. */
+export function frameSnapshot(imgW: number, imgH: number, title: string, theme: ImageTheme, measure: Measure, dpr: number): FramedSnapshot | { tooLarge: true } {
+  const ft: FrameTheme = { bg: theme.bg, fg: theme.fg, muted: theme.muted ?? theme.fg, accent: theme.accent ?? theme.fg };
+  const frame = frameGeometry(imgW, imgH, title, ft, measure);
+  if ("tooLarge" in frame) return frame;
+  const fit = fitScale(frame.width, frame.height, 2);
+  if ("tooLarge" in fit) return fit;
+  const cw = frame.card.w;
+  return { width: frame.width, height: frame.height, scale: fit.scale, ops: frameOps(frame), image: { x: frame.inset.x + (cw - imgW) / 2, y: frame.inset.y, w: imgW, h: imgH } };
+}
+
 /** Shadow blur/offset in device pixels for a canvas drawn at `scale` (ctx.shadow* ignores ctx.scale). */
 export function scaledShadow(shadow: Shadow, scale: number): Shadow {
   return { blur: shadow.blur * scale, offsetY: shadow.offsetY * scale, color: shadow.color };
@@ -136,7 +157,7 @@ export function glyphCells(text: string, x: number, charW: number): { ch: string
   let i = 0;
   for (const ch of text) {
     if (ch !== " ") out.push({ ch, x: x + i * charW });
-    i++;
+    i += charWidth(ch.codePointAt(0)!);
   }
   return out;
 }

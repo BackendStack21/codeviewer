@@ -1,8 +1,8 @@
 // Thin browser glue for image copy (canvas, clipboard, native bridge). Verified manually.
 import { snapTracker, type CopyImageDeps, type SnapRect, type SnapshotDeps } from "./copyimage.ts";
 import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
-import { canvasFont, fontLoadSpecs, glyphCells, scaledShadow } from "./imageframe.ts";
-import type { ImageLayout } from "./imagelayout.ts";
+import { canvasFont, fontLoadSpecs, frameSnapshot, glyphCells, scaledShadow } from "./imageframe.ts";
+import type { DrawOp, ImageLayout, ImageTheme } from "./imagelayout.ts";
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
@@ -14,7 +14,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-export async function renderLayoutPng(layout: ImageLayout, scale: number, font: string, size: number): Promise<Blob> {
+export async function renderLayoutPng(layout: ImageLayout, scale: number, font: string, size: number, image?: { bitmap: CanvasImageSource; x: number; y: number; w: number; h: number; clip?: { x: number; y: number; w: number; h: number; r: number } }): Promise<Blob> {
   font = layout.font ?? font;
   size = layout.size ?? size;
   try {
@@ -60,7 +60,38 @@ export async function renderLayoutPng(layout: ImageLayout, scale: number, font: 
       for (const g of glyphCells(op.text, op.x, charW)) ctx.fillText(g.ch, g.x, op.y);
     }
   }
+  if (image) {
+    ctx.save();
+    // Keep the card's rounded corners where the image reaches the card edge.
+    if (image.clip) {
+      roundRect(ctx, image.clip.x, image.clip.y, image.clip.w, image.clip.h, image.clip.r);
+      ctx.clip();
+    }
+    ctx.drawImage(image.bitmap, image.x, image.y, image.w, image.h);
+    ctx.restore();
+  }
   return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
+}
+
+/** Decodes a PNG blob (a data-URI image never taints the canvas). */
+async function decodePng(png: Blob): Promise<HTMLImageElement> {
+  const uri = await blobToDataUri(png);
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error("png decode failed"));
+    img.src = uri;
+  });
+}
+
+/** Draws a snapshot PNG (cssW x cssH CSS px) inside the snippet card: backdrop, title bar, then the image. */
+export async function framePng(png: Blob, cssW: number, cssH: number, title: string, theme: ImageTheme, measure: (t: string) => number): Promise<Blob> {
+  const f = frameSnapshot(cssW, cssH, title, theme, measure, window.devicePixelRatio || 1);
+  if ("tooLarge" in f) throw new Error("too large");
+  const bitmap = await decodePng(png);
+  const layout: ImageLayout = { width: f.width, height: f.height, cols: 0, rows: 0, ops: f.ops as DrawOp[], font: theme.font, size: theme.size };
+  const card = f.ops.find((o): o is Extract<DrawOp, { t: "rect" }> => o.t === "rect");
+  return renderLayoutPng(layout, f.scale, theme.font, theme.size, { bitmap, ...f.image, clip: card && { x: card.x, y: card.y, w: card.w, h: card.h, r: card.r } });
 }
 
 function toBase64(blob: Blob): Promise<string> {
@@ -94,10 +125,10 @@ export function browserDeps(opts: { font: string; size: number; bridge?: Bridge;
 
 const SNAP_TIMEOUT = 3000;
 const tracker = snapTracker();
-let snapDone: ((ok: boolean) => void) | undefined;
+let snapDone: ((png: string | null) => void) | undefined;
 if (typeof window !== "undefined") {
-  (window as unknown as { __cvSnap?: (id: unknown, ok: unknown) => void }).__cvSnap = (id, ok) => {
-    if (tracker.accept(id)) snapDone?.(ok === true);
+  (window as unknown as { __cvSnap?: (id: unknown, ok: unknown, png?: unknown) => void }).__cvSnap = (id, ok, png) => {
+    if (tracker.accept(id)) snapDone?.(ok === true && typeof png === "string" && png ? png : null);
   };
 }
 
@@ -110,7 +141,7 @@ export function snapshotDeps(bridge: Bridge): SnapshotDeps {
       const old = tracker.cancel();
       if (old !== undefined) {
         bridge?.postMessage({ t: "snapshotcancel", id: old });
-        snapDone?.(false);
+        snapDone?.(null);
       }
       const id = tracker.begin();
       tracker.claimHide(id);
@@ -123,23 +154,24 @@ export function snapshotDeps(bridge: Bridge): SnapshotDeps {
     },
     snapshot: bridge
       ? (r: SnapRect, id?: number) =>
-          new Promise<boolean>((res) => {
+          new Promise<string | null>((res) => {
             if (id === undefined) id = deps.begin!();
             const rid = id;
-            const finish = (ok: boolean) => {
+            const finish = (png: string | null) => {
               clearTimeout(timer);
               snapDone = undefined;
-              res(ok);
+              res(png);
             };
             const timer = setTimeout(() => {
               if (tracker.cancel(rid) !== undefined) bridge.postMessage({ t: "snapshotcancel", id: rid });
-              finish(false);
+              finish(null);
             }, SNAP_TIMEOUT);
             snapDone = finish;
             // Give the highlight removal one frame to paint before the native side captures.
             requestAnimationFrame(() => requestAnimationFrame(() => bridge.postMessage({ t: "snapshotrect", id: rid, ...r })));
           })
       : undefined,
+    native: bridge ? async (png) => bridge.postMessage({ t: "copyimage", png: await toBase64(png) }) : undefined,
   };
   return deps;
 }

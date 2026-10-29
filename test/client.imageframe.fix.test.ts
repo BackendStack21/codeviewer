@@ -75,11 +75,11 @@ describe("glyphCells (V-2)", () => {
       { ch: "x", x: 30 },
     ]);
   });
-  test("astral characters take one cell", () => {
+  test("a wide astral character takes two cells (shared column model)", () => {
     expect(glyphCells("a😀b", 0, 5)).toEqual([
       { ch: "a", x: 0 },
       { ch: "😀", x: 5 },
-      { ch: "b", x: 10 },
+      { ch: "b", x: 15 },
     ]);
   });
   test("empty text yields nothing", () => {

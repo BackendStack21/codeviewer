@@ -242,7 +242,7 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     //   {t: "theme", dark, bg}  sync the window appearance
     //   {t: "drag"}            mouse-down on empty title bar: move the window
     //   {t: "copyimage", png}  PNG (base64) to put on the general pasteboard
-    //   {t: "snapshotrect", id, x, y, w, h}  snapshot a viewport rect (CSS px) to the pasteboard; replies window.__cvSnap(id, ok)
+    //   {t: "snapshotrect", id, x, y, w, h}  snapshot a viewport rect (CSS px) and return it; replies window.__cvSnap(id, ok, pngBase64); the pasteboard is written by copyimage
     //   {t: "snapshotcancel", id}  timed out: a late snapshot for id is dropped
     //   {t: "dblclick"}        double-click on the title bar: system zoom/minimize action
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -270,19 +270,17 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         if t == "snapshotrect" {
             guard let id = (body["id"] as? NSNumber)?.intValue else { return }
             func num(_ k: String) -> Double? { (body[k] as? NSNumber)?.doubleValue }
-            func reply(_ ok: Bool) { webView.evaluateJavaScript("window.__cvSnap && window.__cvSnap(\(id), \(ok))", completionHandler: nil) }
+            func reply(_ ok: Bool, _ b64: String = "") { webView.evaluateJavaScript("window.__cvSnap && window.__cvSnap(\(id), \(ok), \"\(b64)\")", completionHandler: nil) }
             guard let x = num("x"), let y = num("y"), let w = num("w"), let h = num("h"),
                   x.isFinite, y.isFinite, w.isFinite, h.isFinite, w > 0, h > 0 else { return reply(false) }
             let cfg = WKSnapshotConfiguration()
             cfg.rect = CGRect(x: x, y: y, width: w, height: h)
             webView.takeSnapshot(with: cfg) { [weak self] image, _ in
-                // A cancelled (timed out) request must not touch the pasteboard or reply.
+                // A cancelled (timed out) request must not reply.
                 if self?.cancelledSnaps.remove(id) != nil { return }
                 guard let image = image, let tiff = image.tiffRepresentation,
                       let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return reply(false) }
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                reply(pb.setData(png, forType: .png))
+                reply(true, png.base64EncodedString())
             }
             return
         }

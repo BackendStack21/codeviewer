@@ -125,25 +125,46 @@ export function clampSnapRect(rects: RectLike[], vp: Viewport): SnapRect | null 
 
 export interface SnapshotDeps {
   /** Native WKWebView snapshot of a viewport rect; resolves true when the PNG reached the pasteboard. */
-  snapshot?: (r: SnapRect, id?: number) => Promise<boolean>;
+  snapshot?: (r: SnapRect, id?: number) => Promise<string | null>;
+  /** Frames the decoded snapshot PNG (CSS-px rect it covers) into the snippet card. */
+  compose?: (png: Blob, rect: SnapRect) => Promise<Blob>;
+  /** Writes a PNG to the native pasteboard. */
+  native?: (png: Blob) => Promise<void>;
   /** Starts a request: returns its id (supersedes any pending one) and makes it the owner of the highlight hide. */
   begin?: () => number;
   /** Hides (true) / restores (false) the selection highlight; a restore by a request that no longer owns the hide is ignored. */
   hideSelection(on: boolean, id?: number): void;
 }
 
-/** Tries the native snapshot of the selection rects; true only when it succeeded. Always restores the highlight. */
+/** Decodes base64 PNG data into an image/png blob. */
+export function pngFromBase64(b64: string): Blob {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: "image/png" });
+}
+
+/** Tries the native snapshot of the selection rects (base64 PNG), frames it and writes it through the native pasteboard; true only when it all succeeded. Always restores the highlight. */
 export async function copyViaSnapshot(deps: SnapshotDeps, rects: RectLike[], vp: Viewport): Promise<boolean> {
   const rect = deps.snapshot ? clampSnapRect(rects, vp) : null;
   if (!deps.snapshot || !rect) return false;
+  const { compose, native } = deps;
   const id = deps.begin?.();
   deps.hideSelection(true, id);
+  let b64: string | null;
   try {
-    return (await deps.snapshot(rect, id)) === true;
+    b64 = await deps.snapshot(rect, id);
   } catch {
-    return false;
+    b64 = null;
   } finally {
     deps.hideSelection(false, id);
+  }
+  if (typeof b64 !== "string" || !b64 || !compose || !native) return false;
+  try {
+    await native(await compose(pngFromBase64(b64), rect));
+    return true;
+  } catch {
+    return false;
   }
 }
 

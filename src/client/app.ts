@@ -13,7 +13,7 @@ import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from 
 import { isContextMenuOpen, showContextMenu } from "./menu.ts";
 import { bindEditorSelectionMenu, readSelection, snapshotText, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
 import { copyCodeImage, copyPngOrSnapshot, MSG_CLIPBOARD_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
-import { browserDeps, fragmentFromRange, markdownSnapDeps, snapshotDeps } from "./imagedom.ts";
+import { browserDeps, fragmentFromRange, framePng, markdownSnapDeps, snapshotDeps } from "./imagedom.ts";
 import { snapshotMarkdown } from "./mdsnap.ts";
 import type { ImageTheme } from "./imagelayout.ts";
 import type { SelRange } from "./selection.ts";
@@ -571,15 +571,16 @@ class App {
     if (tab?.md) {
       const range = snap?.md ?? tab.md.selectionRange();
       if (!range) return notify(MSG_NO_SELECTION);
-      const png = fragmentFromRange(range, tab.md.el, cssVar("--bg-editor"))
-        .then((f) => snapshotMarkdown(markdownSnapDeps, f))
-        .then((r) => {
-          if (!(r instanceof Blob)) throw new Error("snapshot failed");
-          return r;
-        });
+      const title = tab.path ?? "";
+      const measure = deps.measure!;
+      const png = fragmentFromRange(range, tab.md.el, cssVar("--bg-editor")).then(async (f) => {
+        const r = await snapshotMarkdown(markdownSnapDeps, f);
+        if (!(r instanceof Blob)) throw new Error("snapshot failed");
+        return framePng(r, f.width, f.height, title, theme, measure);
+      });
       const rects = Array.from(range.getClientRects());
       const vp = { width: window.innerWidth, height: window.innerHeight };
-      void copyPngOrSnapshot({ ...deps, ...snapshotDeps(nativeBridge()) }, png, rects, vp).then((res) => notify(res === "failed" ? MSG_CLIPBOARD_FAILED : MSG_OK));
+      void copyPngOrSnapshot({ ...deps, ...snapshotDeps(nativeBridge()), compose: (p, r) => framePng(p, r.w, r.h, title, theme, measure) }, png, rects, vp).then((res) => notify(res === "failed" ? MSG_CLIPBOARD_FAILED : MSG_OK));
       return;
     }
     const input = tab?.code?.imageInput(snap?.code);

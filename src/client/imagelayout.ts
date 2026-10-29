@@ -1,6 +1,7 @@
 // Pure layout of a code selection into canvas draw ops. No DOM access.
 import type { Span } from "./highlight.ts";
 import { normalize, type SelRange } from "./selection.ts";
+import { charWidth } from "./term/width.ts";
 
 export interface TokenStyle {
   bold?: boolean;
@@ -67,6 +68,16 @@ export function fitScale(w: number, h: number, dpr: number): ScaleResult {
   return { scale: Math.floor(Math.sqrt(MAX_PIXELS / area) * 1000) / 1000 };
 }
 
+/** Columns the UTF-16 unit at `i` advances (tab is handled by the caller): wcwidth of its code point; a low surrogate belongs to the pair before it. Shared column model with glyphCells. */
+function unitCols(line: string, i: number): number {
+  const c = line.charCodeAt(i);
+  if (c >= 0xdc00 && c <= 0xdfff && i > 0) {
+    const p = line.charCodeAt(i - 1);
+    if (p >= 0xd800 && p <= 0xdbff) return 0;
+  }
+  return charWidth(line.codePointAt(i)!);
+}
+
 /** Lays out the range of `lines` (with per-line token spans) as draw ops. Deterministic. */
 export function layoutImage(lines: string[], tokens: Span[][], theme: ImageTheme, range: SelRange, opts: LayoutOptions = {}): LayoutResult {
   const { start, end } = normalize(range);
@@ -88,7 +99,7 @@ export function layoutImage(lines: string[], tokens: Span[][], theme: ImageTheme
     const c1 = Math.min(row === rows - 1 ? end.col : line.length, line.length);
     const y = padding + row * lineH;
     let col = 0;
-    for (let i = 0; i < c0; i++) col += line[i] === "\t" ? tabSize - (col % tabSize) : 1;
+    for (let i = 0; i < c0; i++) col += line[i] === "\t" ? tabSize - (col % tabSize) : unitCols(line, i);
     const base = col;
     let run = "";
     let runCol = 0;
@@ -105,7 +116,7 @@ export function layoutImage(lines: string[], tokens: Span[][], theme: ImageTheme
         runCol = col;
         runTok = toks[i];
       }
-      const w = line[i] === "\t" ? tabSize - (col % tabSize) : 1;
+      const w = line[i] === "\t" ? tabSize - (col % tabSize) : unitCols(line, i);
       run += " ".repeat(line[i] === "\t" ? w : 0) + (line[i] === "\t" ? "" : line[i]);
       col += w;
     }

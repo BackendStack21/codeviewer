@@ -30,8 +30,8 @@ describe("snapTracker hide ownership", () => {
 // End to end through the real deps with a fake DOM and bridge.
 let on = false;
 const log: string[] = [];
-const win: any = {};
-(globalThis as any).window = win;
+// imagedom is a cached module: share one window object across test files so its __cvSnap hook lands on it.
+const win: any = ((globalThis as any).window ??= {});
 (globalThis as any).document = {
   documentElement: { classList: { toggle: (_c: string, v: boolean) => { on = v; log.push(v ? "hide" : "show"); } } },
 };
@@ -47,7 +47,7 @@ describe("overlapping Copy as Image", () => {
     on = false;
     log.length = 0;
     const msgs: { t: string; id: number; hideAtPost: boolean }[] = [];
-    const deps = snapshotDeps({ postMessage: (m: any) => msgs.push({ ...m, hideAtPost: on }) });
+    const deps = { ...snapshotDeps({ postMessage: (m: any) => msgs.push({ ...m, hideAtPost: on }) }), compose: async (p: Blob) => p, native: async () => {} };
     const pA = copyViaSnapshot(deps, rects, vp);
     await sleep(5);
     const pB = copyViaSnapshot(deps, rects, vp);
@@ -56,7 +56,7 @@ describe("overlapping Copy as Image", () => {
     expect(shotB).toBeDefined();
     expect(shotB.hideAtPost).toBe(true);
     expect(on).toBe(true);
-    win.__cvSnap(2, true);
+    win.__cvSnap(2, true, btoa("PNGDATA"));
     expect(await pB).toBe(true);
     expect(await pA).toBe(false);
     expect(on).toBe(false);
