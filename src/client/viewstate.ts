@@ -1,4 +1,5 @@
 import { isMarkdown } from "./markdown.ts";
+import { decidePreview } from "./mdgate.ts";
 
 // Pure per-load view decision for a tab, so the editor's branching is testable without a DOM.
 
@@ -30,3 +31,24 @@ export function planView(i: ViewInput): ViewPlan {
   if (isMarkdown(i.path) && !i.asSource) return { view: "md", reuse: i.reload && i.hasMd, md: true, code: false };
   return { view: "code", reuse: i.reload && i.hasCode, md: false, code: true };
 }
+
+/** Per-tab Markdown mode: the user's choice and whether they asked to preview a file over the size cap. */
+export interface ModeState {
+  asSource: boolean;
+  forcePreview: boolean;
+}
+
+/** What a load of a text file shows: the preview only for Markdown, not chosen as source and not gated by size. */
+export function viewMode(path: string, size: number, truncated: boolean, s: ModeState): "source" | "preview" {
+  if (!isMarkdown(path) || s.asSource) return "source";
+  return decidePreview(size, truncated, s.forcePreview).preview ? "preview" : "source";
+}
+
+/** The state after the toggle is used: from a shown source to the (forced) preview, and back. */
+export function toggleMode(path: string, size: number, truncated: boolean, s: ModeState): ModeState {
+  return viewMode(path, size, truncated, s) === "source"
+    ? { asSource: false, forcePreview: true }
+    : { asSource: true, forcePreview: s.forcePreview };
+}
+
+export const toggleLabel = (mode: "source" | "preview") => (mode === "source" ? "Preview" : "View source");
