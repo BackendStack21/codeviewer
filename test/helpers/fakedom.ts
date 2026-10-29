@@ -71,6 +71,8 @@ export class FakeElement extends Target {
   private _html: string | null = null;
   focused = false;
   scrolled = 0;
+  /** Like a browser, emptying the element clamps scrollTop to 0 (see replaceChildren). */
+  scrollTop = 0;
   rect = { width: 100, height: 40, left: 0, top: 0 };
 
   constructor(public tag: string, private doc: FakeDocument) {
@@ -154,6 +156,7 @@ export class FakeElement extends Target {
     this._html = null;
     for (const c of this.children) c.parent = null;
     this.children = [];
+    this.scrollTop = 0;
     this.append(...cs);
   }
   remove() {

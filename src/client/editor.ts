@@ -2,6 +2,8 @@ import { api } from "./api.ts";
 import { CodeView } from "./codeview.ts";
 import { languageFor, languageName } from "./highlight.ts";
 import { fileIcon, icons } from "./icons.ts";
+import { isMarkdown } from "./markdown.ts";
+import { MarkdownView } from "./mdview.ts";
 import { basename, debounce, esc, formatBytes, h, MOD } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
 
@@ -14,6 +16,8 @@ export interface Tab {
   el: HTMLElement;
   tabEl: HTMLElement;
   code?: CodeView;
+  /** Rendered Markdown preview; mutually exclusive with `code`. */
+  md?: MarkdownView;
   image?: ImageView;
   lang: string;
   size: number;
@@ -85,6 +89,7 @@ export class Editor {
       // A single unpinned "preview" tab is reused while browsing.
       const preview = !opts.pin ? this.tabs.find((t) => !t.pinned) : undefined;
       tab = this.createTab(path, !!opts.pin);
+      if (opts.line && isMarkdown(path)) tab.asSource = true; // a line only means something in the source
       if (preview) {
         const i = this.tabs.indexOf(preview);
         this.disposeTab(preview);
@@ -98,6 +103,7 @@ export class Editor {
     } else {
       if (opts.pin) tab.pinned = true;
       this.activate(tab);
+      if (opts.line && tab.md) await this.toSource(tab);
     }
     if (opts.line && tab.code) {
       if (opts.col !== undefined && opts.len) tab.code.showRange(opts.line - 1, opts.col, opts.col + opts.len);
@@ -139,8 +145,19 @@ export class Editor {
       tab.deleted = false;
       if (f.kind === "text") {
         tab.eol = /\r\n/.test(f.text.slice(0, 10000)) ? "CRLF" : "LF";
-        if (tab.code && reload) tab.code.setText(f.text);
+        if (isMarkdown(tab.path) && !tab.asSource) {
+          tab.code = undefined;
+          if (tab.md && reload) tab.md.setText(f.text);
+          else {
+            tab.md?.dispose();
+            tab.md = new MarkdownView(f.text, this.fontSize);
+            tab.el.replaceChildren(tab.md.el);
+            tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
+          }
+        } else if (tab.code && reload) tab.code.setText(f.text);
         else {
+          tab.md?.dispose();
+          tab.md = undefined;
           tab.el.replaceChildren();
           tab.code = new CodeView(f.text, tab.lang, this.fontSize);
           const code = tab.code;
@@ -152,9 +169,12 @@ export class Editor {
           };
           tab.el.append(tab.code.el);
           if (tab.path.endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "Preview image", icons.image));
+          else if (isMarkdown(tab.path)) tab.el.prepend(this.viewToggle(tab, "Preview", icons.image));
         }
         await this.refreshGit(tab, !reload);
       } else if (f.kind === "image") {
+        tab.md?.dispose();
+        tab.md = undefined;
         if (tab.image && reload) tab.image.reload(tab.mtime);
         else {
           tab.code = undefined;
@@ -193,6 +213,8 @@ export class Editor {
           tab.asSource = !tab.asSource;
           tab.code = undefined;
           tab.image = undefined;
+          tab.md?.dispose();
+          tab.md = undefined;
           void this.load(tab);
         },
       },
@@ -236,7 +258,16 @@ export class Editor {
     for (const t of [...this.tabs]) this.close(t);
   }
 
+  /** Leaves the Markdown preview for the source view (find and line jumps only make sense there). */
+  private async toSource(tab: Tab) {
+    tab.asSource = true;
+    tab.md?.dispose();
+    tab.md = undefined;
+    await this.load(tab);
+  }
+
   private disposeTab(tab: Tab) {
+    tab.md?.dispose();
     tab.el.remove();
     tab.tabEl.remove();
   }
@@ -297,11 +328,16 @@ export class Editor {
 
   setFontSize(px: number) {
     this.fontSize = px;
-    for (const t of this.tabs) t.code?.setFontSize(px);
+    for (const t of this.tabs) {
+      t.code?.setFontSize(px);
+      t.md?.setFontSize(px);
+    }
   }
 
   openFind() {
-    this.active?.code?.openFind();
+    const t = this.active;
+    if (t?.md) return void this.toSource(t).then(() => t.code?.openFind());
+    t?.code?.openFind();
   }
 
   nextChange(dir: 1 | -1) {
@@ -309,7 +345,9 @@ export class Editor {
   }
 
   goToLine(line: number) {
-    this.active?.code?.revealLine(line - 1);
+    const t = this.active;
+    if (t?.md) return void this.toSource(t).then(() => t.code?.revealLine(line - 1));
+    t?.code?.revealLine(line - 1);
   }
 
   private status() {
@@ -325,6 +363,11 @@ export class Editor {
       s.encoding = t.encoding;
       s.line = t.code.activeLine >= 0 ? t.code.activeLine + 1 : undefined;
       s.diff = t.code.gitStats;
+    }
+    if (t.md) {
+      s.lang = "Markdown";
+      s.eol = t.eol;
+      s.encoding = t.encoding;
     }
     if (t.image) {
       s.dims = t.image.dims;

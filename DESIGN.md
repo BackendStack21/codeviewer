@@ -542,3 +542,108 @@ single request.
 - **Coverage.** The worker (`search.worker.ts`), the build script, `app.ts` and `editor.ts` are
   excluded from line coverage: they run in a separate thread, the bundler or the real DOM, and are
   exercised through the endpoint, build and manual runs instead.
+
+## 14. Round 5: Markdown rendering
+
+**Brief.** Render `.md` and `.markdown` files as formatted documents, with the source one click away, no external
+dependencies of any kind (the parser and renderer are written in this repo), and repo content treated as untrusted.
+Four panelists reviewed it: the interaction designer, the application security engineer, the systems/performance
+engineer, and the frontend architect & test lead. Before this, a Markdown file opened as highlighted source.
+
+### Positions and decisions
+
+**Preview and source (interaction designer).** A text tab for a Markdown file opens as a rendered preview. The
+existing `tab.asSource` flag and `viewToggle` button, which already switch an SVG between image and source, are reused:
+"View source" in preview, "Preview" in source, same button and position. There is no second tab for the same path.
+- Opening with a line (search hit, `file:line`, `:` in the palette, Go to line) forces source view, because a line has
+  no meaning in the preview. Find (⌘F) in the preview switches that tab to source and opens the find bar there, so it
+  never falls through to the browser's find silently.
+- The mode is per tab and survives live reloads: a file edited on disk while in source stays in source.
+- A palette command "Toggle Markdown Preview" is added.
+- Prose uses the system UI font with a centred column of about 78ch; code uses the existing mono font. All colours come
+  from the existing theme tokens. Headings h1/h2 have a hairline underline; tables have hairline borders; task-list
+  checkboxes are disabled, because the product is read-only. Text size follows the zoom.
+- Deferred: an "On this page" outline, a Cmd/Ctrl+Shift+V shortcut, find inside the preview, link hover in the status
+  bar, copy button on fences, flashing changed blocks, persisting the mode across restarts.
+- **Decision: adopted** (except the deferred items above).
+
+**Escaping model (application security engineer).** Script execution in the page equals shell access, so the escaping
+model is the primary defence and the CSP is the backstop. The CSP is not loosened.
+- The renderer builds DOM with `createElement` and `textContent` only. It never uses `innerHTML` and never the `html:`
+  prop of `h`. The security engineer first proposed a string renderer with one `innerHTML`; the performance engineer
+  and the architect argued for DOM building (no escaping-bug class, nodes can be replaced individually, and the fake
+  DOM in tests cannot inspect `innerHTML`). The security engineer accepted, on the condition that a test walks the
+  output tree and fails on any tag outside a closed set (p, h1-6, ul/ol/li, blockquote, pre/code, table family, a,
+  img, em, strong, del, hr, br, span with a `tok-*` class, input checkbox disabled), any `on*`, `style`, `srcdoc`
+  or `name` attribute, and any `id` that is not `md-` prefixed.
+- Raw HTML (inline and blocks, comments included) is shown as literal text, never parsed. No allowlist in v1.
+- Link URLs go through one pure function, `safeHref`. Allowed: `http:`, `https:`, `mailto:`, `#fragment` and relative
+  paths. Everything else (`javascript:`, `data:`, `vbscript:`, `file:`, `blob:`, unknown schemes, protocol-relative
+  `//host`, backslashes) is rendered as its label text with no `<a>`. The URL is probed after stripping control, space
+  and zero-width characters and decoding entities, so `java\tscript:` and `&#x6A;avascript:` are caught.
+- External links get `rel="noopener noreferrer nofollow"` and `target="_blank"`. Relative links never navigate: a
+  delegated click handler resolves the path against the document's folder (collapsing `.` and `..`, percent-decoding
+  once, rejecting anything that escapes the root) and opens it through the editor. The server's `resolveSafe` stays the
+  real boundary. `#fragment` clicks scroll inside the preview and never touch `location.hash`; heading ids use an
+  `md-` prefix, to avoid DOM clobbering.
+- Relative images load only through `api.rawBlobUrl`, into an `<img>` with a blob URL (SVG is script-inert there and is
+  never inlined). The extension must be an image type the server serves, so `![](.env)` is never fetched. Blob URLs are
+  revoked on re-render and on close. At most 100 images per render.
+- Remote images (`http(s)`, `//host`, `data:`) never load. The CSP already blocks them and `img-src` is not widened, so
+  consent loading is impossible without relaxing it. The renderer shows a placeholder with the alt text and the host,
+  and a link to open the URL in a new tab on an explicit click. A per-image "load" action is deferred until a CSP
+  decision is made. The interaction designer wanted consent loading; the security and performance engineers wanted
+  none in v1; the architect noted the CSP forces "none".
+- Trojan Source: code spans, code blocks and link titles show C0/C1 controls and bidi overrides as visible escapes,
+  reusing the `HIDDEN` rule that now lives in `util.ts` (moved from `search.ts`). Blocks get `dir="auto"`. The fence
+  info string is only a lookup key (`[a-z0-9+#-]{1,20}`, mapped to a known language), never emitted into an attribute.
+- **Decision: adopted.**
+
+**Parser and limits (performance engineer).** Rendering is client-side from the text already fetched. No server change
+and no new endpoint.
+- The parse is linear: a line-oriented block pass with an explicit container stack (no recursion), and a
+  CommonMark-style delimiter stack for emphasis. No regex with nested quantifiers touches untrusted text.
+- Hard limits degrade to literal text and never throw: container nesting 32, inline nesting 32, 10,000 link
+  definitions, 200 table columns, 10,000 characters per inline line, about 200,000 rendered nodes. Tests run the
+  adversarial corpus (200k `*`, 100k `[`, 100k `> `, 100k `- `, 1e5 backticks, `![](` chains, a 1 MB single line)
+  with generous time bounds, and check that doubling the input does not more than triple the time.
+- Files over 1 MiB open in source with a "Too large to preview · Render anyway" note. The panel proposed 2 MiB
+  (performance) and 1 MiB (designer, architect, security); the lower cap won, because there is no chunked rendering.
+  A truncated file (`x-cv-truncated`) shows the existing truncation pill above the preview.
+- Fenced code highlights with `lexLine` from `highlight.ts`, threading its state line by line. The stateful per-file
+  `Highlighter` is not used. Fences over 2,000 lines or 200 KB render as plain text. The architect and the performance
+  engineer differed on `Highlighter` versus `lexLine`; `lexLine` won because it needs no file-wide state.
+- A live update re-parses (cheap and linear), builds the new tree off-screen, swaps it with `replaceChildren` in one
+  frame, and restores `scrollTop`. Identical text skips the render. A reload while in source mode does not render the
+  preview; it is rendered when shown. Closing a tab drops the tree and the parsed blocks.
+- Deferred: chunked/idle rendering, incremental node reuse, a parsing worker, lazy highlighting by visibility,
+  `content-visibility`. The 1 MiB cap and the node cap bound the cost until measurements say otherwise.
+- **Decision: adopted** (chunked rendering and node reuse deferred).
+
+**Structure and tests (frontend architect & test lead).** Three modules with hard boundaries:
+- `src/client/markdown.ts` is pure: `parseMarkdown(src)` returns a typed AST; it also exports `isMarkdown`,
+  `safeHref`, `resolveRepoPath` and `slugify` (GitHub-style, de-duplicated with `-1`, `-2`). It has no DOM and no
+  imports besides types, so its tests run without the fake DOM.
+- `src/client/mdrender.ts` turns the AST into DOM and `src/client/mdview.ts` is `MarkdownView { el, setText, dispose }`,
+  mirroring `CodeView.setText`. `editor.ts` gets `md?: MarkdownView` on `Tab` and a guard on every `tab.code`
+  consumer (status, go to line, find, git refresh, font size).
+- Syntax: CommonMark core (ATX/setext headings, paragraphs, fenced and indented code, nested block quotes, nested and
+  loose/tight lists, thematic break, link reference definitions, emphasis, code spans, links, images, autolinks,
+  escapes, hard breaks, a small entity table decoded to text) plus GFM (tables with alignment, task lists,
+  strikethrough, bare URL autolinks). Not supported in v1: raw HTML, footnotes, math, diagrams, front matter. Full
+  CommonMark conformance is not a goal; correctness is pinned by hand-written cases in `test/fixtures/` (authored in
+  this repo, not copied from the spec) plus a seeded fuzz test that checks the safety invariants on 2,000 random inputs.
+- `editor.ts` and `app.ts` cannot be loaded under the fake DOM, so they are excluded from line coverage, as in Round 4.
+  Everything with logic lives in the three modules above, which are covered.
+- **Decision: adopted.**
+
+### Slices (built test-first)
+1. `markdown.ts` core + `MarkdownView` + editor wiring: headings, paragraphs, source/preview toggle, live update with
+   scroll kept, `tab.code` guards, `file:line` forces source, find and Go to line switch to source. DESIGN.md section.
+2. Block and inline core: lists, quotes, code blocks, thematic break, emphasis, code spans, escapes, entities, hard
+   breaks, caps and the adversarial perf corpus.
+3. Links: `safeHref`, `resolveRepoPath`, external and repo-relative links, `#fragment` scrolling, heading slugs, autolinks.
+4. GFM: tables, task lists, strikethrough; theme styles in `styles.css`.
+5. Fenced code with `lexLine` highlighting, size caps, info-string allowlist.
+6. Images (relative via blob, remote placeholder), size gate with "Render anyway", palette command, README and
+   SECURITY notes, fuzz test.
