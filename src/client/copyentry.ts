@@ -59,3 +59,27 @@ export function bindEditorSelectionMenu(
 ): void {
   bindSelectionMenu(editor.el, host, show);
 }
+
+/** A tab as far as selection capture is concerned. */
+export interface SelTab<C, R extends { cloneRange(): R; toString(): string }> {
+  md?: { selectionRange(): R | null };
+  code?: { selection: C | null; selectedText(range?: C): string };
+}
+export type Captured<C, R> = { code?: C; md?: R };
+
+/** The selection to remember for a menu or palette: markdown ranges are cloned, so a later collapse of the live one cannot change them. */
+export function readSelection<C, R extends { cloneRange(): R; toString(): string }>(tab: SelTab<C, R> | undefined): Captured<C, R> | null {
+  if (tab?.md) {
+    const r = tab.md.selectionRange();
+    return r ? { md: r.cloneRange() } : null;
+  }
+  const c = tab?.code?.selection;
+  return c ? { code: c } : null;
+}
+
+/** Plain text of a captured selection (what the menu's Copy writes); "" when there is none. */
+export function snapshotText<C, R extends { cloneRange(): R; toString(): string }>(tab: SelTab<C, R> | undefined, snap: Captured<C, R> | null | undefined): string {
+  if (!snap) return "";
+  if (snap.md) return snap.md.toString();
+  return snap.code && tab?.code ? tab.code.selectedText(snap.code) : "";
+}
