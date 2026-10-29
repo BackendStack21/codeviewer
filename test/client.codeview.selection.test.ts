@@ -51,8 +51,15 @@ function parseRows(linesEl: FakeElement, html: string) {
     row.setAttribute("data-n", m[2]!);
     const tx = dom.document.createElement("span");
     tx.setAttribute("class", "tx");
-    // Rendered text is HTML-escaped, so any "<" left after stripping tags is markup debris, never content.
-    tx.append(m[3]!.replace(/<[^>]*>/g, "").replace(/</g, ""));
+    // Keep only the text outside tags; rendered text is HTML-escaped, so "<" always opens markup.
+    let text = "";
+    let inTag = false;
+    for (const ch of m[3]!) {
+      if (ch === "<") inTag = true;
+      else if (ch === ">") inTag = false;
+      else if (!inTag) text += ch;
+    }
+    tx.append(text);
     row.append(tx);
     linesEl.append(row);
   }
