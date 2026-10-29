@@ -53,6 +53,9 @@ export interface CodeViewState {
  * Virtualized, read-only code view: only visible lines exist in the DOM.
  * Highlighting is computed lazily per visible line by the incremental Highlighter.
  */
+/** The view the user last pressed in; document-level Cmd+A / copy only act for it. */
+let current: CodeView | null = null;
+
 export class CodeView {
   readonly el: HTMLElement;
   private scroller: HTMLElement;
@@ -96,9 +99,10 @@ export class CodeView {
     private lang: string,
     fontSize: number,
   ) {
+    current = null; // a new file starts without a pointer interaction
     this.linesEl = h("div", { class: "code-lines" });
     this.sizer = h("div", { class: "code-sizer" }, this.linesEl);
-    this.scroller = h("div", { class: "code-scroll" }, this.sizer);
+    this.scroller = h("div", { class: "code-scroll", tabindex: "-1" }, this.sizer);
     this.findInput = h("input", { class: "find-input", placeholder: "Find", spellcheck: "false", "aria-label": "Find in file" });
     this.findCount = h("span", { class: "find-count" });
     const toggle = (label: string, key: keyof CodeView["opts"], title: string) => {
@@ -145,9 +149,12 @@ export class CodeView {
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
       const n = Number(ln.dataset.n);
+      current = this;
       if (e.button || e.ctrlKey) return this.setActiveLine(n); // right press / Ctrl+click opens the menu: keep the range
       this.sel = null;
       this.applied = null;
+      current = this;
+      this.held = true;
       if ((e.target as HTMLElement).classList.contains("g") && this.gitMarks[n]) {
         e.preventDefault();
         this.togglePeek(n, ln);
@@ -156,23 +163,44 @@ export class CodeView {
       this.setActiveLine(n);
     });
     this.scroller.addEventListener("scroll", () => this.closePeek(), { passive: true });
+    // Focus does not reliably sit on the scroller (a press on code text may leave it on <body>), so the
+    // key and copy handling also listens on the document and checks that this view is the one in use.
+    const selectAllKey = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a";
     this.scroller.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
-        e.preventDefault();
-        this.selectAll();
-      }
+      if (!selectAllKey(e)) return;
+      e.preventDefault();
+      this.selectAll();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.defaultPrevented || !this.active || !selectAllKey(e) || isEditable(e.target)) return;
+      e.preventDefault();
+      this.selectAll();
     });
     // Also fires for the WebView's native Edit / context-menu Copy.
+    const onCopy = (e: ClipboardEvent) => {
+      if (e.defaultPrevented || !this.sel || isEditable(e.target)) return;
+      const ds = window.getSelection?.();
+      const live = !!ds && ds.rangeCount > 0 && !ds.isCollapsed;
+      const inside = live && (this.el.contains(ds!.anchorNode) || this.el.contains(ds!.focusNode));
+      if (live ? !inside : !this.active) return;
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", this.selectedText());
+    };
     this.scroller.addEventListener("copy", (e) => {
       if (!this.sel) return;
       e.preventDefault();
       e.clipboardData?.setData("text/plain", this.selectedText());
     });
+    document.addEventListener("copy", onCopy);
     document.addEventListener("selectionchange", () => this.readDomSelection());
+    document.addEventListener("mouseup", () => (this.held = false));
     // A primary press outside the whole view makes the model range stale.
     document.addEventListener("mousedown", (e) => {
       const t = e.target as Node | null;
-      if (e.button || e.ctrlKey || !this.sel || this.el.contains(t) || this.linesEl.contains(t)) return;
+      const inside = this.el.contains(t) || this.linesEl.contains(t);
+      if (inside) current = this;
+      else if (current === this) current = null;
+      if (e.button || e.ctrlKey || !this.sel || inside) return;
       this.sel = null;
       this.applied = null;
     });
@@ -185,6 +213,13 @@ export class CodeView {
     window.getSelection()?.setBaseAndExtent(a, ao, f, fo);
 
   private sel: SelRange | null = null;
+  /** True when the user's anchor is the end of the normalised range (bottom-to-top selection). */
+  private rev = false;
+  private get active() {
+    return current === this;
+  }
+  /** The primary button went down in the rows and has not been released. */
+  private held = false;
   /** Endpoints of the last DOM selection we applied; its selectionchange echo must not shrink the model. */
   private applied: SelRange | null = null;
 
@@ -196,6 +231,7 @@ export class CodeView {
   /** Sets the model range; the DOM selection is restored on the next render. */
   setRange(r: SelRange | null) {
     this.sel = r ? normalize(r) : null;
+    this.rev = false;
     this.applied = null;
     this.schedule();
   }
@@ -220,15 +256,23 @@ export class CodeView {
   /** Re-applies the model range to the freshly rendered rows. */
   private restoreSelection() {
     if (!this.sel) return;
+    if (this.held) {
+      // Never fight the browser mid-drag unless the render destroyed the anchor.
+      const an = window.getSelection?.()?.anchorNode;
+      if (an && this.linesEl.contains(an)) return;
+    }
     const last = Math.min(this.window.last, this.lines.length) - 1;
     const plan = restorePlan(this.sel, this.window.first, last, (l) => Math.min(this.lines[l]?.length ?? 0, MAX_RENDER_COLS));
     if (!plan) return;
     const a = this.rowTx(plan.anchor.line);
     const f = this.rowTx(plan.focus.line);
     if (!a || !f) return;
-    const [an, ao] = locate(a, plan.anchor.offset);
-    const [fn, fo] = locate(f, plan.focus.offset);
-    this.applied = { start: { line: plan.anchor.line, col: plan.anchor.offset }, end: { line: plan.focus.line, col: plan.focus.offset } };
+    const [sn, so] = locate(a, plan.anchor.offset);
+    const [en, eo] = locate(f, plan.focus.offset);
+    // anchor/focus keep the user's direction; `applied` is stored in the same anchor -> focus order
+    const [an, ao, fn, fo] = this.rev ? [en, eo, sn, so] : [sn, so, en, eo];
+    const [ap, fp] = this.rev ? [plan.focus, plan.anchor] : [plan.anchor, plan.focus];
+    this.applied = { start: { line: ap.line, col: ap.offset }, end: { line: fp.line, col: fp.offset } };
     this.setSelection(an, ao, fn, fo);
   }
 
@@ -245,17 +289,18 @@ export class CodeView {
     };
     const a = pos(ds.anchorNode, ds.anchorOffset);
     const f = pos(ds.focusNode, ds.focusOffset);
-    if (!a && !f) {
-      // Endpoints anywhere in the view (rows replaced, find bar, scrollbar) keep the range; a selection elsewhere replaces it.
-      if (this.el.contains(ds.anchorNode) || this.el.contains(ds.focusNode)) return;
-      this.sel = null;
-      this.applied = null;
+    if (!a || !f) {
+      // An endpoint outside the whole view (not just outside the rows) means a selection made elsewhere.
+      if ((!a && !this.el.contains(ds.anchorNode)) || (!f && !this.el.contains(ds.focusNode))) {
+        this.sel = null;
+        this.applied = null;
+      }
       return;
     }
-    if (!a || !f) return;
     const ap = this.applied;
     if (ap && a.line === ap.start.line && a.col === ap.start.col && f.line === ap.end.line && f.col === ap.end.col) return;
     this.applied = null;
+    this.rev = f.line < a.line || (f.line === a.line && f.col < a.col);
     this.sel = normalize({ start: a, end: f });
   }
 
@@ -651,6 +696,13 @@ export class CodeView {
     s.scrollLeft = revealCol(s.scrollLeft, s.clientWidth, this.gutterW, this.charW, this.mStart[this.mCur]!);
     this.schedule();
   }
+}
+
+/** True for targets that own Cmd+A / Cmd+C themselves (inputs, textareas such as the terminal's, editable hosts). */
+function isEditable(t: EventTarget | null): boolean {
+  const e = t as HTMLElement | null;
+  const tag = e?.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!e?.isContentEditable;
 }
 
 /** Text node and offset for a text offset inside a row's text element (the truncation label is skipped). */
