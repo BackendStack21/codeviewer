@@ -191,8 +191,29 @@ export function isInlinableImage(src: string, base: string): boolean {
   try {
     const u = new URL(src, base);
     if (u.protocol === "data:") return true;
+    if (u.protocol === "blob:") return new URL(u.pathname).origin === new URL(base).origin;
     return (u.protocol === "http:" || u.protocol === "https:") && u.origin === new URL(base).origin;
   } catch {
     return false;
   }
+}
+
+/** Weight/style of each same-origin font file, matching styles.css @font-face. */
+export const FONT_FACES: Record<string, { weight: string; style: string }> = {
+  "/fonts/JetBrainsMono-Regular.woff2": { weight: "400", style: "normal" },
+  "/fonts/JetBrainsMono-Bold.woff2": { weight: "700", style: "normal" },
+  "/fonts/JetBrainsMono-Italic.woff2": { weight: "400", style: "italic" },
+  "/fonts/JetBrainsMono-BoldItalic.woff2": { weight: "700", style: "italic" },
+  "/fonts/InterVariable.woff2": { weight: "100 900", style: "normal" },
+};
+
+/** Family to font files for fontFaceUrls. */
+export const FONT_TABLE: Record<string, string[]> = {
+  "JetBrains Mono": Object.keys(FONT_FACES).filter((u) => u.includes("JetBrains")),
+  Inter: ["/fonts/InterVariable.woff2"],
+};
+
+/** Embeddable faces (family, url, weight, style) for a computed font-family list. */
+export function snapFaces(familyList: string): { family: string; url: string; weight: string; style: string }[] {
+  return fontFaceUrls(familyList, FONT_TABLE).map((f) => ({ ...f, ...FONT_FACES[f.url]! }));
 }

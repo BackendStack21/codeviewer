@@ -1,6 +1,6 @@
 // Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
 import type { CopyImageDeps } from "./copyimage.ts";
-import { fontFaceUrls, isInlinableImage, pruneToRange, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
+import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import type { ImageLayout } from "./imagelayout.ts";
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -109,18 +109,6 @@ export const markdownSnapDeps: SnapDeps = {
   },
 };
 
-// Same-origin faces declared in styles.css (@font-face).
-const FACES: Record<string, { weight: string; style: string }> = {
-  "/fonts/JetBrainsMono-Regular.woff2": { weight: "400", style: "normal" },
-  "/fonts/JetBrainsMono-Bold.woff2": { weight: "700", style: "normal" },
-  "/fonts/JetBrainsMono-Italic.woff2": { weight: "400", style: "italic" },
-  "/fonts/JetBrainsMono-BoldItalic.woff2": { weight: "700", style: "italic" },
-  "/fonts/InterVariable.woff2": { weight: "100 900", style: "normal" },
-};
-const FONT_TABLE: Record<string, string[]> = {
-  "JetBrains Mono": Object.keys(FACES).filter((u) => u.includes("JetBrains")),
-  Inter: ["/fonts/InterVariable.woff2"],
-};
 const PAD = 12;
 
 type LiveNode = PNode & { node: Node; children: LiveNode[] };
@@ -175,8 +163,7 @@ export async function fragmentFromRange(range: Range, host: HTMLElement, bg: str
   wrap.setAttribute("style", `padding:${PAD}px;box-sizing:border-box;font:${hs.font};color:${hs.color};line-height:${hs.lineHeight}`);
   await Promise.all(imgs);
   const size = snapSize(Array.from(range.getClientRects()), PAD);
-  const faces = fontFaceUrls(`${getComputedStyle(host).fontFamily},JetBrains Mono,Inter`, FONT_TABLE);
-  const fontFaces = faces.map((f) => ({ ...f, ...FACES[f.url] }));
+  const fontFaces = snapFaces(`${getComputedStyle(host).fontFamily},JetBrains Mono,Inter`);
   return {
     html: new XMLSerializer().serializeToString(wrap),
     elements,
