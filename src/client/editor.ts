@@ -4,6 +4,7 @@ import { languageFor, languageName } from "./highlight.ts";
 import { fileIcon, icons } from "./icons.ts";
 import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
+import { planView } from "./viewstate.ts";
 import { basename, debounce, esc, formatBytes, h, MOD } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
 
@@ -143,21 +144,24 @@ export class Editor {
       tab.truncated = f.truncated;
       tab.encoding = f.encoding;
       tab.deleted = false;
+      const plan = planView({ kind: f.kind, path: tab.path, asSource: tab.asSource, reload, hasMd: !!tab.md, hasCode: !!tab.code });
+      // The tab keeps only the views the plan names, so a Markdown tab that goes binary/dir/image can't get stuck.
+      if (!plan.md) {
+        tab.md?.dispose();
+        tab.md = undefined;
+      }
+      if (!plan.code) tab.code = undefined;
       if (f.kind === "text") {
         tab.eol = /\r\n/.test(f.text.slice(0, 10000)) ? "CRLF" : "LF";
-        if (isMarkdown(tab.path) && !tab.asSource) {
-          tab.code = undefined;
-          if (tab.md && reload) tab.md.setText(f.text);
+        if (plan.view === "md") {
+          if (plan.reuse) tab.md!.setText(f.text);
           else {
-            tab.md?.dispose();
             tab.md = new MarkdownView(f.text, this.fontSize);
             tab.el.replaceChildren(tab.md.el);
             tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
           }
-        } else if (tab.code && reload) tab.code.setText(f.text);
+        } else if (plan.reuse) tab.code!.setText(f.text);
         else {
-          tab.md?.dispose();
-          tab.md = undefined;
           tab.el.replaceChildren();
           tab.code = new CodeView(f.text, tab.lang, this.fontSize);
           const code = tab.code;
@@ -173,8 +177,6 @@ export class Editor {
         }
         await this.refreshGit(tab, !reload);
       } else if (f.kind === "image") {
-        tab.md?.dispose();
-        tab.md = undefined;
         if (tab.image && reload) tab.image.reload(tab.mtime);
         else {
           tab.code = undefined;
@@ -198,6 +200,8 @@ export class Editor {
       }
       tab.kind = "error";
       tab.code = undefined;
+      tab.md?.dispose();
+      tab.md = undefined;
       tab.el.replaceChildren(h("div", { class: "notice error" }, h("strong", null, "Can't open file"), h("span", null, (e as Error).message)));
     }
     if (tab === this.active) this.status();
