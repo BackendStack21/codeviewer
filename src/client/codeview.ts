@@ -83,8 +83,6 @@ export class CodeView {
   private pressed = false;
   /** Line whose row currently carries the .blame span (-1 = none); render() rebuilds it with the markup. */
   private shownBlame = -1;
-  /** A non-collapsed selection existed at the last mouseup; no label then. */
-  private selHidesBlame = false;
   private peek: HTMLElement | null = null;
 
   // find state
@@ -148,6 +146,7 @@ export class CodeView {
       }
     });
     this.linesEl.addEventListener("mousedown", (e) => {
+      this.pressed = false; // a new press supersedes a hold whose mouseup was lost
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
       const n = Number(ln.dataset.n);
@@ -160,14 +159,17 @@ export class CodeView {
         return;
       }
       this.pressed = true;
-      this.selHidesBlame = false;
       this.setActiveLine(n);
     });
-    document.addEventListener("mouseup", () => {
+    const release = () => {
       if (!this.pressed) return;
       this.pressed = false;
-      this.selHidesBlame = window.getSelection?.()?.isCollapsed === false;
       this.syncBlame();
+    };
+    document.addEventListener("mouseup", release);
+    window.addEventListener("blur", release);
+    document.addEventListener("mousemove", (e) => {
+      if (this.pressed && e.buttons === 0) release(); // the button was released outside the page
     });
     this.scroller.addEventListener("scroll", () => this.closePeek(), { passive: true });
     this.scroller.addEventListener("keydown", (e) => {
@@ -181,7 +183,10 @@ export class CodeView {
       e.preventDefault();
       e.clipboardData?.setData("text/plain", this.selectedText());
     });
-    document.addEventListener("selectionchange", () => this.readDomSelection());
+    document.addEventListener("selectionchange", () => {
+      this.readDomSelection();
+      this.syncBlame(); // a selection hides the label only while it exists
+    });
     // A primary press outside the lines (not on the context menu) makes the model range stale.
     document.addEventListener("mousedown", (e) => {
       const t = e.target as HTMLElement | null;
@@ -388,7 +393,7 @@ export class CodeView {
   }
 
   private blameVisible(i: number): boolean {
-    return !!this.blame && this.blame.line === i && !this.pressed && !this.selHidesBlame;
+    return !!this.blame && this.blame.line === i && !this.pressed && window.getSelection?.()?.isCollapsed !== false;
   }
 
   private rowEl(i: number): HTMLElement | null {
