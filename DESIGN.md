@@ -167,6 +167,8 @@ hijacking). Required:
 │   http.ts     Bun.serve: auth, CSP, static (embedded+gzip), REST, WebSockets   │
 │   files.ts    safe path resolution, listing, text/binary sniffing, MIME       │
 │   index.ts    background file index for quick-open                            │
+│   search.ts   query compiler, matcher, candidate list; search.worker.ts scans │
+│               files off the main thread (killable on timeout)                 │
 │   watch.ts    recursive fs.watch → debounced change events                    │
 │   pty.ts      Bun.spawn({terminal}) sessions ↔ WebSocket                     │
 ├────────────────────────────────── client/ (vanilla TS, bundled) ──────────────┤
@@ -176,10 +178,12 @@ hijacking). Required:
 │   codeview.ts   virtualized lines, gutter, find, go-to-line, change flash     │
 │   highlight.ts  incremental multi-language tokenizer                          │
 │   palette.ts    fuzzy quick-open                                              │
+│   search.ts     sidebar search view: streamed, grouped results                │
+│   keys.ts       pure shortcut and side-view helpers                           │
 │   term/         terminal.ts (parser+screen), renderer.ts (canvas),            │
 │                 input.ts (keys/mouse), width.ts, boxdraw.ts                   │
 └───────────────────────────────────────────────────────────────────────────────┘
-REST:  GET /api/info · /api/list?path · /api/file?path · /api/raw?path · /api/index
+REST:  GET /api/info · /api/list?path · /api/file?path · /api/raw?path · /api/index · /api/search?q (NDJSON)
 WS:    /ws/events   (fs changes, open-file requests)
        /ws/pty?id   (binary: pty bytes; text JSON: resize/input control)
 ```
@@ -371,3 +375,162 @@ is a remote-code-execution channel by design, so it gets the same treatment as t
   - Successful installs of the CLI, the Linux package and a real code-signed DMG.
   - Rejection of a forged signature, a checksum mismatch, a rollback, an unsigned release, a
     missing key, and a tampered app bundle. In each case the installed copy must stay untouched.
+
+## 13. Round 4: Search in files
+
+**Brief.** Add project-wide content search. Four panelists reviewed it: the interaction designer,
+the systems/performance engineer, the application security engineer, and the frontend
+architect & test lead. Before this, the app had only ⌘P (fuzzy file names) and ⌘F (the open file).
+
+### Positions and decisions
+
+**Where it lives (interaction designer).** Search is a second sidebar view next to the
+Explorer. It is not a palette mode, because the palette closes when you act and search results
+need to stay visible while the agent works. It is not a panel either, because the terminal owns
+that slot.
+- ⌘⇧F (Ctrl+Shift+F) shows the sidebar, switches to Search, and focuses and selects the query.
+  It works from the terminal too.
+- The existing `mod && k === "f"` branch in `app.ts` ignores Shift, so the new branch must come
+  first and the old one gets `!e.shiftKey`.
+- The current sidebar view is saved in layout state (`L.sideView`).
+- **Decision: adopted.**
+
+**Query options.** Search uses the same three toggles as the find bar: Aa (match case),
+ab (whole word) and .* (regex), with the same labels and `aria-pressed`. Matching uses the same
+rules as `codeview.ts`, so a hit in the project is a hit in the file.
+- There are optional include and exclude globs, comma-separated, matched with `Bun.Glob`.
+- Deferred: replace (never; the app is read-only), multiline regex, search history.
+
+**Engine (performance engineer).** Matching runs in the server, in a Bun `Worker`, using sync
+I/O into a buffer that is reused.
+- Measured on a corpus of 68k files and 360 MB:
+  - One worker took 1.5 s and two took 0.89 s. The first hit arrived in 2 ms.
+  - `rg -uuu` took 2.3–3.1 s.
+  - Literal and regex searches cost the same, because the time goes to I/O.
+- `rg` was rejected: it isn't installed everywhere, and the app has a zero-dependency rule.
+- `git grep` was rejected for matching:
+  - It only works inside a git repo.
+  - It uses POSIX/PCRE regex instead of JS regex, so its results would disagree with the
+    highlights in the client.
+  - It brings in more git attack surface.
+- **Decision:** v1 uses one worker. A pool of two is a planned improvement if a 200k-file scan
+  misses its budget.
+- The worker also serves as the kill switch for runaway regexes.
+
+**Candidate files.**
+- In a git repo: `git ls-files -z --cached --others --exclude-standard --deduplicate -- .`,
+  run through the hardened git runner, so `.gitignore` is respected without writing a parser.
+  The list is cached and invalidated on watcher batches.
+- Outside a repo, or with "Include ignored files" on: the `FileIndex` list. That list still
+  skips `HEAVY_DIRS`.
+
+**Matching rules.** The query compiles to one JS `RegExp` (`g`, `u`, plus `i` when case-insensitive).
+- Literal queries are escaped.
+- Whole word uses the find bar's rule.
+- A case-sensitive literal search first checks the raw bytes with `Buffer.indexOf`, so most
+  files are never decoded.
+- Decoding follows `readForView`: strip the UTF-8 BOM, transcode UTF-16 with a BOM, and use
+  U+FFFD for invalid bytes.
+- Lines split on `\r\n|\r|\n`, the same as the client, so line numbers agree.
+- Columns are UTF-16 offsets.
+- Zero-length matches advance and are dropped.
+- A match that spans lines is clipped to its first line.
+
+**Security (application security engineer).** Non-negotiable:
+- The user's pattern never runs on the main thread, which carries the PTYs.
+  - The main thread enforces a 10 s wall-clock deadline and also cancels when `req.signal`
+    aborts.
+  - It cancels by setting a cancel flag, then calling `worker.terminate()` if the worker
+    doesn't stop.
+  - A test must prove that `terminate()` stops `/(a+)+$/` running on `"a".repeat(40)+"b"`.
+- Only one search runs per server: the newest wins and cancels the old one.
+- Limits:
+  - The query is at most 256 UTF-16 units, with no control characters.
+  - The response stops at 2,000 matches in total, then reports `truncated`.
+  - At most 100 matches per file, followed by a `more` count.
+  - Files over `MAX_TEXT_BYTES` and binary files (`looksBinary`) are skipped and counted.
+  - Previews show about 200 characters around the match.
+- Every candidate file is re-opened with `O_NOFOLLOW|O_NONBLOCK`, and the code checks that it is
+  a regular file from `fstat`. `FileIndex` lists symlinked files, so a link to `~/.ssh/id_rsa`
+  must not be read. Files are de-duplicated by `dev:ino`.
+- Per-file errors are swallowed and counted in `skipped`. Top-level errors return fixed
+  strings, never `e.message`, because that can contain absolute paths. Queries are never logged.
+- Client: paths and previews come from the repo, so they are untrusted.
+  - Every slice is escaped with `esc()`, and only the match is wrapped in `<mark>`.
+  - Rows are referenced by `data-i`, and paths never go into attributes.
+  - C0/C1 controls and bidi overrides are shown as visible escapes, against Trojan Source.
+- `git grep`, if it is ever added, must use `-e`, `-F`/`-E`, `--no-textconv`,
+  `GIT_LITERAL_PATHSPECS=1`, a kill timer and `--`.
+
+**API (frontend architect).** `GET /api/search?q=&regex=1&case=1&word=1&include=&exclude=&ignored=1`
+returns `400 {error}` for an empty query, a query that is too long, or an invalid regex.
+Otherwise it returns `200 application/x-ndjson`:
+```ts
+interface SearchMatch { line: number; col: number; len: number; preview: string; pcol: number }
+type SearchEvent =
+  | { t: "file"; path: string; matches: SearchMatch[]; more?: number }
+  | { t: "done"; files: number; matches: number; skipped: number; truncated: false | "matches" | "time"; ms: number; error?: true };
+```
+If the scanner fails after output has started, the stream still ends with a `done` line carrying
+`error: true` (no message).
+The search does not use `/ws/events`: that socket broadcasts to everyone and can't cancel a
+single request.
+
+**Results UI.**
+- Results are grouped by file, and each group can be collapsed. A file header shows its icon,
+  name, dimmed folder and match count.
+- Each line row shows the line number in tabular figures and a preview that starts about 30
+  characters before the match with "…". Matches are wrapped in `<mark>`, and the selected one in
+  `mark.cur`.
+- A summary line reads "312 results in 41 files", and the honest-cap banner reads
+  "Showing first 2,000 results".
+- No virtualization in v1: the 2,000-match cap bounds the DOM.
+- Keyboard:
+  - ↑/↓ move the selection.
+  - Enter opens the result in the preview tab and keeps focus in the list.
+  - Esc in the list returns to the query; Esc in the query clears it.
+  - F4 / ⇧F4 move to the next or previous result from anywhere except the terminal.
+- Live search runs as you type: after a 250 ms debounce, at 2 or more characters (1 for regex).
+  Enter runs it immediately. Each new search aborts the previous fetch through
+  `AbortController` plus a generation counter.
+
+**Opening a result.**
+- `openFile(path, {line, col, len})` goes through `editor.open` and then `CodeView.showRange`.
+- `showRange` marks the match as the current mark and scrolls it into view horizontally,
+  sharing `revealCol` with the find bar.
+- The marking logic is factored into a pure `markRanges` so it can be unit-tested.
+
+**Live changes.**
+- When a `changed` event touches a path that is in the results (or reports `many`), a "Results may
+  be out of date · Refresh" bar appears. Refresh re-runs the query. If the Search view is hidden,
+  the results are marked stale and refreshed when it is shown again.
+- **Deferred:** re-searching only the changed paths in place.
+
+**States.**
+- Empty query: a hint with the shortcuts.
+- Searching: a thin progress bar after 150 ms.
+- No results: "No results for …".
+- Invalid regex: the input turns red and shows the message, as in the find bar.
+- Skipped files: "N binary/large files skipped".
+
+### Slices (built test-first)
+1. Pure matcher `src/server/search.ts`: `compileQuery`, `matchText` (lines, cols, previews, caps).
+2. Scanner + Worker + `GET /api/search` NDJSON endpoint, with containment, binary/large skips, caps, cancel and the regex-DoS kill.
+3. Candidate list: `git ls-files` in repos, `FileIndex` otherwise, include/exclude globs, ignored toggle.
+4. Client `api.search` + NDJSON splitter + `SearchView`: grouped results, summary, truncation, errors, abort.
+5. App wiring: sidebar Explorer/Search switch, ⌘⇧F, commands, open result at line/col with `showRange` highlight, F4/⇧F4, keyboard nav.
+6. Staleness bar on `changed` events; docs (README shortcut table, DESIGN.md architecture/REST list).
+
+### As built
+
+- **Anchors.** The worker adds the `m` flag, so `^` and `$` match at every line, the same as the
+  client find bar, which tests one line at a time.
+- **Containment.** Each candidate's `realpath` is checked inside the worker; a path that resolves
+  outside the root counts as skipped, as do binary, oversized and non-regular files.
+- **Caps.** `include` and `exclude` are limited to 1,024 characters and 64 patterns each (400
+  otherwise).
+- **Collapsed groups.** Keyboard navigation follows the VS Code convention: ↑/↓ skip the rows of
+  a collapsed group, and F4 / ⇧F4 expand the group they land in.
+- **Coverage.** The worker (`search.worker.ts`), the build script, `app.ts` and `editor.ts` are
+  excluded from line coverage: they run in a separate thread, the bundler or the real DOM, and are
+  exercised through the endpoint, build and manual runs instead.
