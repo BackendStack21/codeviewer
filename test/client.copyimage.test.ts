@@ -43,10 +43,10 @@ describe("messages (AC-7b)", () => {
 });
 
 describe("copyPng (AC-8)", () => {
-  test("creates the ClipboardItem synchronously, before any await", () => {
+  test("creates the ClipboardItem and calls write synchronously, before any await", () => {
     const { deps, log } = mk();
     void copyPng(deps, Promise.resolve(blob));
-    expect(log).toEqual(["item"]);
+    expect(log).toEqual(["item", "write:1"]);
   });
   test("writes one item and reports clipboard", async () => {
     const { deps, log } = mk();
@@ -117,7 +117,7 @@ describe("copyCodeImage (AC-4, AC-7)", () => {
   test("renders synchronously inside the gesture (ClipboardItem built before await)", () => {
     const { deps, log } = mk();
     void copyCodeImage(deps, input());
-    expect(log).toEqual(["render", "item"]);
+    expect(log).toEqual(["render", "item", "write:1"]);
   });
   test("layout receives the laid out size", async () => {
     let w = 0;

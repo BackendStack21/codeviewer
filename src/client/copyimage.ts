@@ -33,13 +33,22 @@ const FILE_NAME = "selection.png";
 /** Writes a PNG (as a promise, so the ClipboardItem can be built inside the user gesture). */
 export async function copyPng(deps: CopyImageDeps, png: Promise<Blob>): Promise<CopyResult> {
   const { clipboard } = deps;
-  // Built before any await: the browser only accepts it while the user gesture is live.
-  let item: unknown;
+  // ClipboardItem and write() are both called before any await: browsers only accept them while the user gesture is live.
+  let write: Promise<void> | undefined;
   if (!deps.native && clipboard?.ClipboardItem && clipboard.write) {
     try {
-      item = new clipboard.ClipboardItem({ "image/png": png });
+      write = clipboard.write([new clipboard.ClipboardItem({ "image/png": png })]);
+    } catch (e) {
+      write = Promise.reject(e);
+    }
+  }
+  if (write) {
+    try {
+      await write;
+      await png; // a render failure must not read as success even if write() ignored it
+      return "clipboard";
     } catch {
-      item = undefined;
+      /* fall through to download */
     }
   }
   let blob: Blob;
@@ -47,14 +56,6 @@ export async function copyPng(deps: CopyImageDeps, png: Promise<Blob>): Promise<
     blob = await png;
   } catch {
     return "failed";
-  }
-  if (item) {
-    try {
-      await clipboard!.write!([item]);
-      return "clipboard";
-    } catch {
-      /* fall through to download */
-    }
   }
   if (deps.native) {
     try {

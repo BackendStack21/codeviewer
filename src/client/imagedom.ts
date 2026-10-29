@@ -12,12 +12,17 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-export function renderLayoutPng(layout: ImageLayout, scale: number, font: string, size: number): Promise<Blob> {
+export async function renderLayoutPng(layout: ImageLayout, scale: number, font: string, size: number): Promise<Blob> {
+  try {
+    await document.fonts.load(`${size}px ${font}`);
+  } catch {
+    /* draw with whatever font is available */
+  }
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(layout.width * scale);
   canvas.height = Math.ceil(layout.height * scale);
   const ctx = canvas.getContext("2d");
-  if (!ctx) return Promise.reject(new Error("no canvas"));
+  if (!ctx) throw new Error("no canvas");
   ctx.scale(scale, scale);
   ctx.textBaseline = "top";
   for (const op of layout.ops) {
