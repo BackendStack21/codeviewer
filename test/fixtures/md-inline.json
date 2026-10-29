@@ -1,0 +1,675 @@
+[
+ {
+  "name": "em with stars",
+  "src": "*a*",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "em with underscores",
+  "src": "_a_",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "strong with stars",
+  "src": "**a**",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "strong",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "strong with underscores",
+  "src": "__a__",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "strong",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "triple stars nest em around strong",
+  "src": "***a***",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "strong",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "nested emphasis",
+  "src": "*a **b** c*",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "text",
+        "value": "a "
+       },
+       {
+        "type": "strong",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       },
+       {
+        "type": "text",
+        "value": " c"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "stars work intraword",
+  "src": "a*b*c",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a"
+     },
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "text",
+        "value": "b"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": "c"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "underscores do not work intraword",
+  "src": "snake_case_name",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "snake_case_name"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "spaced stars are literal",
+  "src": "2 * 3 * 4",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "2 * 3 * 4"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unmatched opener is literal",
+  "src": "*a",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "*a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unbalanced stars",
+  "src": "**a*",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "*"
+     },
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "code span",
+  "src": "`a`",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "codespan",
+      "value": "a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "multi-backtick code span",
+  "src": "``a`b``",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "codespan",
+      "value": "a`b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "code span strips one surrounding space",
+  "src": "` a `",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "codespan",
+      "value": "a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "code span turns a newline into a space",
+  "src": "`a\nb`",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "codespan",
+      "value": "a b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "code span shields emphasis",
+  "src": "`*a*`",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "codespan",
+      "value": "*a*"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unmatched backtick is literal",
+  "src": "`a",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "`a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "backslash escapes",
+  "src": "\\*a\\*",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "*a*"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "escaped backslash",
+  "src": "\\\\",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "\\"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "backslash before a letter stays",
+  "src": "\\a",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "\\a"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "hard break with a backslash",
+  "src": "a\\\nb",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a"
+     },
+     {
+      "type": "break"
+     },
+     {
+      "type": "text",
+      "value": "b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "hard break with two spaces",
+  "src": "a  \nb",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "a"
+     },
+     {
+      "type": "break"
+     },
+     {
+      "type": "text",
+      "value": "b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "named and numeric entities become text",
+  "src": "&amp; &lt; &gt; &quot; &apos; &nbsp; &#65; &#x42;",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "& < > \" '   A B"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "entities decode to text only",
+  "src": "&lt;b&gt;x&lt;/b&gt;",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "<b>x</b>"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "unknown entity stays literal",
+  "src": "&foo;",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "&foo;"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "entities are decoded once",
+  "src": "&amp;lt;",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "&lt;"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "NUL and out-of-range references become U+FFFD",
+  "src": "&#0; &#x110000;",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "� �"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "inline link",
+  "src": "[a](/u \"t\")",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/u",
+      "title": "t",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "inline link without title",
+  "src": "[a](/u)",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/u",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "link text may hold emphasis",
+  "src": "[*a*](u)",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "u",
+      "title": null,
+      "children": [
+       {
+        "type": "em",
+        "children": [
+         {
+          "type": "text",
+          "value": "a"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "full reference link",
+  "src": "[foo][bar]\n\n[bar]: /url \"T\"",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": "T",
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "collapsed reference link",
+  "src": "[foo][]\n\n[foo]: /url",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "shortcut reference link, labels are case-insensitive",
+  "src": "[Foo]\n\n[FOO]: /url",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "Foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "undefined reference stays literal",
+  "src": "[nope]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[nope]"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definitions produce no block",
+  "src": "[a]: /x\n\ntext",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "text"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "image",
+  "src": "![a *b*](x.png \"t\")",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "image",
+      "src": "x.png",
+      "alt": "a b",
+      "title": "t"
+     }
+    ]
+   }
+  ]
+ }
+]
