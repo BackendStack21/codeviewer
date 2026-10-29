@@ -11,11 +11,12 @@ import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 import { isContextMenuOpen, showContextMenu } from "./menu.ts";
-import { copyImageCommand, selectionMenuItems, type SelectionHost } from "./copyentry.ts";
+import { bindSelectionMenu, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
 import { copyCodeImage, copyPng, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
 import { browserDeps, fragmentFromRange, markdownSnapDeps } from "./imagedom.ts";
 import { snapshotMarkdown } from "./mdsnap.ts";
 import type { ImageTheme } from "./imagelayout.ts";
+import type { SelRange } from "./selection.ts";
 import { SearchView } from "./search.ts";
 import { copyImageKey, normSideView, searchKey, type SideView } from "./keys.ts";
 
@@ -227,10 +228,7 @@ class App {
       if (t) this.trackRecent(t.path);
     };
     this.editor.onStatus = (s) => this.renderStatus(s);
-    this.editor.onSelectionMenu = (e) => {
-      const items = selectionMenuItems(this.selectionHost);
-      if (items.length) showContextMenu(e, items);
-    };
+    bindSelectionMenu(this.editor.el, this.selectionHost, showContextMenu);
     this.editor.onOpenLink = async (p, hash) => {
       const type = await api.stat(p);
       if (type === "file") {
@@ -322,6 +320,12 @@ class App {
     this.palette.onOpenFile = (p, line) => void this.openFile(p, { pin: true, line });
     this.palette.onGoToLine = (n) => this.editor.goToLine(n);
     this.palette.commands = this.commands();
+    // Opening the palette moves focus into its input; remember what was selected so its command still has it.
+    const openPalette = this.palette.open.bind(this.palette);
+    this.palette.open = (prefix) => {
+      this.paletteSel.take();
+      openPalette(prefix);
+    };
 
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.applyTheme());
     this.applyLayout();
@@ -347,7 +351,7 @@ class App {
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
       c("search.prev", "Previous Search Result", () => this.search.step(-1), "⇧F4"),
       c("view.explorer", "Show Explorer", () => this.setSideView("explorer")),
-      copyImageCommand(this.selectionHost, IS_MAC ? "⌘⇧C" : "Ctrl+Shift+C"),
+      copyImageCommand({ copyImage: () => this.copyImage(this.paletteSel.value()) }, IS_MAC ? "⌘⇧C" : "Ctrl+Shift+C"),
       markdownToggleCommand({ isMarkdownTab: () => this.editor.isMarkdownTab(), toggleMarkdown: () => this.editor.toggleMarkdown() }),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
       c("file.line", "Go to Line…", () => this.palette.open(":"), IS_MAC ? "⌃G" : "Ctrl+G"),
@@ -522,6 +526,16 @@ class App {
 
   // ───────────────────────────── copy as image ─────────────────────────────
 
+  private paletteSel = selectionSnapshot<{ code?: SelRange; md?: Range }>(() => {
+    const t = this.editor.active;
+    if (t?.md) {
+      const r = t.md.selectionRange();
+      return r ? { md: r.cloneRange() } : null;
+    }
+    const c = t?.code?.selection;
+    return c ? { code: c } : null;
+  });
+
   private selectionHost: SelectionHost = {
     hasSelection: () => {
       const t = this.editor.active;
@@ -552,13 +566,14 @@ class App {
   }
 
   /** Must run synchronously from the click/keydown handler: nothing is awaited before the clipboard write. */
-  private copyImage() {
+  private copyImage(snap: { code?: SelRange; md?: Range } | null = null) {
     const tab = this.editor.active;
+    this.paletteSel.clear();
     const notify = (m: string) => this.notify(m);
     const theme = this.imageTheme();
     const deps = browserDeps({ font: theme.font, size: theme.size, bridge: nativeBridge(), notify });
     if (tab?.md) {
-      const range = tab.md.selectionRange();
+      const range = snap?.md ?? tab.md.selectionRange();
       if (!range) return notify(MSG_NO_SELECTION);
       const text = range.toString();
       const png = fragmentFromRange(range, tab.md.el, cssVar("--bg-editor"))
@@ -576,7 +591,7 @@ class App {
       });
       return;
     }
-    const input = tab?.code?.imageInput();
+    const input = tab?.code?.imageInput(snap?.code);
     if (!input) return notify(MSG_NO_SELECTION);
     void copyCodeImage(deps, { ...input, theme, dpr: window.devicePixelRatio || 1 });
   }

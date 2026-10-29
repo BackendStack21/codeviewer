@@ -70,8 +70,6 @@ export class Editor {
   fontSize = 13;
   onActive: (tab: Tab | null) => void = () => {};
   onStatus: (s: StatusInfo | null) => void = () => {};
-  /** Right-click inside a code/preview selection: the app shows its Copy / Copy as Image menu. */
-  onSelectionMenu: (e: MouseEvent) => void = () => {};
   onReveal: (path: string) => void = () => {};
   /** Opens a repo-relative link from a Markdown preview; false when the target does not exist. */
   onOpenLink: (path: string, hash?: string) => Promise<boolean> = async (p, hash) => {
@@ -171,7 +169,6 @@ export class Editor {
           if (plan.reuse) tab.md!.setText(f.text);
           else {
             tab.md = new MarkdownView(f.text, this.fontSize, { path: tab.path, onOpen: (p, hash) => this.onOpenLink(p, hash) });
-            tab.md.onContextMenu = (e) => this.onSelectionMenu(e);
             tab.el.replaceChildren(tab.md.el);
             tab.el.prepend(this.viewToggle(tab, toggleLabel("preview"), icons.code));
           }
@@ -180,7 +177,6 @@ export class Editor {
           tab.el.replaceChildren();
           tab.code = new CodeView(f.text, tab.lang, this.fontSize);
           const code = tab.code;
-          code.onContextMenu = (e) => this.onSelectionMenu(e);
           const blame = debounce((line: number) => void this.loadBlame(tab, code, line), 180);
           code.onActiveLine = (line) => {
             this.status();

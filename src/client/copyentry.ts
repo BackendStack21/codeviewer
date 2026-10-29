@@ -33,3 +33,17 @@ export function bindSelectionMenu(
     if (items.length) show(e, items);
   });
 }
+
+/** Remembers the selection that existed when the palette opened (opening it moves focus and may drop the live one). */
+export function selectionSnapshot<T>(read: () => T | null): { take(): void; value(): T | null; clear(): void } {
+  let snap: T | null = null;
+  return {
+    take() {
+      snap = read();
+    },
+    value: () => snap,
+    clear() {
+      snap = null;
+    },
+  };
+}

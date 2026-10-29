@@ -656,5 +656,5 @@ menu with a selection, palette command `selection.copyImage`, Cmd/Ctrl+Shift+C; 
 out as canvas draw ops (`imagelayout.ts`, pure) in the theme colours and writes a PNG; a Markdown preview selection
 is serialised into an SVG `foreignObject` snapshot (`mdsnap.ts`). The ClipboardItem is created synchronously inside
 the gesture with a promise of the blob. Fallbacks: macOS app posts `copyimage` to the native bridge, no image
-clipboard downloads the PNG, a render failure copies plain text; sizes over 16M pixels are refused. Toasts reuse the
+clipboard downloads the PNG, a render failure copies plain text; selections over 20,000 rows or 4,000 columns, or whose canvas would exceed 16M pixels even at scale 1, are refused (the scale drops from 2 to fit). Toasts reuse the
 app toast.
