@@ -1,9 +1,11 @@
-import type { Block, Inline } from "./markdown.ts";
+import { resolveRepoPath, safeHref, slugify, type Block, type Inline } from "./markdown.ts";
 
 /** Rendering stops once this many DOM nodes exist. */
 const MAX_NODES = 200_000;
 
 class Budget {
+  readonly seen = new Map<string, number>();
+  constructor(readonly base = "") {}
   n = 0;
   over = false;
   /** Counts `k` nodes; false once the cap is exceeded. */
@@ -12,6 +14,41 @@ class Budget {
     if (this.n > MAX_NODES) this.over = true;
     return !this.over;
   }
+}
+
+function plainText(nodes: Inline[]): string {
+  let out = "";
+  for (const n of nodes) {
+    if (n.type === "text" || n.type === "codespan") out += n.value;
+    else if (n.type === "em" || n.type === "strong" || n.type === "link") out += plainText(n.children);
+    else if (n.type === "image") out += n.alt;
+  }
+  return out;
+}
+
+function link(parent: HTMLElement, n: Extract<Inline, { type: "link" }>, b: Budget) {
+  const safe = safeHref(n.href);
+  let a: HTMLElement | null = null;
+  if (safe) {
+    a = document.createElement("a");
+    if (safe.kind === "external") {
+      a.setAttribute("href", safe.href);
+      a.setAttribute("rel", "noopener noreferrer nofollow");
+      a.setAttribute("target", "_blank");
+    } else if (safe.kind === "fragment") {
+      a.setAttribute("href", safe.href);
+    } else {
+      const r = resolveRepoPath(b.base, safe.href);
+      if (r) {
+        a.setAttribute("href", "#");
+        a.setAttribute("data-md-path", r.path);
+        a.setAttribute("data-md-hash", r.hash);
+      } else a = null;
+    }
+  }
+  if (a && n.title) a.setAttribute("title", n.title);
+  if (a) parent.append(a);
+  inline(a ?? parent, n.children, b);
 }
 
 function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
@@ -38,8 +75,7 @@ function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
         parent.append(document.createElement("br"));
         break;
       case "link":
-        // Links are made clickable (and URL-checked) in a later slice; the label shows as text.
-        inline(parent, n.children, b);
+        link(parent, n, b);
         break;
       case "image":
         parent.append(n.alt);
@@ -54,6 +90,7 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
     switch (blk.type) {
       case "heading": {
         const el = document.createElement(`h${blk.level}`);
+        el.setAttribute("id", "md-" + slugify(plainText(blk.children), b.seen));
         parent.append(el);
         inline(el, blk.children, b);
         break;
@@ -102,10 +139,10 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
 }
 
 /** Turns the AST into DOM using createElement/textContent only; never innerHTML. */
-export function renderMarkdown(list: Block[]): HTMLElement {
+export function renderMarkdown(list: Block[], opts: { base?: string } = {}): HTMLElement {
   const root = document.createElement("div");
   root.className = "md-doc";
-  const b = new Budget();
+  const b = new Budget(opts.base);
   blocks(root, list, b);
   if (b.over) {
     const note = document.createElement("div");
