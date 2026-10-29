@@ -144,7 +144,7 @@ export class CodeView {
     this.linesEl.addEventListener("mousedown", (e) => {
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
-      if (e.button) return; // right/middle press keeps the range (the contextmenu follows)
+      if (e.button || e.ctrlKey) return; // right/middle press or Ctrl+click (opens the menu) keeps the range
       this.sel = null;
       this.applied = null;
       const n = Number(ln.dataset.n);
