@@ -222,8 +222,8 @@ export class CodeView {
   }
 
   /** Text of the model selection ("" when none), never including decorations. */
-  selectedText(): string {
-    return this.sel ? textOf(this.lines, this.sel) : "";
+  selectedText(range: SelRange | null = this.sel): string {
+    return range ? textOf(this.lines, range) : "";
   }
 
   private rowTx(n: number): HTMLElement | null {

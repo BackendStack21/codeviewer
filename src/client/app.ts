@@ -11,7 +11,7 @@ import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 import { isContextMenuOpen, showContextMenu } from "./menu.ts";
-import { bindEditorSelectionMenu, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
+import { bindEditorSelectionMenu, readSelection, snapshotText, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
 import { copyCodeImage, copyPng, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
 import { browserDeps, fragmentFromRange, markdownSnapDeps } from "./imagedom.ts";
 import { snapshotMarkdown } from "./mdsnap.ts";
@@ -526,15 +526,7 @@ class App {
 
   // ───────────────────────────── copy as image ─────────────────────────────
 
-  private readSel = (): { code?: SelRange; md?: Range } | null => {
-    const t = this.editor.active;
-    if (t?.md) {
-      const r = t.md.selectionRange();
-      return r ? { md: r.cloneRange() } : null;
-    }
-    const c = t?.code?.selection;
-    return c ? { code: c } : null;
-  };
+  private readSel = () => readSelection<SelRange, Range>(this.editor.active);
 
   private paletteSel = selectionSnapshot<{ code?: SelRange; md?: Range }>(this.readSel);
 
@@ -546,12 +538,9 @@ class App {
       return t?.md ? !!t.md.selectionRange() : !!t?.code?.selection;
     },
     copy: (snap) => {
-      const s = snap as { code?: SelRange; md?: Range } | null | undefined;
-      const t = this.editor.active;
-      if (t?.md) {
-        const r = s?.md ?? t.md.selectionRange();
-        if (r) void navigator.clipboard?.writeText(r.toString()).catch(() => {});
-      } else t?.code?.copySelection();
+      const s = (snap ?? this.readSel()) as { code?: SelRange; md?: Range } | null;
+      const t = snapshotText(this.editor.active, s);
+      if (t) void navigator.clipboard?.writeText(t).catch(() => {});
     },
     copyImage: (snap) => this.copyImage((snap as { code?: SelRange; md?: Range } | null | undefined) ?? null),
   };
