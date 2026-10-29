@@ -32,6 +32,7 @@ export class FileTree {
   private changedDirs = new Set<string>();
   private frame = 0;
   onOpen: (path: string, pin: boolean) => void = () => {};
+  onSearchIn: (dir: string) => void = () => {};
   git: GitState | null = null;
 
   constructor(rootName: string) {
@@ -192,7 +193,11 @@ export class FileTree {
     this.selected = n.path;
     this.schedule();
     if (n.type === "dir") {
-      showContextMenu(e, [{ label: n.expanded ? "Collapse" : "Expand", run: () => void this.toggle(n) }, collapse]);
+      showContextMenu(e, [
+        { label: n.expanded ? "Collapse" : "Expand", run: () => void this.toggle(n) },
+        { label: "Search in Folder…", run: () => this.onSearchIn(n.path) },
+        collapse,
+      ]);
     } else if (n.type === "file") {
       showContextMenu(e, [{ label: "Open in New Tab", run: () => this.onOpen(n.path, true) }]);
     }

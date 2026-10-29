@@ -26,7 +26,8 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
 - **Search in files:** ⌘⇧F opens a sidebar search over the whole project: literal, whole-word or
   regex, case toggle, include/exclude globs, and `.gitignore` respected unless you opt in to ignored
   files. Results stream in grouped by file, open at the exact match, and offer a Refresh when files
-  change on disk.
+  change on disk. Right-click a folder in the Explorer and pick "Search in Folder…" to scope the
+  search to it.
 - **Git (read-only):**
   - Explorer status letters and colors (M A U D R C), with folders rolled up and ignored files dimmed.
   - Colored tabs.

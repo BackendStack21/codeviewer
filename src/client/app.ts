@@ -167,6 +167,10 @@ class App {
     // Sidebar
     this.tree = new FileTree(this.info.name);
     this.tree.onOpen = (p, pin) => void this.openFile(p, { pin, focus: pin });
+    this.tree.onSearchIn = (dir) => {
+      this.showSearch();
+      this.search.searchIn(dir);
+    };
     this.search = new SearchView();
     this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
     const sideTab = (v: SideView, label: string) => {

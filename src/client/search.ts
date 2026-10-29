@@ -29,6 +29,11 @@ function safe(s: string): string {
   );
 }
 
+/** An include glob for everything under `dir`: Bun.Glob metacharacters escaped, commas (the list separator) widened to `?`. */
+export function folderGlob(dir: string): string {
+  return `${dir.replace(/[\\*?[\]{}!]/g, "\\$&").replace(/,/g, "?")}/**`;
+}
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Project-wide content search panel: query, option toggles, results grouped by file. */
@@ -210,6 +215,13 @@ export class SearchView {
     this.pending.clear();
     this.stale = false;
     this.staleBar.hidden = true;
+  }
+
+  /** Scopes the search to one folder (via the include field) and re-runs any current query. */
+  searchIn(dir: string): void {
+    this.include.value = folderGlob(dir);
+    this.focus();
+    if (this.eligible()) this.schedule(true);
   }
 
   focus() {
