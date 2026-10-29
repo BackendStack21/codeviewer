@@ -10,15 +10,9 @@ import { icons } from "./icons.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
-import { isContextMenuOpen, showContextMenu } from "./menu.ts";
-import { bindEditorSelectionMenu, readSelection, snapshotText, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
-import { copyCodeImage, copyPngOrSnapshot, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
-import { browserDeps, fragmentFromRange, markdownSnapDeps, snapshotDeps } from "./imagedom.ts";
-import { snapshotMarkdown } from "./mdsnap.ts";
-import type { ImageTheme } from "./imagelayout.ts";
-import type { SelRange } from "./selection.ts";
+import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
-import { copyImageKey, normSideView, searchKey, type SideView } from "./keys.ts";
+import { normSideView, searchKey, type SideView } from "./keys.ts";
 
 type ThemeName = "dark" | "light" | "system";
 
@@ -228,7 +222,6 @@ class App {
       if (t) this.trackRecent(t.path);
     };
     this.editor.onStatus = (s) => this.renderStatus(s);
-    bindEditorSelectionMenu(this.editor, this.selectionHost, showContextMenu);
     this.editor.onOpenLink = async (p, hash) => {
       const type = await api.stat(p);
       if (type === "file") {
@@ -320,12 +313,6 @@ class App {
     this.palette.onOpenFile = (p, line) => void this.openFile(p, { pin: true, line });
     this.palette.onGoToLine = (n) => this.editor.goToLine(n);
     this.palette.commands = this.commands();
-    // Opening the palette moves focus into its input; remember what was selected so its command still has it.
-    const openPalette = this.palette.open.bind(this.palette);
-    this.palette.open = (prefix) => {
-      this.paletteSel.take();
-      openPalette(prefix);
-    };
 
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.applyTheme());
     this.applyLayout();
@@ -351,7 +338,6 @@ class App {
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
       c("search.prev", "Previous Search Result", () => this.search.step(-1), "⇧F4"),
       c("view.explorer", "Show Explorer", () => this.setSideView("explorer")),
-      copyImageCommand({ copyImage: () => this.copyImage(this.paletteSel.value()) }, IS_MAC ? "⌘⇧C" : "Ctrl+Shift+C"),
       markdownToggleCommand({ isMarkdownTab: () => this.editor.isMarkdownTab(), toggleMarkdown: () => this.editor.toggleMarkdown() }),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
       c("file.line", "Go to Line…", () => this.palette.open(":"), IS_MAC ? "⌃G" : "Ctrl+G"),
@@ -524,74 +510,6 @@ class App {
 
   private saveLayout = debounce(() => store.set("layout", { ...this.L, v: LAYOUT_VERSION }), 200);
 
-  // ───────────────────────────── copy as image ─────────────────────────────
-
-  private readSel = () => readSelection<SelRange, Range>(this.editor.active);
-
-  private paletteSel = selectionSnapshot<{ code?: SelRange; md?: Range }>(this.readSel);
-
-  private selectionHost: SelectionHost = {
-    capture: () => this.readSel(),
-    hasSelection: (snap) => {
-      if (snap !== undefined) return snap !== null;
-      const t = this.editor.active;
-      return t?.md ? !!t.md.selectionRange() : !!t?.code?.selection;
-    },
-    copy: (snap) => {
-      const s = (snap ?? this.readSel()) as { code?: SelRange; md?: Range } | null;
-      const t = snapshotText(this.editor.active, s);
-      if (t) void navigator.clipboard?.writeText(t).catch(() => {});
-    },
-    copyImage: (snap) => this.copyImage((snap as { code?: SelRange; md?: Range } | null | undefined) ?? null),
-  };
-
-  private imageTheme(): ImageTheme {
-    const tokenColors: Record<string, string> = {};
-    for (const t of "kscnftpovmhaxl") tokenColors[t] = cssVar(`--sx-${t}`);
-    const font = "JetBrains Mono";
-    return {
-      bg: cssVar("--bg-editor"),
-      fg: cssVar("--fg"),
-      tokenColors,
-      tokenStyles: { c: { italic: true }, h: { bold: true }, b: { bold: true }, i: { italic: true } },
-      font,
-      size: this.L.codeSize,
-    };
-  }
-
-  /** Must run synchronously from the click/keydown handler: nothing is awaited before the clipboard write. */
-  private copyImage(snap: { code?: SelRange; md?: Range } | null = null) {
-    const tab = this.editor.active;
-    this.paletteSel.clear();
-    const notify = (m: string) => this.notify(m);
-    const theme = this.imageTheme();
-    const deps = browserDeps({ font: theme.font, size: theme.size, bridge: nativeBridge(), notify });
-    if (tab?.md) {
-      const range = snap?.md ?? tab.md.selectionRange();
-      if (!range) return notify(MSG_NO_SELECTION);
-      const text = range.toString();
-      const png = fragmentFromRange(range, tab.md.el, cssVar("--bg-editor"))
-        .then((f) => snapshotMarkdown(markdownSnapDeps, f))
-        .then((r) => {
-          if (!(r instanceof Blob)) throw new Error("snapshot failed");
-          return r;
-        });
-      const rects = Array.from(range.getClientRects());
-      const vp = { width: window.innerWidth, height: window.innerHeight };
-      void copyPngOrSnapshot({ ...deps, ...snapshotDeps(nativeBridge()) }, png, rects, vp).then(async (res) => {
-        if (res === "failed") {
-          await Promise.resolve(deps.copyText(text)).catch(() => {});
-          return notify(MSG_FAILED);
-        }
-        notify(res === "downloaded" ? MSG_DOWNLOADED : MSG_OK);
-      });
-      return;
-    }
-    const input = tab?.code?.imageInput(snap?.code);
-    if (!input) return notify(MSG_NO_SELECTION);
-    void copyCodeImage(deps, { ...input, theme, dpr: window.devicePixelRatio || 1 });
-  }
-
   private notify(msg: string) {
     this.toast.textContent = msg;
     this.toast.hidden = false;
@@ -679,13 +597,6 @@ class App {
         const k = e.key.toLowerCase();
         const inTerm = (e.target as HTMLElement).classList?.contains("term-input");
         let handled = true;
-        if (copyImageKey(e, { isMac: IS_MAC, inTerm: !!inTerm })) {
-          // Runs synchronously inside the keydown so the clipboard write keeps the user gesture.
-          this.copyImage();
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
         const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
         if (sk === "search") this.showSearch();
         else if (sk === "next" || sk === "prev") this.search.step(sk === "next" ? 1 : -1);

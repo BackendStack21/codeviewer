@@ -1207,7 +1207,6 @@ svg {
   }
 }
 .trunc {
-  user-select: none;
   color: var(--fg-faint);
   font-style: italic;
 }
@@ -2081,5 +2080,3 @@ li[data-state="done"] .upd-mark {
 .sv-stale { display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: var(--fg-muted); }
 .sv-stale[hidden] { display: none; }
 .sv-refresh { cursor: pointer; }
-
-html.snap-hide-sel ::selection { background: transparent !important; }

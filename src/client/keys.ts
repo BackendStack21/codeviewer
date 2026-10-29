@@ -9,7 +9,6 @@ export interface KeyLike {
   ctrlKey?: boolean;
   altKey?: boolean;
   shiftKey?: boolean;
-  target?: unknown;
 }
 
 export type SearchKeyAction = "search" | "find" | "next" | "prev";
@@ -30,12 +29,4 @@ export function searchKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): S
 /** Normalises a persisted sidebar view; anything unknown falls back to the Explorer. */
 export function normSideView(v: unknown): SideView {
   return v === "search" ? "search" : "explorer";
-}
-
-/** Cmd/Ctrl+Shift+C copies the selection as an image (not from the terminal, where Ctrl+Shift+C is its own copy). */
-export function copyImageKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): boolean {
-  const mod = o.isMac ? !!e.metaKey : !!e.ctrlKey;
-  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null | undefined;
-  const field = t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || !!t?.isContentEditable;
-  return mod && !!e.shiftKey && !e.altKey && !o.inTerm && !field && e.key.toLowerCase() === "c";
 }
