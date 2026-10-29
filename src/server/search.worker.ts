@@ -1,8 +1,8 @@
 // Search worker: scans candidate files with a verified-regular-file handle and posts results.
 // The user's pattern only ever runs here, so the main thread can terminate() it at any time.
-import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { looksBinary, MAX_TEXT_BYTES } from "./files.ts";
+import { looksBinary, MAX_TEXT_BYTES, within } from "./files.ts";
 import { compileQuery, matchText, MAX_TOTAL_MATCHES, type WorkerJob, type WorkerMsg } from "./search.ts";
 
 declare var self: Worker;
@@ -26,6 +26,12 @@ function run({ req, cancel }: WorkerJob): void {
   }
   // Like the find bar (which tests line by line), ^ and $ anchor at line boundaries.
   const re = new RegExp(c.re.source, c.re.flags.includes("m") ? c.re.flags : c.re.flags + "m");
+  let rootReal = req.root;
+  try {
+    rootReal = realpathSync(req.root);
+  } catch {
+    /* unreadable root: every open below fails and counts as skipped */
+  }
   const seen = new Set<string>();
   let files = 0;
   let matches = 0;
@@ -41,7 +47,9 @@ function run({ req, cancel }: WorkerJob): void {
     }
     let fd = -1;
     try {
-      fd = openSync(path.join(req.root, rel), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      // Containment: a symlinked parent (or file) that resolves outside the root is never opened.
+      if (!within(rootReal, realpathSync(path.join(rootReal, rel)))) throw new Error("skip");
+      fd = openSync(path.join(rootReal, rel), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const st = fstatSync(fd);
       if (!st.isFile() || st.size > MAX_TEXT_BYTES) throw new Error("skip");
       const id = `${st.dev}:${st.ino}`;

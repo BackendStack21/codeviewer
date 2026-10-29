@@ -10,7 +10,7 @@ import { loadAssets, FONTS, type Asset } from "./assets.ts";
 import { Settings } from "./settings.ts";
 import { Git } from "./git.ts";
 import { Updater } from "./update.ts";
-import { Candidates, compileQuery, createWorkerScanner, type SearchEvent } from "./search.ts";
+import { Candidates, compileQuery, globsOk, createWorkerScanner, type SearchEvent } from "./search.ts";
 
 import pkg from "../../package.json" with { type: "json" };
 
@@ -143,6 +143,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     const o = { regex: sp.get("regex") === "1", case: sp.get("case") === "1", word: sp.get("word") === "1" };
     const c = compileQuery(q, o);
     if (!c.ok) return fail(400, c.error);
+    const include = sp.get("include") ?? "";
+    const exclude = sp.get("exclude") ?? "";
+    if (!globsOk(include) || !globsOk(exclude)) return fail(400, "Invalid include/exclude globs");
 
     activeSearch?.abort();
     const ac = new AbortController();
@@ -164,7 +167,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       poke();
     };
     const run = (async () => {
-      const list = await candidates.list({ include: sp.get("include"), exclude: sp.get("exclude"), ignored: sp.get("ignored") === "1" });
+      const list = await candidates.list({ include, exclude, ignored: sp.get("ignored") === "1" });
       await scanner({ root: opts.root, files: list, q, opts: o }, ac.signal, emit);
     })()
       .catch(() => {
