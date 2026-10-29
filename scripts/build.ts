@@ -92,7 +92,7 @@ function minifyCss(css: string): string {
 
 async function compile(target: string | null, outfile: string) {
   await mkdir(path.dirname(outfile), { recursive: true });
-  const cmd = ["bun", "build", "--compile", "--minify", "--sourcemap=none", path.join(root, "src/server/main.ts"), "--outfile", outfile];
+  const cmd = ["bun", "build", "--compile", "--minify", "--sourcemap=none", path.join(root, "src/server/main.ts"), path.join(root, "src/server/search.worker.ts"), "--outfile", outfile];
   if (target) cmd.push(`--target=${target}`);
   await sh(cmd);
   log(`binary   ${path.relative(root, outfile)} ${mb((await stat(outfile)).size)}`);
