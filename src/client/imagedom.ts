@@ -1,5 +1,5 @@
 // Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
-import type { CopyImageDeps } from "./copyimage.ts";
+import type { CopyImageDeps, SnapRect, SnapshotDeps } from "./copyimage.ts";
 import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import type { ImageLayout } from "./imagelayout.ts";
 
@@ -70,6 +70,32 @@ export function browserDeps(opts: { font: string; size: number; bridge?: Bridge;
     native: bridge ? async (png) => bridge.postMessage({ t: "copyimage", png: await toBase64(png) }) : undefined,
     copyText: (t) => navigator.clipboard.writeText(t),
     notify: opts.notify,
+  };
+}
+
+const SNAP_TIMEOUT = 3000;
+let snapDone: ((ok: boolean) => void) | undefined;
+if (typeof window !== "undefined") (window as unknown as { __cvSnap?: (ok: boolean) => void }).__cvSnap = (ok) => snapDone?.(ok);
+
+/** Snapshot fallback deps: native takeSnapshot via the bridge (reply through window.__cvSnap) and a root class hiding ::selection. */
+export function snapshotDeps(bridge: Bridge): SnapshotDeps {
+  const root = document.documentElement;
+  return {
+    hideSelection: (on) => root.classList.toggle("snap-hide-sel", on),
+    snapshot: bridge
+      ? (r: SnapRect) =>
+          new Promise<boolean>((res) => {
+            const timer = setTimeout(() => finish(false), SNAP_TIMEOUT);
+            const finish = (ok: boolean) => {
+              clearTimeout(timer);
+              snapDone = undefined;
+              res(ok);
+            };
+            snapDone = finish;
+            // Give the highlight removal one frame to paint before the native side captures.
+            requestAnimationFrame(() => requestAnimationFrame(() => bridge.postMessage({ t: "snapshotrect", ...r })));
+          })
+      : undefined,
   };
 }
 
