@@ -102,7 +102,9 @@ describe("AC-9 the label waits for the button and the selection", () => {
     m.view.setBlame(1, "Kay");
     env.flush();
     expect(shown(m)).toBe(0);
-    m.sel.isCollapsed = true;
+    press(m, 1); // a plain click clears the range
+    m.sel.set(tx(m, 1).childNodes[0]!, 0, tx(m, 1).childNodes[0]!, 0, true);
+    release();
     fireSelectionChange(env);
     env.flush();
     expect(blameOf(m.row(1))!.textContent).toBe("Kay");
