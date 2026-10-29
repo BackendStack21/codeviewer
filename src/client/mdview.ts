@@ -132,6 +132,14 @@ export class MarkdownView {
     return true;
   }
 
+  /** The live selection range when it lies inside this view, else null. */
+  selectionRange(): Range | null {
+    const sel = window.getSelection?.();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const r = sel.getRangeAt(0);
+    return this.el.contains(r.commonAncestorContainer) ? r : null;
+  }
+
   setFontSize(px: number) {
     this.el.style.fontSize = `${px}px`;
   }
