@@ -241,6 +241,7 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     //   {t: "theme", dark, bg}  sync the window appearance
     //   {t: "drag"}            mouse-down on empty title bar: move the window
     //   {t: "copyimage", png}  PNG (base64) to put on the general pasteboard
+    //   {t: "snapshotrect", x, y, w, h}  snapshot a viewport rect (CSS px) to the pasteboard; replies via window.__cvSnap(ok)
     //   {t: "dblclick"}        double-click on the title bar: system zoom/minimize action
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let t = body["t"] as? String else { return }
@@ -257,6 +258,21 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 pb.setData(data, forType: .png)
+            }
+            return
+        }
+        if t == "snapshotrect" {
+            func num(_ k: String) -> Double? { (body[k] as? NSNumber)?.doubleValue }
+            func reply(_ ok: Bool) { webView.evaluateJavaScript("window.__cvSnap && window.__cvSnap(\(ok))", completionHandler: nil) }
+            guard let x = num("x"), let y = num("y"), let w = num("w"), let h = num("h"), w > 0, h > 0 else { return reply(false) }
+            let cfg = WKSnapshotConfiguration()
+            cfg.rect = CGRect(x: x, y: y, width: w, height: h)
+            webView.takeSnapshot(with: cfg) { image, _ in
+                guard let image = image, let tiff = image.tiffRepresentation,
+                      let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return reply(false) }
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                reply(pb.setData(png, forType: .png))
             }
             return
         }

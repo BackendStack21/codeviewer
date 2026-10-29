@@ -91,3 +91,74 @@ export async function copyCodeImage(deps: CopyImageDeps, input: CopyImageInput):
   }
   return done(result === "downloaded" ? MSG_DOWNLOADED : MSG_OK);
 }
+
+export interface RectLike {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+export interface SnapRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+export interface Viewport {
+  width: number;
+  height: number;
+}
+
+/** Union of the selection's client rects, clamped to the visible viewport (CSS px); null when nothing visible remains. */
+export function clampSnapRect(rects: RectLike[], vp: Viewport): SnapRect | null {
+  let l = Infinity;
+  let t = Infinity;
+  let r = -Infinity;
+  let b = -Infinity;
+  for (const q of rects) {
+    if (!(q.width > 0 && q.height > 0)) continue;
+    l = Math.min(l, q.left);
+    t = Math.min(t, q.top);
+    r = Math.max(r, q.left + q.width);
+    b = Math.max(b, q.top + q.height);
+  }
+  l = Math.max(l, 0);
+  t = Math.max(t, 0);
+  r = Math.min(r, vp.width);
+  b = Math.min(b, vp.height);
+  if (!(r > l && b > t)) return null;
+  return { x: l, y: t, w: r - l, h: b - t };
+}
+
+export interface SnapshotDeps {
+  /** Native WKWebView snapshot of a viewport rect; resolves true when the PNG reached the pasteboard. */
+  snapshot?: (r: SnapRect) => Promise<boolean>;
+  /** Hides (true) / restores (false) the selection highlight. */
+  hideSelection(on: boolean): void;
+}
+
+/** Tries the native snapshot of the selection rects; true only when it succeeded. Always restores the highlight. */
+export async function copyViaSnapshot(deps: SnapshotDeps, rects: RectLike[], vp: Viewport): Promise<boolean> {
+  const rect = deps.snapshot ? clampSnapRect(rects, vp) : null;
+  if (!deps.snapshot || !rect) return false;
+  deps.hideSelection(true);
+  try {
+    return (await deps.snapshot(rect)) === true;
+  } catch {
+    return false;
+  } finally {
+    deps.hideSelection(false);
+  }
+}
+
+/** copyPng, then (only when the PNG could not be produced) the native snapshot fallback. */
+export async function copyPngOrSnapshot(
+  deps: CopyImageDeps & SnapshotDeps,
+  png: Promise<Blob>,
+  rects: RectLike[],
+  vp: Viewport,
+): Promise<CopyResult | "snapshot"> {
+  const res = await copyPng(deps, png);
+  if (res === "failed" && (await copyViaSnapshot(deps, rects, vp))) return "snapshot";
+  return res;
+}

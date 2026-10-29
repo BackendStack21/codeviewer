@@ -12,8 +12,8 @@ import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 import { isContextMenuOpen, showContextMenu } from "./menu.ts";
 import { bindEditorSelectionMenu, readSelection, snapshotText, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
-import { copyCodeImage, copyPng, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
-import { browserDeps, fragmentFromRange, markdownSnapDeps } from "./imagedom.ts";
+import { copyCodeImage, copyPngOrSnapshot, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
+import { browserDeps, fragmentFromRange, markdownSnapDeps, snapshotDeps } from "./imagedom.ts";
 import { snapshotMarkdown } from "./mdsnap.ts";
 import type { ImageTheme } from "./imagelayout.ts";
 import type { SelRange } from "./selection.ts";
@@ -576,7 +576,9 @@ class App {
           if (!(r instanceof Blob)) throw new Error("snapshot failed");
           return r;
         });
-      void copyPng(deps, png).then(async (res) => {
+      const rects = Array.from(range.getClientRects());
+      const vp = { width: window.innerWidth, height: window.innerHeight };
+      void copyPngOrSnapshot({ ...deps, ...snapshotDeps(nativeBridge()) }, png, rects, vp).then(async (res) => {
         if (res === "failed") {
           await Promise.resolve(deps.copyText(text)).catch(() => {});
           return notify(MSG_FAILED);
