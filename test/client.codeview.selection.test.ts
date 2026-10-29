@@ -51,10 +51,8 @@ function parseRows(linesEl: FakeElement, html: string) {
     row.setAttribute("data-n", m[2]!);
     const tx = dom.document.createElement("span");
     tx.setAttribute("class", "tx");
-    // Strip tags until none remain, so a split tag like "<scr<x>ipt>" cannot survive one pass.
-    let text = m[3]!;
-    for (let prev = ""; prev !== text; ) [prev, text] = [text, text.replace(/<[^>]*>/g, "")];
-    tx.append(text);
+    // Rendered text is HTML-escaped, so any "<" left after stripping tags is markup debris, never content.
+    tx.append(m[3]!.replace(/<[^>]*>/g, "").replace(/</g, ""));
     row.append(tx);
     linesEl.append(row);
   }
