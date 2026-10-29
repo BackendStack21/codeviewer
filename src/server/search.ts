@@ -192,12 +192,23 @@ export function createWorkerScanner(deadlineMs: number = SEARCH_DEADLINE_MS): Sc
 
 // ───────────── SL03 scaffolding: candidate list (stubs, filled in by implement) ─────────────
 
-/** Splits a comma-separated glob list: trimmed, empty entries dropped. */
+/** Splits a comma-separated glob list: trimmed, empty entries dropped; `\,` is a literal comma, other escapes are kept for Bun.Glob. */
 export function parseGlobs(s: string | null | undefined): string[] {
-  return (s ?? "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
+  const out: string[] = [];
+  let cur = "";
+  const str = s ?? "";
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i]!;
+    if (c === "\\" && i + 1 < str.length) {
+      const n = str[++i]!;
+      cur += n === "," ? "," : c + n;
+    } else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  out.push(cur);
+  return out.map((x) => x.trim()).filter(Boolean);
 }
 
 export const MAX_GLOB_CHARS = 1024;

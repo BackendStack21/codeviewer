@@ -401,8 +401,13 @@ rules as `codeview.ts`, so a hit in the project is a hit in the file.
 - There are optional include and exclude globs, comma-separated, matched with `Bun.Glob`.
 - Deferred: replace (never; the app is read-only), multiline regex, search history.
 - **Search in Folder…** (folder context menu in the Explorer) switches to Search and sets the
-  include field to `<folder>/**`, re-running any current query. Glob metacharacters in the folder
-  name are backslash-escaped, and commas (the list separator) become `?`, so the scope stays literal.
+  include field to `<folder>/**`, re-running any current query. Glob metacharacters, commas and
+  whitespace in the folder name are backslash-escaped, so the scope stays literal: `parseGlobs`
+  treats `\,` as a literal comma (not a separator) and the client's trim cannot eat edge whitespace.
+  The scope is set before the view is revealed, so exactly one request is made. A git-ignored folder
+  turns "Include ignored files" on. An existing exclude is kept (user-authored filter), so an exclude
+  that covers the folder yields no results. A scope longer than the server's 1,024-character cap shows
+  a message instead of an invalid-query error.
 
 **Engine (performance engineer).** Matching runs in the server, in a Bun `Worker`, using sync
 I/O into a buffer that is reused.

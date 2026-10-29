@@ -29,10 +29,13 @@ function safe(s: string): string {
   );
 }
 
-/** An include glob for everything under `dir`: Bun.Glob metacharacters escaped, commas (the list separator) widened to `?`. */
+/** An include glob for everything under `dir`: Bun.Glob metacharacters, commas (the list separator) and whitespace (trimmed from list entries) backslash-escaped, so the scope is literal. */
 export function folderGlob(dir: string): string {
-  return `${dir.replace(/[\\*?[\]{}!]/g, "\\$&").replace(/,/g, "?")}/**`;
+  return `${dir.replace(/[\\*?[\]{}!,\s]/g, "\\$&")}/**`;
 }
+
+/** Longest include list the server accepts (src/server/search.ts MAX_GLOB_CHARS). */
+const MAX_INCLUDE = 1024;
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -40,6 +43,8 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export class SearchView {
   readonly el: HTMLElement;
   onOpen: (path: string, line: number, col: number, len: number) => void = () => {};
+  /** Makes the view visible; searchIn calls it once the scope is set, before searching. */
+  onReveal: () => void = () => {};
   private input: HTMLInputElement;
   private include: HTMLInputElement;
   private exclude: HTMLInputElement;
@@ -218,9 +223,27 @@ export class SearchView {
   }
 
   /** Scopes the search to one folder (via the include field) and re-runs any current query. */
-  searchIn(dir: string): void {
-    this.include.value = folderGlob(dir);
+  searchIn(dir: string, ignored = false): void {
+    const glob = folderGlob(dir);
+    this.include.value = glob;
+    if (ignored && !this.on.ignored) {
+      // A git-ignored folder has no results unless ignored files are searched too.
+      this.on.ignored = true;
+      this.toggles.get("ignored")?.setAttribute("aria-pressed", "true");
+    }
+    // The search below replaces stale results, so revealing the view must not start its own.
+    this.clearStale();
+    this.onReveal();
     this.focus();
+    if (glob.length > MAX_INCLUDE) {
+      this.cancel();
+      this.started = true;
+      this.groups = [];
+      this.done = null;
+      this.error = "Folder path is too long to search in as a folder";
+      this.input.classList.remove("invalid");
+      return this.render();
+    }
     if (this.eligible()) this.schedule(true);
   }
 
