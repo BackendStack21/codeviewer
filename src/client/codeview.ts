@@ -302,15 +302,9 @@ export class CodeView {
   private readDomSelection() {
     const ds = window.getSelection?.();
     if (!ds || ds.rangeCount === 0 || !ds.anchorNode || !ds.focusNode) return;
-    if (ds.isCollapsed) {
-      // The user collapsed the selection inside the rows (arrow key, click): the model range is stale.
-      // Not while a render is pending, which is about to re-apply it.
-      if (this.sel && !this.frame && !this.held && this.linesEl.contains(ds.anchorNode)) {
-        this.sel = null;
-        this.applied = null;
-      }
-      return;
-    }
+    // A collapsed DOM selection is not an intent to clear: scrolling the range out of the rendered rows makes
+    // the browser collapse it. Only a plain click, setText or a selection made elsewhere clears the model range.
+    if (ds.isCollapsed) return;
     const pos = (node: Node, off: number) => {
       const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
       const row = el?.closest<HTMLElement>(".ln");
