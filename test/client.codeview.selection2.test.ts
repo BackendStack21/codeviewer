@@ -52,7 +52,7 @@ describe("R-02 the selection keeps its direction across a re-render", () => {
     pressRow(m, 50);
     env.flush();
     dragUp(m);
-    m.view.setBlame(50, "someone");
+    m.view.schedule(); // a full re-render of a stale window
     env.flush();
     const last = m.calls[m.calls.length - 1]!;
     expect([rowOf(last.a), last.ao, rowOf(last.f), last.fo]).toEqual([50, 1, 10, 1]);

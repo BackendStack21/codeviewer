@@ -115,12 +115,12 @@ describe("range survives re-renders (AC-4)", () => {
     expect(m.view.selection).toEqual(rng(500, 0, 510, 3));
   });
 
-  test("setBlame re-renders re-apply the same DOM positions and leave the model unchanged", () => {
+  test("full re-renders re-apply the same DOM positions and leave the model unchanged", () => {
     const m = mount(env, small);
     m.view.setRange(rng(0, 2, 2, 5));
     env.flush();
     const before = m.calls.length;
-    m.view.setBlame(1, "someone");
+    m.view.schedule(); // a full re-render of a stale window
     env.flush();
     expect(m.calls.length).toBeGreaterThan(before);
     const last = m.calls[m.calls.length - 1]!;

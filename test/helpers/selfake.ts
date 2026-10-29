@@ -17,8 +17,47 @@ export class N {
   get textContent(): string {
     return this.nodeType === 3 ? this.data : this.childNodes.map((c) => c.textContent).join("");
   }
+  get className() {
+    return this.cls;
+  }
+  set className(v: string) {
+    this.cls = v;
+  }
   get classList() {
-    return { contains: (c: string) => this.cls.split(" ").includes(c) };
+    const get = () => this.cls.split(" ").filter(Boolean);
+    return {
+      contains: (c: string) => get().includes(c),
+      add: (...cs: string[]) => void (this.cls = [...new Set([...get(), ...cs])].join(" ")),
+      remove: (...cs: string[]) => void (this.cls = get().filter((c) => !cs.includes(c)).join(" ")),
+      toggle: (c: string, force?: boolean) => {
+        const on = force ?? !get().includes(c);
+        this.cls = (on ? [...new Set([...get(), c])] : get().filter((x) => x !== c)).join(" ");
+        return on;
+      },
+    };
+  }
+  get children() {
+    return this.childNodes.filter((c) => c.nodeType === 1);
+  }
+  append(...cs: N[]) {
+    this.add(...cs);
+  }
+  appendChild(c: N) {
+    this.add(c);
+    return c;
+  }
+  remove() {
+    if (this.parent) this.parent.childNodes = this.parent.childNodes.filter((c) => c !== this);
+    this.parent = null;
+  }
+  /** Understands one `<span class="x">inner</span>` fragment (all the code view ever inserts). */
+  insertAdjacentHTML(_pos: string, html: string) {
+    const open = html.indexOf('class="');
+    const gt = html.indexOf(">");
+    const end = html.lastIndexOf("</span>");
+    if (open < 0 || gt < 0 || end < gt) return;
+    const cls = html.slice(open + 7, html.indexOf('"', open + 7));
+    this.add(new N(1, cls).add(text(html.slice(gt + 1, end))));
   }
   add(...cs: N[]) {
     for (const c of cs) {
@@ -123,18 +162,32 @@ export function mount(env: Env, src: string) {
       rows = [];
       const lines = view.lines as string[];
       const last = Math.min(lines.length, view.window.last);
+      // per-row class list and blame markup as the code view wrote them
+      const segs = new Map<string, string>();
+      for (const part of v.split('<div class="').slice(1)) {
+        const n = part.slice(part.indexOf('data-n="') + 8, part.indexOf('"', part.indexOf('data-n="') + 8));
+        segs.set(n, part);
+      }
       for (let i = view.window.first; i < last; i++) {
         const l = lines[i]!;
         const long = l.length > MAX_COLS;
         const s = long ? l.slice(0, MAX_COLS) : l;
         const tx = el("tx", text(s.slice(0, 2)), el("t-k", text(s.slice(2, 5))), text(s.slice(5)), ...(long ? [el("trunc", text(" … more characters"))] : []));
-        const row = el("ln", el("g", text(String(i + 1))), tx);
+        const seg = segs.get(String(i)) ?? "";
+        const row = el(seg.slice(0, seg.indexOf('"')) || "ln", el("g", text(String(i + 1))), tx);
         row.dataset.n = String(i);
+        const b = seg.indexOf('<span class="blame">');
+        if (b >= 0) row.insertAdjacentHTML("beforeend", seg.slice(b, seg.lastIndexOf("</span>") + 7));
         rows.push(row);
       }
     },
   });
   linesEl.querySelectorAll = () => rows;
+  linesEl.querySelector = (sel: string) => {
+    const n = /data-n="?(\d+)"?/.exec(sel)?.[1];
+    return rows.find((r) => n === undefined || r.dataset.n === n) ?? null;
+  };
+  Object.defineProperty(linesEl, "children", { configurable: true, get: () => rows });
   linesEl.contains = (n: N) => rows.some((r) => r.contains(n));
   // The code view element also holds the find bar and the scroller (and its scrollbar).
   const chrome = el("code-chrome", el("find-input"), el("code-scroller"), el("code-lines"));

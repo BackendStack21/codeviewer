@@ -146,6 +146,7 @@ export class CodeView {
       }
     });
     this.linesEl.addEventListener("mousedown", (e) => {
+      this.held = false; // a new press supersedes a hold whose mouseup was lost
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
       const n = Number(ln.dataset.n);
@@ -192,8 +193,20 @@ export class CodeView {
       e.clipboardData?.setData("text/plain", this.selectedText());
     });
     document.addEventListener("copy", onCopy);
-    document.addEventListener("selectionchange", () => this.readDomSelection());
-    document.addEventListener("mouseup", () => (this.held = false));
+    document.addEventListener("selectionchange", () => {
+      this.readDomSelection();
+      this.syncBlame(); // a selection hides the label only while it exists
+    });
+    const release = () => {
+      if (!this.held) return;
+      this.held = false;
+      this.syncBlame();
+    };
+    document.addEventListener("mouseup", release);
+    window.addEventListener("blur", release);
+    document.addEventListener("mousemove", (e) => {
+      if (this.held && e.buttons === 0) release(); // the button was released outside the page
+    });
     // A primary press outside the whole view makes the model range stale.
     document.addEventListener("mousedown", (e) => {
       const t = e.target as Node | null;
@@ -406,7 +419,30 @@ export class CodeView {
   /** Inline blame annotation shown at the end of the active line. */
   setBlame(line: number, html: string | null) {
     this.blame = html === null ? null : { line, html };
-    this.schedule();
+    this.syncBlame();
+  }
+
+  private blameVisible(i: number): boolean {
+    return !!this.blame && this.blame.line === i && !this.held && window.getSelection?.()?.isCollapsed !== false;
+  }
+
+  private rowEl(i: number): HTMLElement | null {
+    return this.linesEl.querySelector<HTMLElement>?.(`.ln[data-n="${i}"]`) ?? null;
+  }
+
+  /** Line whose row currently carries the .blame span (-1 = none). */
+  private shownBlame = -1;
+
+  /** Patches the single .blame span in place; rebuilding rows would break a drag-selection. */
+  private syncBlame() {
+    const want = this.blame && this.blameVisible(this.blame.line) ? this.blame.line : -1;
+    if (this.shownBlame >= 0) this.rowEl(this.shownBlame)?.querySelector?.(".blame")?.remove();
+    this.shownBlame = -1;
+    if (want < 0) return;
+    const row = this.rowEl(want);
+    if (!row) return;
+    row.insertAdjacentHTML("beforeend", `<span class="blame">${this.blame!.html}</span>`);
+    this.shownBlame = want;
   }
 
   private hunkAt(line: number): Hunk | undefined {
@@ -517,11 +553,13 @@ export class CodeView {
         cls += " flash";
         style = ` style="animation-delay:${-(now - this.flash.at) | 0}ms"`;
       }
-      const blame = this.blame && this.blame.line === i ? `<span class="blame">${this.blame.html}</span>` : "";
+      const blame = this.blameVisible(i) ? `<span class="blame">${this.blame!.html}</span>` : "";
       html += `<div class="${cls}" data-n="${i}"${style}><span class="g">${i + 1}</span><span class="tx">${this.lineHtml(i)}</span>${blame}</div>`;
     }
     this.linesEl.style.transform = `translateY(${first * this.lh}px)`;
     this.linesEl.innerHTML = html;
+    const bl = this.blame?.line ?? -1;
+    this.shownBlame = bl >= first && bl < last && this.blameVisible(bl) ? bl : -1;
     this.restoreSelection();
   }
 
@@ -575,9 +613,13 @@ export class CodeView {
   }
 
   setActiveLine(n: number) {
+    const old = this.activeLine;
     this.activeLine = n;
     this.onActiveLine(n);
-    this.schedule();
+    if (old !== n) {
+      if (old >= 0) this.rowEl(old)?.classList?.remove?.("active");
+      this.rowEl(n)?.classList?.add?.("active");
+    }
   }
 
   /** Scrolls so that 0-based `line` is visible (centered when far away). */
