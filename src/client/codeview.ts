@@ -1,6 +1,7 @@
 import { Highlighter, type Tok } from "./highlight.ts";
 import { dismissable, esc, h } from "./util.ts";
 import { icons } from "./icons.ts";
+import { normalize, restorePlan, selectAll as selectAllRange, textOf, type SelRange } from "./selection.ts";
 import { diffLines, gutterMarks, ADDED, MODIFIED, DELETED_BELOW, DELETED_ABOVE, type Hunk } from "./diff.ts";
 
 const TOKS: Tok[] = ["k", "s", "c", "n", "f", "t", "p", "o", "v", "m", "h", "a", "x", "b", "i", "l"];
@@ -143,6 +144,7 @@ export class CodeView {
     this.linesEl.addEventListener("mousedown", (e) => {
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
+      this.sel = null;
       const n = Number(ln.dataset.n);
       if ((e.target as HTMLElement).classList.contains("g") && this.gitMarks[n]) {
         e.preventDefault();
@@ -152,6 +154,83 @@ export class CodeView {
       this.setActiveLine(n);
     });
     this.scroller.addEventListener("scroll", () => this.closePeek(), { passive: true });
+    this.scroller.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        this.selectAll();
+      }
+    });
+    this.scroller.addEventListener("copy", (e) => {
+      if (!this.sel) return;
+      e.preventDefault();
+      e.clipboardData?.setData("text/plain", this.selectedText());
+    });
+    document.addEventListener("selectionchange", () => this.readDomSelection());
+  }
+
+  // ───────────────────────────── selection (model range) ─────────────────────────────
+
+  /** Seam that applies a DOM selection; tests inject a recorder. */
+  setSelection: (anchorEl: Node, anchorOffset: number, focusEl: Node, focusOffset: number) => void = (a, ao, f, fo) =>
+    window.getSelection()?.setBaseAndExtent(a, ao, f, fo);
+  private sel: SelRange | null = null;
+
+  /** The selection as a normalised model range, or null. */
+  get selection(): SelRange | null {
+    return this.sel;
+  }
+
+  /** Sets the model range; the DOM selection is restored on the next render. */
+  setRange(r: SelRange | null) {
+    this.sel = r ? normalize(r) : null;
+    this.schedule();
+  }
+
+  /** Selects the whole file as a model range. */
+  selectAll() {
+    this.setRange(selectAllRange(this.lines));
+  }
+
+  /** Text of the model selection ("" when none), never including decorations. */
+  selectedText(): string {
+    return this.sel ? textOf(this.lines, this.sel) : "";
+  }
+
+  private rowTx(n: number): HTMLElement | null {
+    for (const row of this.linesEl.querySelectorAll<HTMLElement>(".ln")) {
+      if (Number(row.dataset.n) === n) return row.querySelector<HTMLElement>(".tx");
+    }
+    return null;
+  }
+
+  /** Re-applies the model range to the freshly rendered rows. */
+  private restoreSelection() {
+    if (!this.sel) return;
+    const last = Math.min(this.window.last, this.lines.length) - (this.window.last === Infinity ? 0 : 1);
+    const plan = restorePlan(this.sel, this.window.first, last, (l) => Math.min(this.lines[l]?.length ?? 0, MAX_RENDER_COLS));
+    if (!plan) return;
+    const a = this.rowTx(plan.anchor.line);
+    const f = this.rowTx(plan.focus.line);
+    if (!a || !f) return;
+    const [an, ao] = locate(a, plan.anchor.offset);
+    const [fn, fo] = locate(f, plan.focus.offset);
+    this.setSelection(an, ao, fn, fo);
+  }
+
+  /** Mirrors a user (mouse/keyboard) DOM selection inside the rows into the model range. */
+  private readDomSelection() {
+    const ds = window.getSelection?.();
+    if (!ds || ds.rangeCount === 0 || ds.isCollapsed || !ds.anchorNode || !ds.focusNode) return;
+    const pos = (node: Node, off: number) => {
+      const el = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+      const row = el?.closest<HTMLElement>(".ln");
+      const tx = row?.querySelector<HTMLElement>(".tx");
+      if (!row || !tx || !this.linesEl.contains(row)) return null;
+      return { line: Number(row.dataset.n), col: Math.min(colOf(tx, node, off), this.lines[Number(row.dataset.n)]?.length ?? 0) };
+    };
+    const a = pos(ds.anchorNode, ds.anchorOffset);
+    const f = pos(ds.focusNode, ds.focusOffset);
+    if (a && f) this.sel = normalize({ start: a, end: f });
   }
 
   get lineCount() {
@@ -366,6 +445,7 @@ export class CodeView {
     }
     this.linesEl.style.transform = `translateY(${first * this.lh}px)`;
     this.linesEl.innerHTML = html;
+    this.restoreSelection();
   }
 
   private lineHtml(i: number): string {
@@ -545,6 +625,51 @@ export class CodeView {
     s.scrollLeft = revealCol(s.scrollLeft, s.clientWidth, this.gutterW, this.charW, this.mStart[this.mCur]!);
     this.schedule();
   }
+}
+
+/** Text node and offset for a text offset inside a row's text element. */
+function locate(tx: Node, off: number): [Node, number] {
+  if (!tx.childNodes) return [tx, off];
+  let left = off;
+  let lastText: Text | null = null;
+  const walk = (n: Node): [Node, number] | null => {
+    for (const c of Array.from(n.childNodes ?? [])) {
+      if (c.nodeType === 3) {
+        lastText = c as Text;
+        const len = (c as Text).data.length;
+        if (left <= len) return [c, left];
+        left -= len;
+      } else if (c.nodeType === 1 && !(c as HTMLElement).classList.contains("trunc")) {
+        const r = walk(c);
+        if (r) return r;
+      }
+    }
+    return null;
+  };
+  return walk(tx) ?? (lastText ? [lastText, (lastText as Text).data.length] : [tx, 0]);
+}
+
+/** Text offset of (node, off) within a row's text element. */
+function colOf(tx: Node, node: Node, off: number): number {
+  let n = 0;
+  let done = false;
+  const walk = (p: Node) => {
+    for (const c of Array.from(p.childNodes)) {
+      if (done) return;
+      if (c === node) {
+        if (c.nodeType === 3) n += off;
+        else for (let i = 0; i < off; i++) n += c.childNodes[i]?.textContent?.length ?? 0;
+        done = true;
+        return;
+      }
+      if (c.nodeType === 3) n += (c as Text).data.length;
+      else if (c.contains(node)) walk(c);
+      else n += c.textContent?.length ?? 0;
+    }
+  };
+  if (node === tx) for (let i = 0; i < off; i++) n += tx.childNodes[i]?.textContent?.length ?? 0;
+  else walk(tx);
+  return n;
 }
 
 function countTabs(s: string): number {
