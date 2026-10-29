@@ -144,6 +144,7 @@ export class CodeView {
     this.linesEl.addEventListener("mousedown", (e) => {
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
+      if (e.button) return; // right/middle press keeps the range (the contextmenu follows)
       this.sel = null;
       this.applied = null;
       const n = Number(ln.dataset.n);
@@ -202,14 +203,14 @@ export class CodeView {
   }
 
   /** Inputs for copying the selection as an image, or null without a selection. */
-  imageInput(): { lines: string[]; tokens: Span[][]; range: SelRange } | null {
-    if (!this.sel) return null;
+  imageInput(range: SelRange | null = this.sel): { lines: string[]; tokens: Span[][]; range: SelRange } | null {
+    if (!range) return null;
     const tokens: Span[][] = this.lines.map(() => []);
     // Beyond the row cap the layout reports "too large" anyway; skip lexing then.
-    if (this.sel.end.line - this.sel.start.line < 20000) {
-      for (let i = this.sel.start.line; i <= this.sel.end.line; i++) tokens[i] = this.hl.line(i);
+    if (range.end.line - range.start.line < 20000) {
+      for (let i = range.start.line; i <= range.end.line; i++) tokens[i] = this.hl.line(i);
     }
-    return { lines: this.lines, tokens, range: this.sel };
+    return { lines: this.lines, tokens, range };
   }
 
   /** Copies the model selection as plain text (context-menu "Copy"). */
