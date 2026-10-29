@@ -1,5 +1,4 @@
 // Project-wide content search: pure matcher (compileQuery, matchText), scanner and candidate list.
-import { realpath } from "node:fs/promises";
 import { resolveSafe } from "./files.ts";
 import type { Git } from "./git.ts";
 import type { FileIndex } from "./index.ts";
@@ -201,6 +200,14 @@ export function parseGlobs(s: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+export const MAX_GLOB_CHARS = 1024;
+export const MAX_GLOBS = 64;
+
+/** True when a comma-separated glob param is within the length and pattern-count caps. */
+export function globsOk(s: string): boolean {
+  return s.length <= MAX_GLOB_CHARS && parseGlobs(s).length <= MAX_GLOBS;
+}
+
 /** Keeps paths matching any include glob (all when none) and no exclude glob (Bun.Glob, root-relative paths). */
 export function filterByGlobs(files: string[], include: string[], exclude: string[]): string[] {
   if (!include.length && !exclude.length) return files;
@@ -229,7 +236,7 @@ export interface CandidateOptions {
   ignored?: boolean;
 }
 
-/** Candidate files for a search: git ls-files in repos, FileIndex otherwise; cached until invalidate(). */
+/** Candidate files for a search (containment is enforced per file by the worker): git ls-files in repos, FileIndex otherwise; cached until invalidate(). */
 export class Candidates {
   private cached: Promise<string[] | null> | null = null;
   constructor(
@@ -244,8 +251,7 @@ export class Candidates {
       list = await this.cached;
     }
     list ??= (await this.index.get()).split("\n").filter(Boolean);
-    const rootReal = await realpath(this.root).catch(() => this.root);
-    return containedOnly(rootReal, filterByGlobs(list, parseGlobs(o.include), parseGlobs(o.exclude)));
+    return filterByGlobs(list, parseGlobs(o.include), parseGlobs(o.exclude));
   }
   invalidate(): void {
     this.cached = null;
