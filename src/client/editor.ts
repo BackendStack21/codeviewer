@@ -4,6 +4,7 @@ import { languageFor, languageName } from "./highlight.ts";
 import { fileIcon, icons } from "./icons.ts";
 import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
+import { decidePreview, tooLargeNote } from "./mdgate.ts";
 import { planView } from "./viewstate.ts";
 import { basename, debounce, esc, formatBytes, h, MOD } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
@@ -33,6 +34,8 @@ export interface Tab {
   /** Git status changed while the tab was in the background. */
   gitStale: boolean;
   asSource: boolean;
+  /** The user asked for the preview of a file over the size cap (Render anyway or the toggle). */
+  forcePreview?: boolean;
   changedOnDisk: boolean;
   deleted: boolean;
 }
@@ -69,8 +72,9 @@ export class Editor {
   onStatus: (s: StatusInfo | null) => void = () => {};
   onReveal: (path: string) => void = () => {};
   /** Opens a repo-relative link from a Markdown preview; false when the target does not exist. */
-  onOpenLink: (path: string) => Promise<boolean> = async (p) => {
+  onOpenLink: (path: string, hash?: string) => Promise<boolean> = async (p, hash) => {
     await this.open(p, { pin: true });
+    if (hash) this.revealFragment(p, hash);
     return true;
   };
   /** Called whenever the set of tabs or the active tab changes. */
@@ -149,7 +153,9 @@ export class Editor {
       tab.truncated = f.truncated;
       tab.encoding = f.encoding;
       tab.deleted = false;
-      const plan = planView({ kind: f.kind, path: tab.path, asSource: tab.asSource, reload, hasMd: !!tab.md, hasCode: !!tab.code });
+      const md = f.kind === "text" && isMarkdown(tab.path) && !tab.asSource;
+      const tooLarge = md && decidePreview(f.size, f.truncated, !!tab.forcePreview).tooLarge;
+      const plan = planView({ kind: f.kind, path: tab.path, asSource: tab.asSource || tooLarge, reload, hasMd: !!tab.md, hasCode: !!tab.code });
       // The tab keeps only the views the plan names, so a Markdown tab that goes binary/dir/image can't get stuck.
       if (!plan.md) {
         tab.md?.dispose();
@@ -161,7 +167,7 @@ export class Editor {
         if (plan.view === "md") {
           if (plan.reuse) tab.md!.setText(f.text);
           else {
-            tab.md = new MarkdownView(f.text, this.fontSize, { path: tab.path, onOpen: (p) => this.onOpenLink(p) });
+            tab.md = new MarkdownView(f.text, this.fontSize, { path: tab.path, onOpen: (p, hash) => this.onOpenLink(p, hash) });
             tab.el.replaceChildren(tab.md.el);
             tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
           }
@@ -178,7 +184,18 @@ export class Editor {
           };
           tab.el.append(tab.code.el);
           if (tab.path.endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "Preview image", icons.image));
-          else if (isMarkdown(tab.path)) tab.el.prepend(this.viewToggle(tab, "Preview", icons.image));
+          else if (isMarkdown(tab.path)) {
+            tab.el.prepend(this.viewToggle(tab, "Preview", icons.image));
+            if (tooLarge) {
+              tab.el.prepend(
+                tooLargeNote(() => {
+                  tab.forcePreview = true;
+                  tab.code = undefined;
+                  void this.load(tab);
+                }),
+              );
+            }
+          }
         }
         await this.refreshGit(tab, !reload);
       } else if (f.kind === "image") {
@@ -218,18 +235,36 @@ export class Editor {
       "button",
       {
         class: "view-toggle",
-        onclick: () => {
-          tab.asSource = !tab.asSource;
-          tab.code = undefined;
-          tab.image = undefined;
-          tab.md?.dispose();
-          tab.md = undefined;
-          void this.load(tab);
-        },
+        onclick: () => this.flip(tab),
       },
       h("span", { html: icon }),
       label,
     );
+  }
+
+  private flip(tab: Tab) {
+    tab.asSource = !tab.asSource;
+    if (!tab.asSource) tab.forcePreview = true; // an explicit request overrides the size gate
+    tab.code = undefined;
+    tab.image = undefined;
+    tab.md?.dispose();
+    tab.md = undefined;
+    void this.load(tab);
+  }
+
+  /** The active tab is a text file that can switch between preview and source. */
+  isMarkdownTab(): boolean {
+    const t = this.active;
+    return !!t && t.kind === "text" && isMarkdown(t.path);
+  }
+
+  toggleMarkdown() {
+    if (this.active && this.isMarkdownTab()) this.flip(this.active);
+  }
+
+  /** Scrolls an open Markdown preview to a heading fragment. */
+  revealFragment(path: string, hash: string) {
+    this.tabs.find((t) => t.path === path)?.md?.scrollToFragment(hash);
   }
 
   activate(tab: Tab) {

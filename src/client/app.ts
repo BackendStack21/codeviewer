@@ -3,6 +3,7 @@ import { api, type Info } from "./api.ts";
 import { Editor, type StatusInfo } from "./editor.ts";
 import { FileTree } from "./tree.ts";
 import { Palette, type Command } from "./palette.ts";
+import { markdownToggleCommand } from "./mdcommands.ts";
 import { TerminalPanel } from "./terminals.ts";
 import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
@@ -221,10 +222,11 @@ class App {
       if (t) this.trackRecent(t.path);
     };
     this.editor.onStatus = (s) => this.renderStatus(s);
-    this.editor.onOpenLink = async (p) => {
+    this.editor.onOpenLink = async (p, hash) => {
       const type = await api.stat(p);
       if (type === "file") {
         await this.openFile(p, { pin: true });
+        if (hash) this.editor.revealFragment(p, hash);
         return true;
       }
       if (type === "dir") {
@@ -336,6 +338,7 @@ class App {
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
       c("search.prev", "Previous Search Result", () => this.search.step(-1), "⇧F4"),
       c("view.explorer", "Show Explorer", () => this.setSideView("explorer")),
+      markdownToggleCommand({ isMarkdownTab: () => this.editor.isMarkdownTab(), toggleMarkdown: () => this.editor.toggleMarkdown() }),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
       c("file.line", "Go to Line…", () => this.palette.open(":"), IS_MAC ? "⌃G" : "Ctrl+G"),
       c("file.reveal", "Reveal Active File in Explorer", () => this.editor.active && void this.tree.reveal(this.editor.active.path)),

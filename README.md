@@ -90,6 +90,23 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
 
+## Markdown
+
+`.md` and `.markdown` files open as a rendered document; the **View source** button (or the command
+palette entry **Toggle Markdown Preview**) switches to the highlighted source and back. Opening a file at a
+line, Find and Go to line always use the source. The preview updates live when the file changes.
+
+- **Supported:** CommonMark core plus GFM tables, task lists, strikethrough, bare-URL autolinks and
+  highlighted fenced code. The parser and renderer are written in this repository, with no dependencies.
+- **Untrusted content:** the preview is built with `createElement`/`textContent` only. There is no raw HTML
+  (it is shown as text), links use an allowlist (`http`, `https`, `mailto`, `#fragment`, relative paths), and
+  relative links open inside the viewer.
+- **Images:** relative images of a type the server serves (png, jpg, gif, webp, avif, bmp, ico, svg) load
+  through the authenticated raw endpoint; at most 100 images per render. Remote images (`http(s)`, `//host`,
+  `data:`) are never loaded: a placeholder shows the alt text and host, with a link to open it in your browser.
+- **Limits:** files over 1 MiB open in source with a "Too large to preview · Render anyway" note; nesting,
+  table width, line length and about 200,000 rendered nodes are capped and degrade to literal text.
+
 ## Security
 
 The server binds to localhost and serves a shell. It was hardened through an adversarial review
@@ -109,6 +126,8 @@ The server binds to localhost and serves a shell. It was hardened through an adv
   - A throwaway profile, locked to the window's own server port.
   - External links open in your default browser.
   - Terminal clipboard writes always show a notice.
+- **Markdown:** repository files are untrusted. The preview never uses `innerHTML`, shows no raw HTML,
+  filters link schemes and loads no remote images (the CSP is unchanged).
 - **Builds:** the Linux browser is pinned by SHA-256 in `packaging/browser-pins.json`.
 
 ## Verify a download

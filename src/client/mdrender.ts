@@ -1,5 +1,6 @@
 import { languageFor, lexLine, type Span } from "./highlight.ts";
 import { showHidden } from "./util.ts";
+import { classifyImage, MAX_IMAGES } from "./mdimage.ts";
 import {
   resolveRepoPath,
   safeHref,
@@ -55,9 +56,13 @@ function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
   return pre;
 }
 
+/** Called for each repo image the renderer emits; the caller loads it and sets `src`. `wrap` holds the img. */
+export type ImageLoader = (img: HTMLElement, path: string, alt: string, wrap: HTMLElement) => void;
+
 class Budget {
   readonly seen = new Map<string, number>();
-  constructor(readonly base = "") {}
+  images = 0;
+  constructor(readonly base = "", readonly onImage?: ImageLoader) {}
   n = 0;
   over = false;
   /** Counts `k` nodes; false once the cap is exceeded. */
@@ -113,6 +118,36 @@ function link(
   inline(a ?? parent, n.children, b);
 }
 
+function image(parent: HTMLElement, n: Extract<Inline, { type: "image" }>, b: Budget) {
+  const t = classifyImage(n.src, b.base);
+  if (t.kind === "repo" && b.onImage && b.images < MAX_IMAGES) {
+    b.images++;
+    const wrap = document.createElement("span");
+    wrap.className = "md-img";
+    const img = document.createElement("img");
+    img.setAttribute("alt", n.alt);
+    wrap.append(img);
+    parent.append(wrap);
+    b.take(2);
+    b.onImage(img, t.path, n.alt, wrap);
+  } else if (t.kind === "remote") {
+    const ph = document.createElement("span");
+    ph.className = "md-img-remote";
+    ph.append((n.alt || "image") + (t.host ? ` · ${t.host} ` : " "));
+    const safe = t.href ? safeHref(t.href) : null;
+    if (safe && safe.kind === "external") {
+      const a = document.createElement("a");
+      a.setAttribute("href", safe.href);
+      a.setAttribute("rel", "noopener noreferrer nofollow");
+      a.setAttribute("target", "_blank");
+      a.textContent = "Open";
+      ph.append(a);
+    }
+    parent.append(ph);
+    b.take(2);
+  } else parent.append(n.alt);
+}
+
 function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
   for (const n of nodes) {
     if (!b.take()) return;
@@ -141,7 +176,7 @@ function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
         link(parent, n, b);
         break;
       case "image":
-        parent.append(n.alt);
+        image(parent, n, b);
         break;
     }
   }
@@ -238,11 +273,11 @@ function blocks(parent: HTMLElement, list: Block[], b: Budget, tight = false) {
 /** Turns the AST into DOM using createElement/textContent only; never innerHTML. */
 export function renderMarkdown(
   list: Block[],
-  opts: { base?: string } = {},
+  opts: { base?: string; onImage?: ImageLoader } = {},
 ): HTMLElement {
   const root = document.createElement("div");
   root.className = "md-doc";
-  const b = new Budget(opts.base);
+  const b = new Budget(opts.base, opts.onImage);
   blocks(root, list, b);
   if (b.over) {
     const note = document.createElement("div");
