@@ -11,6 +11,37 @@ const OVERSCAN = 40;
 const HIGHLIGHT_COLS = 1000;
 const MAX_RENDER_COLS = 4000;
 
+/** One highlighted range of a line; `cur` marks the current match. */
+export interface MarkRange {
+  start: number;
+  end: number;
+  cur?: boolean;
+}
+
+/**
+ * Merges ranges into a per-column mark map for a line of `n` columns: 1 = match, 2 = current match
+ * (which wins over overlapping matches). Ranges are clamped to [0, n); null when nothing is marked.
+ */
+export function markRanges(n: number, ranges: readonly MarkRange[]): Uint8Array | null {
+  let out: Uint8Array | null = null;
+  for (const r of ranges) {
+    const s = Math.max(0, r.start);
+    const e = Math.min(n, r.end);
+    if (s >= e) continue;
+    out ??= new Uint8Array(n);
+    const v = r.cur ? 2 : 1;
+    for (let i = s; i < e; i++) if (out[i]! < v) out[i] = v;
+  }
+  return out;
+}
+
+/** New scrollLeft that brings 0-based column `col` into view, or `scrollLeft` when it already is. */
+export function revealCol(scrollLeft: number, clientWidth: number, gutterW: number, charW: number, col: number): number {
+  const x = gutterW + Math.min(col, MAX_RENDER_COLS) * charW;
+  if (x < scrollLeft + gutterW || x > scrollLeft + clientWidth - 40) return Math.max(0, x - clientWidth / 2);
+  return scrollLeft;
+}
+
 export interface CodeViewState {
   scrollTop: number;
   scrollLeft: number;
@@ -56,6 +87,8 @@ export class CodeView {
   private mStart: number[] = [];
   private mEnd: number[] = [];
   private mCur = -1;
+  /** Range opened from a project search result: 0-based line, column span. */
+  private sr: { line: number; start: number; end: number } | null = null;
 
   constructor(
     text: string,
@@ -137,6 +170,7 @@ export class CodeView {
 
   /** Replaces the content (e.g. after the file changed on disk), keeping scroll and flashing changed lines. */
   setText(text: string, diff = true) {
+    this.sr = null;
     const next = text.split(/\r\n|\r|\n/);
     if (next.length > 1 && next[next.length - 1] === "") next.pop();
     if (diff && this.lines.length) {
@@ -335,7 +369,8 @@ export class CodeView {
   }
 
   private lineHtml(i: number): string {
-    const hasMarks = this.query && this.mLine.length;
+    const findMarks = !!(this.query && this.mLine.length);
+    const hasMarks = findMarks || this.sr?.line === i;
     if (!hasMarks) {
       const c = this.cache.get(i);
       if (c !== undefined) return c;
@@ -353,12 +388,16 @@ export class CodeView {
     for (const [s, e, t] of this.hl.line(i)) if (s < hlEnd) cls.fill(TOK_ID.get(t)!, s, Math.min(e, hlEnd));
     let mark: Uint8Array | null = null;
     if (hasMarks) {
-      let k = lowerBound(this.mLine, i);
-      while (k < this.mLine.length && this.mLine[k] === i) {
-        mark ??= new Uint8Array(n);
-        mark.fill(k === this.mCur ? 2 : 1, this.mStart[k]!, Math.min(this.mEnd[k]!, n));
-        k++;
+      const ranges: MarkRange[] = [];
+      if (findMarks) {
+        let k = lowerBound(this.mLine, i);
+        while (k < this.mLine.length && this.mLine[k] === i) {
+          ranges.push({ start: this.mStart[k]!, end: this.mEnd[k]!, cur: k === this.mCur });
+          k++;
+        }
       }
+      if (this.sr?.line === i) ranges.push({ start: this.sr.start, end: this.sr.end, cur: true });
+      mark = markRanges(n, ranges);
     }
     let out = "";
     let s = 0;
@@ -410,7 +449,24 @@ export class CodeView {
 
   // ───────────────────────────── find ─────────────────────────────
 
+  /** Marks 0-based `line` columns [start, end) as the current match and scrolls it into view. */
+  showRange(line: number, start: number, end: number) {
+    line = Math.max(0, Math.min(this.lines.length - 1, line));
+    start = Math.min(start, MAX_RENDER_COLS);
+    end = Math.min(end, MAX_RENDER_COLS);
+    this.sr = { line, start, end };
+    this.cache.clear();
+    this.revealLine(line);
+    const s = this.scroller;
+    s.scrollLeft = revealCol(s.scrollLeft, s.clientWidth, this.gutterW, this.charW, start);
+    this.schedule();
+  }
+
   openFind() {
+    if (this.sr) {
+      this.sr = null;
+      this.cache.clear();
+    }
     this.findBar.hidden = false;
     const sel = window.getSelection()?.toString();
     if (sel && !sel.includes("\n")) this.findInput.value = sel;
@@ -485,9 +541,8 @@ export class CodeView {
     this.updateCount();
     this.revealLine(this.mLine[this.mCur]!, false);
     // Bring the match into view horizontally too.
-    const x = this.gutterW + this.mStart[this.mCur]! * this.charW;
     const s = this.scroller;
-    if (x < s.scrollLeft + this.gutterW || x > s.scrollLeft + s.clientWidth - 40) s.scrollLeft = Math.max(0, x - s.clientWidth / 2);
+    s.scrollLeft = revealCol(s.scrollLeft, s.clientWidth, this.gutterW, this.charW, this.mStart[this.mCur]!);
     this.schedule();
   }
 }

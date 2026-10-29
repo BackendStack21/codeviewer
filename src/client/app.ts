@@ -10,6 +10,8 @@ import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 import { isContextMenuOpen } from "./menu.ts";
+import { SearchView } from "./search.ts";
+import { normSideView, searchKey, type SideView } from "./keys.ts";
 
 type ThemeName = "dark" | "light" | "system";
 
@@ -23,6 +25,7 @@ interface Layout {
   theme: ThemeName;
   codeSize: number;
   termSize: number;
+  sideView: SideView;
 }
 
 /** Panel decision (DESIGN.md §7): 13px on HiDPI screens, 14px on 1× screens. */
@@ -41,6 +44,7 @@ const DEFAULTS: Layout = {
   theme: "system",
   codeSize: BASE_SIZE,
   termSize: BASE_SIZE,
+  sideView: "explorer",
 };
 
 /** Message channel to Codeviewer.app (WKWebView); undefined in a regular browser. */
@@ -65,6 +69,9 @@ class App {
   private L: Layout = { ...DEFAULTS };
   private info!: Info;
   private tree!: FileTree;
+  private search!: SearchView;
+  private sideTabs = new Map<SideView, HTMLElement>();
+  private sideTools!: HTMLElement;
   private editor!: Editor;
   private palette = new Palette();
   private terms!: TerminalPanel;
@@ -89,6 +96,7 @@ class App {
       delete saved.termSize;
     }
     this.L = { ...DEFAULTS, ...saved };
+    this.L.sideView = normSideView(this.L.sideView);
     this.recent = store.get("recent", []);
     this.applyTheme();
     // The terminal measures its cell grid once, so the real faces must be loaded first.
@@ -159,18 +167,27 @@ class App {
     // Sidebar
     this.tree = new FileTree(this.info.name);
     this.tree.onOpen = (p, pin) => void this.openFile(p, { pin, focus: pin });
+    this.search = new SearchView();
+    this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
+    const sideTab = (v: SideView, label: string) => {
+      const b = h("button", { class: "side-tab", type: "button", onclick: () => this.setSideView(v) }, label);
+      this.sideTabs.set(v, b);
+      return b;
+    };
+    this.sideTools = h(
+      "span",
+      { class: "side-tools" },
+      h("button", { class: "icon-btn sm", title: "Collapse all", html: icons.collapse, onclick: () => this.tree.collapseAll() }),
+      h("button", { class: "icon-btn sm", title: "Clear change markers", html: icons.refresh, onclick: () => this.tree.clearChanges() }),
+    );
     this.sidebar = h(
       "aside",
       { class: "sidebar" },
-      h(
-        "div",
-        { class: "side-head" },
-        h("span", { class: "side-title" }, "Explorer"),
-        h("button", { class: "icon-btn sm", title: "Collapse all", html: icons.collapse, onclick: () => this.tree.collapseAll() }),
-        h("button", { class: "icon-btn sm", title: "Clear change markers", html: icons.refresh, onclick: () => this.tree.clearChanges() }),
-      ),
+      h("div", { class: "side-head" }, sideTab("explorer", "Explorer"), sideTab("search", "Search"), h("span", { class: "side-title" }), this.sideTools),
       this.tree.el,
+      this.search.el,
     );
+    this.setSideView(this.L.sideView, false);
     const sideSplit = h("div", { class: "splitter vertical", role: "separator" });
 
     // Editor
@@ -188,6 +205,8 @@ class App {
         kb(`${MOD}⇧P`.replace("Ctrl+⇧", "Ctrl+Shift+"), "Commands"),
         kb(IS_MAC ? "⌃`" : "Ctrl+`", "Toggle terminal"),
         kb(`${MOD}F`, "Find in file"),
+        kb(IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F", "Search in files"),
+        kb("F4", "Next search result"),
         kb(IS_MAC ? "⌃G" : "Ctrl+G", "Go to line"),
         kb(`${MOD}B`, "Toggle sidebar"),
       ),
@@ -298,6 +317,10 @@ class App {
       c("view.zoomIn", "Increase Font Size", () => this.zoom(1), `${MOD}=`),
       c("view.zoomOut", "Decrease Font Size", () => this.zoom(-1), `${MOD}-`),
       c("view.zoomReset", "Reset Font Size", () => this.zoom(0), `${MOD}0`),
+      c("search.files", "Search in Files", () => this.showSearch(), IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F"),
+      c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
+      c("search.prev", "Previous Search Result", () => this.search.step(-1), "⇧F4"),
+      c("view.explorer", "Show Explorer", () => this.setSideView("explorer")),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
       c("file.line", "Go to Line…", () => this.palette.open(":"), IS_MAC ? "⌃G" : "Ctrl+G"),
       c("file.reveal", "Reveal Active File in Explorer", () => this.editor.active && void this.tree.reveal(this.editor.active.path)),
@@ -322,7 +345,7 @@ class App {
 
   // ───────────────────────────── actions ─────────────────────────────
 
-  private async openFile(path: string, opts: { pin?: boolean; line?: number; focus?: boolean } = {}) {
+  private async openFile(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
     await this.editor.open(path, opts);
     void this.tree.reveal(path);
   }
@@ -366,6 +389,24 @@ class App {
     if (!t) return;
     void navigator.clipboard.writeText(abs ? `${this.info.root}/${t.path}` : t.path);
     this.notify("Path copied");
+  }
+
+  private setSideView(v: SideView, save = true) {
+    this.L.sideView = v;
+    this.tree.el.hidden = v !== "explorer";
+    this.search.el.hidden = v !== "search";
+    this.sideTools.hidden = v !== "explorer";
+    for (const [k, b] of this.sideTabs) {
+      b.classList.toggle("active", k === v);
+      b.setAttribute("aria-pressed", String(k === v));
+    }
+    if (save) this.saveLayout();
+  }
+
+  private showSearch() {
+    if (!this.L.sidebar) this.toggleSidebar(true);
+    this.setSideView("search");
+    this.search.focus();
   }
 
   private toggleSidebar(on = !this.L.sidebar) {
@@ -537,7 +578,10 @@ class App {
         const k = e.key.toLowerCase();
         const inTerm = (e.target as HTMLElement).classList?.contains("term-input");
         let handled = true;
-        if (e.ctrlKey && (e.code === "Backquote" || k === "`")) {
+        const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
+        if (sk === "search") this.showSearch();
+        else if (sk === "next" || sk === "prev") this.search.step(sk === "next" ? 1 : -1);
+        else if (e.ctrlKey && (e.code === "Backquote" || k === "`")) {
           if (e.shiftKey) this.newTerminal();
           else if (this.L.panel && !inTerm) this.terms.focus();
           else this.togglePanel();
@@ -547,7 +591,7 @@ class App {
           if (!this.L.sidebar) this.toggleSidebar(true);
           this.tree.focus();
         } else if (mod && k === "b" && !inTerm) this.toggleSidebar();
-        else if (mod && k === "f" && !inTerm) this.editor.openFind();
+        else if (mod && !e.shiftKey && k === "f" && !inTerm) this.editor.openFind();
         else if (e.ctrlKey && k === "g" && !inTerm) this.palette.open(":");
         else if (mod && k === "w" && !inTerm) this.editor.close();
         else if (mod && k === "w" && inTerm && IS_MAC) this.terms.close();

@@ -79,7 +79,7 @@ export class Editor {
     this.render();
   }
 
-  async open(path: string, opts: { pin?: boolean; line?: number; focus?: boolean } = {}) {
+  async open(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
     let tab = this.tabs.find((t) => t.path === path);
     if (!tab) {
       // A single unpinned "preview" tab is reused while browsing.
@@ -99,7 +99,10 @@ export class Editor {
       if (opts.pin) tab.pinned = true;
       this.activate(tab);
     }
-    if (opts.line && tab.code) tab.code.revealLine(opts.line - 1);
+    if (opts.line && tab.code) {
+      if (opts.col !== undefined && opts.len) tab.code.showRange(opts.line - 1, opts.col, opts.col + opts.len);
+      else tab.code.revealLine(opts.line - 1);
+    }
     if (opts.focus !== false) tab.code?.focus();
     this.render();
   }

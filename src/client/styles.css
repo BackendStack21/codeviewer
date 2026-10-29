@@ -1909,3 +1909,7 @@ li[data-state="done"] .upd-mark {
 .sv-ln { color: var(--fg-faint); min-width: 3ch; text-align: right; }
 .sv-pv { overflow: hidden; text-overflow: ellipsis; }
 .sv-pv mark { background: var(--mark); color: inherit; border-radius: 2px; }
+.side-tab { background: none; border: 0; padding: 0 8px 0 0; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-muted); cursor: pointer; opacity: 0.7; }
+.side-tab:hover, .side-tab.active { opacity: 1; color: var(--fg); }
+.side-tools { display: flex; gap: 2px; }
+.side-tools[hidden], .tree-scroll[hidden], .search-view[hidden] { display: none; }
