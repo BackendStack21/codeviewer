@@ -94,10 +94,12 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 ## Copy as Image
 
 Select code (or text in a Markdown preview) and choose **Copy as Image** from the right-click menu, the command
-palette (*Copy Selection as Image*), or press ⌘⇧C / Ctrl+Shift+C. Code is drawn with the current theme's syntax
-colours (no line numbers); a preview selection is rendered as it looks on screen. If the clipboard does not accept
-images the PNG is downloaded instead; if rendering fails the plain text is copied and a message says so. Very large
-selections are refused with "Selection too large for an image".
+palette (*Copy Selection as Image*), or press ⌘⇧C / Ctrl+Shift+C. The image goes to the clipboard only and is
+never written to disk. It is a share-ready snippet card: a backdrop, a rounded window with three window dots, the
+file name as the title, a soft shadow, rendered at 2x. Code uses the current theme's syntax colours; line numbers
+never join a selection, so they are never in the image. Markdown selections and the macOS app's native snapshot get
+the same frame. If the image cannot be put on the clipboard, a clear error says so. Very large selections are
+refused with "Selection too large for an image".
 
 ## Markdown
 
