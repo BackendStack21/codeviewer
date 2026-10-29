@@ -12,6 +12,22 @@ const DEADLINE = 250;
 const EVIL = { q: "(a+)+$", regex: "1" };
 let fx: Fx;
 
+/**
+ * True once the process goes quiet: a 500 ms window under 40% of a core. JSC can't interrupt a
+ * regex mid-exec, so terminate() lands when the current exec returns (bounded by JSC's backtrack
+ * limit, longer on slow CI runners); a worker that kept spinning would never settle.
+ */
+async function cpuSettles(maxMs = 6000): Promise<boolean> {
+  const end = performance.now() + maxMs;
+  while (performance.now() < end) {
+    const c0 = process.cpuUsage();
+    await Bun.sleep(500);
+    const c = process.cpuUsage(c0);
+    if ((c.user + c.system) / 1000 < 200) return true;
+  }
+  return false;
+}
+
 beforeAll(async () => {
   fx = await makeServer(
     async (dir) => {
@@ -54,11 +70,7 @@ describe("regex DoS (AC-10)", () => {
     // The main thread (which carries the PTYs) was never blocked by the pattern.
     expect(maxGap).toBeLessThan(750);
     // terminate() really stopped it: no thread is still burning CPU afterwards.
-    await Bun.sleep(300);
-    const c0 = process.cpuUsage();
-    await Bun.sleep(700);
-    const c = process.cpuUsage(c0);
-    expect((c.user + c.system) / 1000).toBeLessThan(400);
+    expect(await cpuSettles()).toBe(true);
     // and the server still answers a normal search.
     const ok = await fx.search({ q: "hello" }, 5000);
     expect(done(ok.events)).toMatchObject({ matches: 1, truncated: false });
@@ -95,11 +107,7 @@ describe("cancellation (AC-9)", () => {
     expect(done(ok.events)?.matches).toBe(1);
     expect(performance.now() - t0).toBeLessThan(1500);
     // the cancelled worker is not left spinning
-    await Bun.sleep(300);
-    const c0 = process.cpuUsage();
-    await Bun.sleep(700);
-    const c = process.cpuUsage(c0);
-    expect((c.user + c.system) / 1000).toBeLessThan(400);
+    expect(await cpuSettles()).toBe(true);
   }, 20_000);
 
   test("a normal search streams its file lines through the worker", async () => {
