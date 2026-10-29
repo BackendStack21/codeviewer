@@ -1873,3 +1873,39 @@ li[data-state="done"] .upd-mark {
   background: var(--bg-active);
   color: var(--fg-strong);
 }
+
+/* Search in files */
+.search-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.sv-top { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
+.sv-field { display: flex; align-items: center; gap: 2px; }
+.sv-query, .sv-include, .sv-exclude {
+  flex: 1; min-width: 0; background: var(--bg-elev); color: var(--fg); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 4px 8px; font: inherit; font-size: 12px; outline: none;
+}
+.sv-query:focus, .sv-include:focus, .sv-exclude:focus { border-color: var(--accent); }
+.sv-query.invalid { border-color: var(--danger); }
+.sv-toggle {
+  background: transparent; color: var(--fg-muted); border: 1px solid transparent; border-radius: 4px;
+  padding: 2px 6px; font: 11px var(--font-mono); cursor: pointer;
+}
+.sv-toggle:hover { background: var(--bg-hover); }
+.sv-toggle[aria-pressed="true"] { background: var(--bg-active); color: var(--accent); border-color: var(--accent); }
+.sv-wide { align-self: flex-start; font-family: var(--font-ui); }
+.sv-progress { height: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: sv-slide 1s linear infinite; }
+.sv-progress[hidden] { display: none; }
+@keyframes sv-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.sv-results { flex: 1; overflow: auto; font-size: 12px; padding-bottom: 8px; }
+.sv-msg, .sv-note, .sv-summary { padding: 6px 10px; color: var(--fg-muted); }
+.sv-error { color: var(--danger); }
+.sv-warn { color: var(--warn); }
+.sv-file { display: flex; align-items: baseline; gap: 6px; padding: 3px 10px; cursor: pointer; color: var(--fg-strong); }
+.sv-file:hover { background: var(--bg-hover); }
+.sv-file::before { content: "\25BE"; color: var(--fg-faint); }
+.sv-file.collapsed::before { content: "\25B8"; }
+.sv-dir { color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sv-count { margin-left: auto; background: var(--bg-active); border-radius: 8px; padding: 0 6px; color: var(--fg-muted); font-size: 11px; }
+.sv-row { display: flex; gap: 8px; padding: 1px 10px 1px 22px; cursor: pointer; font-family: var(--font-mono); white-space: nowrap; }
+.sv-row:hover, .sv-row.sel { background: var(--bg-hover); }
+.sv-ln { color: var(--fg-faint); min-width: 3ch; text-align: right; }
+.sv-pv { overflow: hidden; text-overflow: ellipsis; }
+.sv-pv mark { background: var(--mark); color: inherit; border-radius: 2px; }

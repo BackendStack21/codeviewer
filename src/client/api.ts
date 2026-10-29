@@ -22,6 +22,49 @@ export interface FileData {
   text: string;
 }
 
+export interface SearchMatch {
+  line: number;
+  col: number;
+  len: number;
+  preview: string;
+  pcol: number;
+}
+
+export type SearchEvent =
+  | { t: "file"; path: string; matches: SearchMatch[]; more?: number }
+  | { t: "done"; files: number; matches: number; skipped: number; truncated: false | "matches" | "time"; ms: number };
+
+export interface SearchParams {
+  q: string;
+  case?: boolean;
+  word?: boolean;
+  regex?: boolean;
+  include?: string;
+  exclude?: string;
+  ignored?: boolean;
+}
+
+/** Splits an NDJSON stream: complete lines of `carry + chunk`, and the unfinished tail. */
+export function ndjsonLines(carry: string, chunk: string): { lines: string[]; rest: string } {
+  const parts = (carry + chunk).split("\n");
+  const rest = parts.pop()!;
+  const lines: string[] = [];
+  for (const p of parts) {
+    const l = p.endsWith("\r") ? p.slice(0, -1) : p;
+    if (l) lines.push(l);
+  }
+  return { lines, rest };
+}
+
+function parseEvent(line: string): SearchEvent | null {
+  try {
+    const e = JSON.parse(line) as SearchEvent | null;
+    return e && typeof e === "object" && (e.t === "file" || e.t === "done") ? e : null;
+  } catch {
+    return null;
+  }
+}
+
 const q = (p: string) => encodeURIComponent(p);
 
 export interface UpdateInfo {
@@ -91,6 +134,47 @@ export const api = {
   /** Raw file as a blob: URL (images can't send the auth header themselves). Caller revokes it. */
   rawBlobUrl: async (path: string): Promise<string> =>
     URL.createObjectURL(await (await check(await fetch(`/api/raw?path=${q(path)}`))).blob()),
+  /** Streams search events; ends quietly on abort, throws the server's error message on failure. */
+  async *search(params: SearchParams, signal?: AbortSignal): AsyncGenerator<SearchEvent> {
+    const sp = new URLSearchParams({ q: params.q });
+    if (params.case) sp.set("case", "1");
+    if (params.word) sp.set("word", "1");
+    if (params.regex) sp.set("regex", "1");
+    if (params.include) sp.set("include", params.include);
+    if (params.exclude) sp.set("exclude", params.exclude);
+    if (params.ignored) sp.set("ignored", "1");
+    let res: Response;
+    try {
+      res = await fetch(`/api/search?${sp}`, { signal });
+    } catch (e) {
+      if (signal?.aborted) return;
+      throw e;
+    }
+    await check(res);
+    if (!res.body) return;
+    const reader = res.body.getReader();
+    const aborted = new Promise<null>((r) => {
+      if (signal?.aborted) r(null);
+      else signal?.addEventListener("abort", () => r(null), { once: true });
+    });
+    const dec = new TextDecoder();
+    let rest = "";
+    try {
+      for (;;) {
+        const r = await Promise.race([reader.read(), aborted]);
+        if (!r) return;
+        const split = ndjsonLines(rest, r.done ? dec.decode() + "\n" : dec.decode(r.value, { stream: true }));
+        rest = r.done ? "" : split.rest;
+        for (const l of split.lines) {
+          const e = parseEvent(l);
+          if (e) yield e;
+        }
+        if (r.done) return;
+      }
+    } finally {
+      if (!signal?.aborted) void reader.cancel().catch(() => {});
+    }
+  },
   head: async (path: string, bytes: number): Promise<Uint8Array> =>
     new Uint8Array(await (await check(await fetch(`/api/raw?path=${q(path)}&limit=${bytes}`))).arrayBuffer()),
 };
