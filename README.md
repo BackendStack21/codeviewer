@@ -23,6 +23,10 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
   emulator with 256/truecolor, the alternate screen, mouse (SGR), bracketed paste, OSC 8 links,
   OSC 52 clipboard, synchronized output, wide characters and emoji, and pixel-exact box
   drawing. Sessions survive page reloads.
+- **Search in files:** ⌘⇧F opens a sidebar search over the whole project: literal, whole-word or
+  regex, case toggle, include/exclude globs, and `.gitignore` respected unless you opt in to ignored
+  files. Results stream in grouped by file, open at the exact match, and offer a Refresh when files
+  change on disk.
 - **Git (read-only):**
   - Explorer status letters and colors (M A U D R C), with folders rolled up and ignored files dimmed.
   - Colored tabs.
@@ -76,6 +80,8 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘⇧P / Ctrl+Shift+P | Command palette |
 | ⌃\` | Toggle / focus terminal · ⌃⇧\` new terminal |
 | ⌘F · ⌃G | Find in file · go to line |
+| ⌘⇧F / Ctrl+Shift+F | Search in files |
+| F4 / ⇧F4 | Next / previous search result |
 | ⌘B · ⌘⇧E | Toggle sidebar · focus explorer |
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs |
 | ⌘= ⌘- ⌘0 | Font size |
