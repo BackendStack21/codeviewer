@@ -62,7 +62,15 @@ export class FakeElement extends Target {
   parent: FakeElement | null = null;
   children: (FakeElement | FakeText)[] = [];
   attrs = new Map<string, string>();
-  style: Record<string, string> = {};
+  /** Plain property bag; setProperty is non-enumerable so an untouched style has no keys. */
+  style: Record<string, string> & { setProperty(k: string, v: string): void } = Object.defineProperty({} as Record<string, string>, "setProperty", {
+    value(this: Record<string, string>, k: string, v: string) {
+      this[k] = v;
+    },
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  }) as Record<string, string> & { setProperty(k: string, v: string): void };
   tagName: string;
   value = "";
   placeholder = "";

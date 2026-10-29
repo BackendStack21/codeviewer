@@ -67,6 +67,27 @@ function parseEvent(line: string): SearchEvent | null {
 
 const q = (p: string) => encodeURIComponent(p);
 
+export interface ChangeFile {
+  path: string;
+  oldPath?: string;
+  /** git's raw status letter; "?" = untracked, "U" = unmerged */
+  status: "M" | "A" | "D" | "R" | "C" | "T" | "U" | "X" | "?";
+  added: number | null;
+  removed: number | null;
+  binary: boolean;
+}
+
+export interface ChangesData {
+  repo: boolean;
+  scope: "head" | "branch";
+  base: { name: string; oid: string; mergeBase: string; same: boolean } | null;
+  rev: string | null;
+  files: ChangeFile[];
+  truncated: boolean;
+  commits: number;
+  subjects: string[];
+}
+
 export interface UpdateInfo {
   current: string;
   latest: string | null;
@@ -113,11 +134,13 @@ export const api = {
     return res.ok ? ((await res.json()) as { type: "file" | "dir" }).type : null;
   },
   gitStatus: async () => (await check(await fetch("/api/git/status"))).json(),
-  /** HEAD version of a file; null when it isn't in HEAD (or is binary). */
-  gitBase: async (path: string): Promise<string | null> => {
-    const r = await fetch(`/api/git/base?path=${q(path)}`);
+  /** HEAD version of a file (or the version at commit `rev`); null when it isn't there (or is binary). */
+  gitBase: async (path: string, rev?: string): Promise<string | null> => {
+    const r = await fetch(`/api/git/base?path=${q(path)}${rev ? `&rev=${q(rev)}` : ""}`);
     return r.ok ? r.text() : null;
   },
+  /** Changed files vs HEAD or vs the base branch (see src/server/git.ts Changes). */
+  gitChanges: async (scope: "head" | "branch"): Promise<ChangesData> => (await check(await fetch(`/api/git/changes?scope=${scope}`))).json(),
   gitBlame: async (path: string, line: number) => {
     const r = await fetch(`/api/git/blame?path=${q(path)}&line=${line}`);
     return r.ok

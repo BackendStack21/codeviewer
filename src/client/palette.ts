@@ -105,8 +105,6 @@ export class Palette {
   recent: string[] = [];
   commands: Command[] = [];
   onOpenFile: (path: string, line?: number) => void = () => {};
-  /** When set, the palette lists these entries instead of all files (e.g. git changes). */
-  private custom: { path: string; badge: string; cls: string; detail: string }[] | null = null;
   onGoToLine: (line: number) => void = () => {};
 
   constructor() {
@@ -154,13 +152,6 @@ export class Palette {
     await this.loading;
   }
 
-  /** Shows a filterable list of specific files (e.g. changed files), each with a badge. */
-  openList(items: { path: string; badge: string; cls: string; detail: string }[], placeholder: string) {
-    this.custom = items;
-    this.input.placeholder = placeholder;
-    this.open();
-  }
-
   open(prefix = "") {
     this.prevFocus = document.activeElement;
     this.el.hidden = false;
@@ -172,8 +163,6 @@ export class Palette {
 
   close() {
     this.el.hidden = true;
-    this.custom = null;
-    this.input.placeholder = "";
     (this.prevFocus as HTMLElement | null)?.focus?.();
   }
 
@@ -184,27 +173,7 @@ export class Palette {
   private update() {
     const v = this.input.value;
     this.items = [];
-    if (this.custom) {
-      const q = v.trim();
-      const rows = this.custom
-        .map((it) => ({ it, m: q ? scorePath(q, it.path) : { score: 0, pos: [] } }))
-        .filter((x): x is { it: (typeof x)["it"]; m: Match } => !!x.m);
-      if (q) rows.sort((a, b) => b.m.score - a.m.score);
-      for (const { it, m } of rows) {
-        const slash = it.path.lastIndexOf("/", it.path.length - 2) + 1;
-        const base = it.path.slice(slash);
-        const html = this.row(
-          fileIcon(base),
-          `<span class="${it.cls}">${highlight(base, m.pos.filter((i) => i >= slash).map((i) => i - slash))}</span>`,
-          `${esc(it.detail)} · ${highlight(it.path.slice(0, Math.max(0, slash - 1)), m.pos.filter((i) => i < slash))}`,
-        ).replace("</div>", `<span class="gbadge ${it.cls}">${it.badge}</span></div>`);
-        this.items.push({ label: it.path, html, run: () => this.onOpenFile(it.path.replace(/\/$/, "")) });
-      }
-      if (!this.items.length) {
-        this.list.innerHTML = `<div class="pal-empty">${this.custom.length ? "No matching changes" : "No changes: the working tree is clean"}</div>`;
-        return;
-      }
-    } else if (v.startsWith(">")) {
+    if (v.startsWith(">")) {
       const q = v.slice(1).trim();
       const scored: { c: Command; m: Match }[] = [];
       for (const c of this.commands) {
@@ -274,8 +243,6 @@ export class Palette {
     const it = this.items[i];
     if (!it) return;
     this.el.hidden = true;
-    this.custom = null;
-    this.input.placeholder = "";
     it.run();
   }
 }

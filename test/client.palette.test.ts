@@ -283,40 +283,6 @@ describe("Palette", () => {
     expect(lines).toEqual([120]);
   });
 
-  test("openList: filterable change list with badges, empty-state messages and placeholder reset", async () => {
-    const t = await make();
-    const opened: string[] = [];
-    t.p.onOpenFile = (p) => opened.push(p);
-    t.p.openList(
-      [
-        { path: "src/a.ts", badge: "M", cls: "g-M", detail: "Modified" },
-        { path: "new/", badge: "U", cls: "g-U", detail: "Untracked" },
-      ],
-      "Changed files",
-    );
-    expect(t.input.placeholder).toBe("Changed files");
-    expect(t.rows().length).toBe(2);
-    expect(t.list.innerHTML).toContain('<span class="gbadge g-M">M</span>');
-    expect(t.list.innerHTML).toContain("Modified · src");
-    t.type("new");
-    expect(t.rows().length).toBe(1);
-    t.key("Enter");
-    expect(opened).toEqual(["new"]); // trailing slash stripped
-    expect(t.input.placeholder).toBe("");
-
-    t.p.openList([{ path: "x.ts", badge: "M", cls: "c", detail: "d" }], "p");
-    t.type("zzz");
-    expect(t.list.innerHTML).toContain("No matching changes");
-    t.p.close();
-    t.p.openList([], "p");
-    expect(t.list.innerHTML).toContain("No changes: the working tree is clean");
-    // closing leaves custom mode
-    t.p.close();
-    t.p.open();
-    await t.flush();
-    expect(t.list.innerHTML).toContain("a.ts");
-  });
-
   test("empty index shows 'No files'", async () => {
     const t = await make([]);
     t.p.open();

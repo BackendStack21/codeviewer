@@ -8,7 +8,7 @@ import { watchTree } from "./watch.ts";
 import { PtyManager, type PtySocketData } from "./pty.ts";
 import { loadAssets, FONTS, type Asset } from "./assets.ts";
 import { Settings } from "./settings.ts";
-import { Git } from "./git.ts";
+import { Git, isOid } from "./git.ts";
 import { Updater } from "./update.ts";
 import { Candidates, compileQuery, globsOk, createWorkerScanner, type SearchEvent } from "./search.ts";
 
@@ -214,6 +214,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
   };
 
   const relParam = (url: URL) => url.searchParams.get("path") ?? "";
+  /** A well-formed root-relative path (for blobs read from history, which need not exist on disk). */
+  const relOk = (rel: string) =>
+    !!rel && !rel.includes("\0") && !path.isAbsolute(rel) && !/^[a-zA-Z]:/.test(rel) && !rel.split(/[\\/]+/).some((p) => p === "..");
 
   const server = Bun.serve<SocketData>({
     port: opts.port,
@@ -358,12 +361,24 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           return json(g ? await g.status() : { repo: false });
         }
 
+        case "/api/git/changes": {
+          // Changed files vs HEAD, or vs the merge-base with the base branch (default).
+          const g = await gitReady;
+          if (!g) return json({ repo: false });
+          return json({ repo: true, ...(await g.changes(url.searchParams.get("scope") === "head" ? "head" : "branch")) });
+        }
+
         case "/api/git/base": {
           // HEAD version of a file, for gutter diffs. 404 = not tracked at HEAD.
+          // `rev` (a full object id from /api/git/changes) reads the file as of that commit instead;
+          // the file need not exist in the working tree then (deleted or renamed files).
           const g = await gitReady;
           const rel = relParam(url);
-          if (!g || !(await resolveSafe(opts.root, rel))) return fail(404, "not tracked");
-          const blob = await g.base(rel, MAX_TEXT_BYTES);
+          const rev = url.searchParams.get("rev");
+          if (rev !== null && !isOid(rev)) return fail(400, "bad rev");
+          const ok = rev === null ? !!(await resolveSafe(opts.root, rel)) : relOk(rel);
+          if (!g || !ok) return fail(404, "not tracked");
+          const blob = await g.base(rel, MAX_TEXT_BYTES, rev ?? "HEAD");
           if (!blob) return fail(404, "not tracked");
           if (looksBinary(blob)) return fail(415, "binary");
           return new Response(blob as BodyInit, {

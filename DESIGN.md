@@ -647,3 +647,120 @@ and no new endpoint.
 5. Fenced code with `lexLine` highlighting, size caps, info-string allowlist.
 6. Images (relative via blob, remote placeholder), size gate with "Render anyway", palette command, README and
    SECURITY notes, fuzz test.
+
+## 15. Round 6: Branch changes review
+
+**Brief.** Let the user review what an agent changed: both the uncommitted work and everything the
+branch has accumulated since it left its base branch, since agents commit every few minutes. Three
+panelists reviewed a draft: the interaction designer, the visual/information designer, and a
+developer-experience researcher who argued for the smallest product that does the job. Before this,
+the app had gutter markers vs `HEAD` with click-to-peek, and ⌘⇧G opened a palette list of changed
+files (a binding that, it turned out, was advertised but never wired).
+
+### Positions and decisions
+
+**Where it lives (all three).** A third sidebar view, "Changes", next to Explorer and Search, for the
+reason Search is one (§13): the list must stay visible and keep updating while the agent works, and a
+palette closes when you act. Not a panel (the terminal owns it), not a tab (it would fight the file
+being read).
+- ⌘⇧G shows the sidebar, switches to Changes and focuses the list. The status bar's branch and
+  change-count buttons do the same. The palette list is gone: two surfaces for one list is a
+  discoverability and maintenance tax.
+- **Decision: adopted.**
+
+**Scope (disagreement, resolved).** The interaction designer wanted a single list, branch vs base,
+falling back to `HEAD`, because a switch makes the user choose before seeing anything and
+"uncommitted" is a shrinking subset of "branch". The other two wanted both scopes: "what did the
+agent do since the last commit" is a real question mid-task. The DX researcher settled the semantics:
+the branch scope compares the *working tree* with the merge-base (not `HEAD` with the merge-base),
+because the file the agent is editing this second is the one the user most wants to see; the two
+scopes are therefore nested.
+- A segmented control (Uncommitted · vs main) appears only when a base branch exists and HEAD has
+  commits on top of it; otherwise there is one list and the summary reads "vs HEAD". The default is
+  the branch scope.
+- Base detection (server): the remote's default branch (`refs/remotes/origin/HEAD`), else the first
+  of `main`/`master`/`develop`/`trunk` that exists and is not the current branch, else the upstream.
+  On `main` itself the base is `origin/main`, so unpushed commits are what the branch scope shows.
+  A detached HEAD still compares with the base. No user-configurable base in v1.
+- **Decision: two nested scopes, the control only when they differ.**
+
+**Summary and list (visual designer).** One 28px summary line, mono tabular counts: `7 files ·
++120 −38 · 3 commits`, the base right-aligned and faint, a 2px two-colour bar under it. The commit
+list was cut (the DX researcher: nobody reviews agent output commit by commit; the count answers "did
+it squash?") and lives in the tooltip of the count. Rows are 24px like the tree: badge, basename,
+faint directory, fixed-width `+N` `−N` columns so counts align without a table. Names are not tinted
+(the counts already carry colour). Renames show `old → new`, deletions strike the name through,
+binaries say `bin`, conflicts get a left rule. Surprises sort first: conflicts, deletions, new files,
+renames, then edits. A file that was opened dims ("reviewed") until it changes again, so a finished
+review is a list of dim rows (the interaction designer's "know when you're done").
+- **Decision: adopted.**
+
+**Diff tab vs re-based gutter (disagreement, resolved).** The interaction designer proposed no new
+view: re-base the existing gutter markers on the merge-base and keep deletions behind click-to-peek,
+to avoid a second renderer. The other two held that reading deletions is the core of reviewing agent
+output ("did the tests shrink?") and that a peek-per-hunk does not scale to a 40-file review. The
+diff tab won, kept lean: unified only (side-by-side needs ~160 columns; sidebar + terminal on a
+laptop leaves ~70), two line-number columns and a `+`/`−` marker, row backgrounds from the existing
+git tokens at 12% (20% in the number cells), syntax highlighting untouched, three lines of context
+with a clickable "N unchanged lines" row, virtualized like the code view. No word-level diff in v1.
+The interaction designer's two fixes were kept: deleted files open (their old side comes from the
+merge-base blob), and ⌥F5/⌥⇧F5 walk the hunks of a diff and, at the ends, move on to the
+next/previous file, so a review is one key held down. The header shows the file, `+/−`, the base,
+`n/N` with ‹ › buttons, and "Open file" (the live file at its first change).
+- **Decision: unified diff tab; no side-by-side, ever.**
+
+**Live behaviour (DX researcher).** A stale review list in an agent-watching tool is a bug. The list
+refreshes on every git status change while shown (or while diff tabs are open); diff tabs reload when
+their file changes on disk and re-diff when the base moves (a commit in the uncommitted scope), keeping
+their scroll position. A file the agent reverts keeps its tab and shows "No differences". Diff tabs are
+not restored across sessions.
+- **Decision: adopted.**
+
+**Engine and security.** One new endpoint, `/api/git/changes?scope=`, built from `git diff --raw
+--numstat -z -M <rev> -- .` (raw records give status and rename pairs, numstat the counts; both are
+parsed as NUL-separated records, never lines) plus `git ls-files --others --exclude-standard` for
+untracked files, whose lines are counted by the server for the first 200 files under 1 MiB, opened
+with `O_NOFOLLOW` so an untracked symlink to `~/.ssh` is never read. The list is capped at 1,000
+entries. The old side of a diff reuses `/api/git/base` with a `rev` parameter that must be a full
+hex object id the server itself issued (never a ref name, never `-`-prefixed); with a `rev` the path
+need not exist on disk (deleted and renamed files) but is checked syntactically. Everything runs
+through the hardened runner of §10. Client: paths and subjects are escaped and control characters
+made visible (Trojan Source), rows are addressed by index, never by path in an attribute.
+
+**Cut from v1, by the panel:** commits list (count only), user-chosen base, whitespace toggle,
+word-level diff, side-by-side, anything that writes (staging, commenting, stash). Those are an SCM
+client; this is a viewer.
+
+### As built
+
+- `src/server/git.ts`: `changes()`, `detectBase()`, `base(rel, max, rev)`, `isOid`, `MAX_CHANGES`.
+- `src/client/changes.ts`: `ChangesView` (scope control, summary, sorted rows, keyboard, reviewed
+  dimming, live refresh) and the pure `letterOf`, `labelOf`, `sortChanges`, `summarize`.
+- `src/client/diffview.ts`: `DiffView` (header, virtualized unified rows, gaps, hunk stepping) and the
+  pure `buildRows`, `spansHtml`.
+- `src/client/editor.ts`: diff tabs (`openDiff`, `refreshDiffs`, `setDiffPositions`); ⌥F5 falls
+  through to the next file. `src/client/app.ts`: the Changes side view, ⌘⇧G and ⌥F5 bindings, the
+  "Git: Review Changes" and "Git: Compare With Base Branch / HEAD" commands.
+- Tests: `servergit.changes`, `http.changes`, `client.changes`, `client.diffview`.
+
+### Adversarial review (security, performance, correctness)
+
+Three independent reviewers attacked the feature with repros and measurements. Every confirmed
+finding was fixed and locked in with a test:
+
+| Area | Finding | Fix |
+| --- | --- | --- |
+| Security (high) | `diff.orderFile=/dev/zero` in a hostile `.git/config` made the new `git diff` grow past 4 GB and never return; `mailmap.file=/dev/zero` did the same to `git log` (and the pre-existing `log -1`/`blame`) | `-O/dev/null` on the diff, `--no-mailmap` on every log, `mailmap.file=/dev/null`, `mailmap.blob=` and `log.mailmap=false` in `HARDEN`; a 30 s kill timer on every git run |
+| Security (medium) | `diff.relative=true` made paths cwd-relative, so a subfolder view silently listed nothing; `core.bigFileThreshold=1` turned every count into "bin" | `--no-relative`; `core.bigFileThreshold=512m` in `HARDEN` |
+| Security (low) | 200 untracked files × 1 MiB read concurrently into full-size buffers; a rename from outside the viewed folder showed a path above the root | Streamed counting through one 64 KiB buffer, 8 at a time; such renames are shown as added, without the old path |
+| Correctness (high) | Merge conflicts never appeared: `git diff <commit>` compares a tree with the working tree and never emits unmerged entries, so the whole conflict path was dead code | `git ls-files --unmerged` overlays `U` entries (test: `UU` and modify/delete) |
+| Correctness (high) | Past the 1,000-file cap the parser stopped before the numstat section, so every row lost its counts and never un-dimmed | Skip entries over the cap but keep parsing; `truncated` is set only when something was cut |
+| Correctness (medium) | A diff tab kept a stale status when its file left the list: an added file that got committed showed entirely green instead of "No differences"; a restored deleted file stayed "deleted" | A file missing from the list is re-diffed as a plain modification |
+| Correctness (low) | `git rm --cached` listed the same path twice (D and ?); submodules were listed as `M +1 −1`; an orphan branch with a staged index showed nothing; EOL-only changes read "No differences" while the list said `+1 −1` | Merged into one `M` entry; mode `160000` skipped; the empty tree is the diff base of an unborn branch; "Only line endings or the final newline changed" |
+| Performance (medium) | `/api/git/changes` ran ~10 git processes per call with no coalescing (4 concurrent callers: 650 ms on 100k files) and the client fired a request on every status push | One in-flight run per scope on the server; the client keeps one request in flight and re-runs once afterwards |
+| Performance (low) | Every reload of a diff tab refetched the unchanged old blob; ArrowDown rebuilt 1,000 rows | The old side is cached per tab by rev and path; selection moves in place |
+
+Measured and left alone: a 100k-line file with every other line changed builds 200k rows in
+2.3 ms and renders a window in 0.6 ms; one change at line 99,990 costs 9.5 ms including lexing
+both sides; a diff tab of an 8 MB file holds 11.6 MB.
+

@@ -1,6 +1,6 @@
 /** Keyboard routing helpers shared by the app shell (pure, so they can be unit tested). */
 
-export type SideView = "explorer" | "search";
+export type SideView = "explorer" | "search" | "changes";
 
 export interface KeyLike {
   key: string;
@@ -28,5 +28,5 @@ export function searchKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): S
 
 /** Normalises a persisted sidebar view; anything unknown falls back to the Explorer. */
 export function normSideView(v: unknown): SideView {
-  return v === "search" ? "search" : "explorer";
+  return v === "search" || v === "changes" ? v : "explorer";
 }
