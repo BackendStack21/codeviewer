@@ -104,7 +104,7 @@ const setWinSel = (s: unknown) => ((dom.window as unknown as Record<string, unkn
 const src = ["abcdefgh", "ijklmnop", "qrstuvwx"].join("\n");
 import { copyPng, type CopyImageDeps } from "../src/client/copyimage.ts";
 import { copyImageKey } from "../src/client/keys.ts";
-import { selectionSnapshot } from "../src/client/copyentry.ts";
+import { bindSelectionMenu, selectionSnapshot } from "../src/client/copyentry.ts";
 
 describe("R-01 right-click inside a selection keeps the model range", () => {
   const press = (button: number) => {
@@ -124,14 +124,19 @@ describe("R-01 right-click inside a selection keeps the model range", () => {
   test("primary button (0) still clears it", () => {
     expect(press(0).selection).toBeNull();
   });
-  test("contextmenu with a selection calls onContextMenu", () => {
+  test("no dead context-menu hook remains on the code view (AC-12)", () => {
+    const { view } = mount(src);
+    expect("onContextMenu" in view).toBe(false);
+    expect((view.scroller as FakeElement).listenerCount("contextmenu")).toBe(0);
+  });
+  test("the menu is wired through bindSelectionMenu: contextmenu with a selection shows Copy / Copy as Image", () => {
     setWinSel({ setBaseAndExtent() {} });
     const { view } = mount(src);
     view.setRange(rng(0, 0, 2, 3));
-    let n = 0;
-    view.onContextMenu = () => n++;
-    (view.scroller as FakeElement).dispatchEvent(new FakeEvent("contextmenu"));
-    expect(n).toBe(1);
+    const shown: string[][] = [];
+    bindSelectionMenu(view.el as FakeElement as never, { hasSelection: () => view.selection !== null, copy() {}, copyImage() {} }, (_e, items) => shown.push(items.map((i) => i.label)));
+    (view.el as FakeElement).dispatchEvent(new FakeEvent("contextmenu"));
+    expect(shown).toEqual([["Copy", "Copy as Image"]]);
   });
 });
 
