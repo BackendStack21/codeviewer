@@ -56,6 +56,8 @@ export class SearchView {
   private ranQ = "";
   private started = false;
   private sel = -1;
+  private stale = false;
+  private staleBar: HTMLElement;
 
   constructor(opts: SearchViewOptions = {}) {
     this.debounce = opts.debounce ?? 250;
@@ -64,6 +66,9 @@ export class SearchView {
     this.exclude = h("input", { class: "sv-exclude", spellcheck: "false", placeholder: "files to exclude", "aria-label": "Files to exclude" });
     this.results = h("div", { class: "sv-results", role: "listbox", tabindex: "0" });
     this.progress = h("div", { class: "sv-progress", hidden: true });
+    const refresh = h("button", { class: "sv-refresh", type: "button" }, "Refresh");
+    refresh.addEventListener("click", () => void this.run());
+    this.staleBar = h("div", { class: "sv-stale", hidden: true }, h("span", null, "Results may be out of date"), refresh);
     const tog = (opt: Opt, label: string, title: string, cls = "") => {
       const b = h("button", { class: `sv-toggle ${cls}`.trim(), "data-opt": opt, "aria-pressed": "false", title, type: "button" }, label);
       b.addEventListener("click", () => {
@@ -85,6 +90,7 @@ export class SearchView {
         this.exclude,
         tog("ignored", "Include ignored files", "Also search files excluded by .gitignore", "sv-wide"),
       ),
+      this.staleBar,
       this.progress,
       this.results,
     );
@@ -181,6 +187,24 @@ export class SearchView {
     return true;
   }
 
+  /** A file changed on disk: when it is in the results (or `many` changed), offer a Refresh. */
+  markStale(paths: string[], many = false): void {
+    if (!this.started || this.error || this.running) return;
+    if (!many && !this.groups.some((g) => paths.includes(g.path))) return;
+    this.stale = true;
+    this.staleBar.hidden = false;
+  }
+
+  /** Call when the view becomes visible: refreshes once if results went stale while it was hidden. */
+  onShown(): void {
+    if (this.stale) void this.run();
+  }
+
+  private clearStale() {
+    this.stale = false;
+    this.staleBar.hidden = true;
+  }
+
   focus() {
     this.input.focus();
     (this.input as unknown as { select?: () => void }).select?.();
@@ -200,6 +224,7 @@ export class SearchView {
   }
 
   private cancel() {
+    this.clearStale();
     clearTimeout(this.timer);
     clearTimeout(this.progressTimer);
     clearTimeout(this.renderTimer);
@@ -313,6 +338,7 @@ export class SearchView {
     let head = `<div class="sv-summary">${plural(n, "result", "results")} in ${plural(files, "file", "files")}</div>`;
     if (d?.truncated === "matches") head += `<div class="sv-note sv-warn">Showing first 2,000 results</div>`;
     if (d?.truncated === "time") head += `<div class="sv-note sv-warn">Search timed out - showing partial results</div>`;
+    if (d?.error || (!d && !this.running)) head += `<div class="sv-note sv-warn">Search ended early - showing partial results</div>`;
     this.results.innerHTML = head + skipped + html;
   }
 }

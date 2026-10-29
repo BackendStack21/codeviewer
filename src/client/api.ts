@@ -32,7 +32,7 @@ export interface SearchMatch {
 
 export type SearchEvent =
   | { t: "file"; path: string; matches: SearchMatch[]; more?: number }
-  | { t: "done"; files: number; matches: number; skipped: number; truncated: false | "matches" | "time"; ms: number };
+  | { t: "done"; files: number; matches: number; skipped: number; truncated: false | "matches" | "time"; ms: number; error?: true };
 
 export interface SearchParams {
   q: string;

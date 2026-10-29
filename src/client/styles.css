@@ -1913,3 +1913,6 @@ li[data-state="done"] .upd-mark {
 .side-tab:hover, .side-tab.active { opacity: 1; color: var(--fg); }
 .side-tools { display: flex; gap: 2px; }
 .side-tools[hidden], .tree-scroll[hidden], .search-view[hidden] { display: none; }
+.sv-stale { display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: var(--fg-muted); }
+.sv-stale[hidden] { display: none; }
+.sv-refresh { cursor: pointer; }
