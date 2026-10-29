@@ -85,33 +85,44 @@ if (typeof window !== "undefined") {
 /** Snapshot fallback deps: native takeSnapshot via the bridge (reply through window.__cvSnap) and a root class hiding ::selection. */
 export function snapshotDeps(bridge: Bridge): SnapshotDeps {
   const root = document.documentElement;
-  return {
-    hideSelection: (on) => root.classList.toggle("snap-hide-sel", on),
+  const deps: SnapshotDeps = {
+    begin() {
+      // A new request supersedes a pending one: its late PNG must never reach the pasteboard.
+      const old = tracker.cancel();
+      if (old !== undefined) {
+        bridge?.postMessage({ t: "snapshotcancel", id: old });
+        snapDone?.(false);
+      }
+      const id = tracker.begin();
+      tracker.claimHide(id);
+      return id;
+    },
+    // Only the request that owns the hide may restore the highlight.
+    hideSelection: (on, id) => {
+      if (!on && id !== undefined && !tracker.releaseHide(id)) return;
+      root.classList.toggle("snap-hide-sel", on);
+    },
     snapshot: bridge
-      ? (r: SnapRect) =>
+      ? (r: SnapRect, id?: number) =>
           new Promise<boolean>((res) => {
-            // A new request supersedes a pending one: its late PNG must never reach the pasteboard.
-            const old = tracker.cancel();
-            if (old !== undefined) {
-              bridge.postMessage({ t: "snapshotcancel", id: old });
-              snapDone?.(false);
-            }
-            const id = tracker.begin();
+            if (id === undefined) id = deps.begin!();
+            const rid = id;
             const finish = (ok: boolean) => {
               clearTimeout(timer);
               snapDone = undefined;
               res(ok);
             };
             const timer = setTimeout(() => {
-              if (tracker.cancel(id) !== undefined) bridge.postMessage({ t: "snapshotcancel", id });
+              if (tracker.cancel(rid) !== undefined) bridge.postMessage({ t: "snapshotcancel", id: rid });
               finish(false);
             }, SNAP_TIMEOUT);
             snapDone = finish;
             // Give the highlight removal one frame to paint before the native side captures.
-            requestAnimationFrame(() => requestAnimationFrame(() => bridge.postMessage({ t: "snapshotrect", id, ...r })));
+            requestAnimationFrame(() => requestAnimationFrame(() => bridge.postMessage({ t: "snapshotrect", id: rid, ...r })));
           })
       : undefined,
   };
+  return deps;
 }
 
 const blobToDataUri = (b: Blob) =>
