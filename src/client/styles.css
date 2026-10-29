@@ -288,11 +288,13 @@ svg {
 .resizing-x,
 .resizing-x * {
   cursor: col-resize !important;
+  -webkit-user-select: none !important;
   user-select: none !important;
 }
 .resizing-y,
 .resizing-y * {
   cursor: row-resize !important;
+  -webkit-user-select: none !important;
   user-select: none !important;
 }
 
@@ -339,6 +341,7 @@ svg {
 }
 :root[data-native="macos"] .titlebar {
   padding-left: calc(var(--native-inset, 72px) + 12px);
+  -webkit-user-select: none;
   -webkit-user-select: none;
   user-select: none;
   cursor: default;
@@ -554,6 +557,7 @@ svg {
   cursor: pointer;
   white-space: nowrap;
   color: var(--fg);
+  -webkit-user-select: none;
   user-select: none;
 }
 .row::before {
@@ -713,6 +717,7 @@ svg {
   color: var(--fg-muted);
   border-right: 1px solid var(--border);
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   transition: color 0.12s, background 0.12s;
 }
@@ -1064,6 +1069,7 @@ svg {
   text-align: right;
   color: var(--fg-faint);
   background: var(--bg-editor);
+  -webkit-user-select: none;
   user-select: none;
   font-variant-numeric: tabular-nums;
 }
@@ -1134,6 +1140,7 @@ svg {
   font-size: 0.88em;
   font-style: italic;
   white-space: nowrap;
+  -webkit-user-select: none;
   user-select: none;
   pointer-events: none;
 }
@@ -1189,6 +1196,7 @@ svg {
   padding-right: 12px;
   text-align: right;
   color: var(--fg-faint);
+  -webkit-user-select: none;
   user-select: none;
 }
 .peek-t {
@@ -1207,6 +1215,8 @@ svg {
   }
 }
 .trunc {
+  -webkit-user-select: none;
+  user-select: none;
   color: var(--fg-faint);
   font-style: italic;
 }
@@ -1516,6 +1526,7 @@ mark.cur {
   border-radius: 6px;
   color: var(--fg-muted);
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   font-size: 12px;
 }
@@ -2080,3 +2091,10 @@ li[data-state="done"] .upd-mark {
 .sv-stale { display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: var(--fg-muted); }
 .sv-stale[hidden] { display: none; }
 .sv-refresh { cursor: pointer; }
+
+.ln .g::selection,
+.ln .g *::selection,
+.blame::selection,
+.blame *::selection,
+.trunc::selection,
+.trunc *::selection { background: transparent; }
