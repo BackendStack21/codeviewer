@@ -10,7 +10,7 @@ import { loadAssets, FONTS, type Asset } from "./assets.ts";
 import { Settings } from "./settings.ts";
 import { Git } from "./git.ts";
 import { Updater } from "./update.ts";
-import { compileQuery, createWorkerScanner, type SearchEvent } from "./search.ts";
+import { Candidates, compileQuery, createWorkerScanner, type SearchEvent } from "./search.ts";
 
 import pkg from "../../package.json" with { type: "json" };
 
@@ -73,7 +73,10 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     return g;
   });
 
+  const candidates = new Candidates(opts.root, index, gitReady);
+
   const stopWatch = watchTree(opts.root, async (paths) => {
+    candidates.invalidate();
     const structural = await index.apply(paths);
     // Huge bursts (installs, builds) are summarized: the client refreshes what it shows.
     if (paths.length > 2000) broadcast({ t: "changed", paths: [], many: true, structural: true });
@@ -161,7 +164,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       poke();
     };
     const run = (async () => {
-      const list = (await index.get()).split("\n").filter(Boolean);
+      const list = await candidates.list({ include: sp.get("include"), exclude: sp.get("exclude"), ignored: sp.get("ignored") === "1" });
       await scanner({ root: opts.root, files: list, q, opts: o }, ac.signal, emit);
     })()
       .catch(() => {

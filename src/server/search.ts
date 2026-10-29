@@ -1,4 +1,8 @@
-// Project-wide content search: pure matcher (compileQuery, matchText).
+// Project-wide content search: pure matcher (compileQuery, matchText), scanner and candidate list.
+import { realpath } from "node:fs/promises";
+import { resolveSafe } from "./files.ts";
+import type { Git } from "./git.ts";
+import type { FileIndex } from "./index.ts";
 
 export interface SearchMatch {
   line: number;
@@ -185,4 +189,65 @@ export function createWorkerScanner(deadlineMs: number = SEARCH_DEADLINE_MS): Sc
       };
       worker.postMessage({ req, cancel } satisfies WorkerJob);
     });
+}
+
+// ───────────── SL03 scaffolding: candidate list (stubs, filled in by implement) ─────────────
+
+/** Splits a comma-separated glob list: trimmed, empty entries dropped. */
+export function parseGlobs(s: string | null | undefined): string[] {
+  return (s ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+/** Keeps paths matching any include glob (all when none) and no exclude glob (Bun.Glob, root-relative paths). */
+export function filterByGlobs(files: string[], include: string[], exclude: string[]): string[] {
+  if (!include.length && !exclude.length) return files;
+  const inc = include.map((g) => new Bun.Glob(g));
+  const exc = exclude.map((g) => new Bun.Glob(g));
+  return files.filter((f) => (!inc.length || inc.some((g) => g.match(f))) && !exc.some((g) => g.match(f)));
+}
+
+/** Drops every path whose realpath is not inside rootReal (symlinked parents, missing files). */
+export async function containedOnly(rootReal: string, files: string[]): Promise<string[]> {
+  const ok: boolean[] = new Array(files.length).fill(false);
+  const CHUNK = 64;
+  for (let i = 0; i < files.length; i += CHUNK) {
+    await Promise.all(
+      files.slice(i, i + CHUNK).map(async (f, j) => {
+        ok[i + j] = (await resolveSafe(rootReal, f)) !== null;
+      }),
+    );
+  }
+  return files.filter((_, i) => ok[i]);
+}
+
+export interface CandidateOptions {
+  include?: string | null;
+  exclude?: string | null;
+  ignored?: boolean;
+}
+
+/** Candidate files for a search: git ls-files in repos, FileIndex otherwise; cached until invalidate(). */
+export class Candidates {
+  private cached: Promise<string[] | null> | null = null;
+  constructor(
+    readonly root: string,
+    readonly index: FileIndex,
+    readonly git: Promise<Git | null>,
+  ) {}
+  async list(o: CandidateOptions = {}): Promise<string[]> {
+    let list: string[] | null = null;
+    if (!o.ignored) {
+      this.cached ??= this.git.then((g) => g?.listFiles() ?? null).catch(() => null);
+      list = await this.cached;
+    }
+    list ??= (await this.index.get()).split("\n").filter(Boolean);
+    const rootReal = await realpath(this.root).catch(() => this.root);
+    return containedOnly(rootReal, filterByGlobs(list, parseGlobs(o.include), parseGlobs(o.exclude)));
+  }
+  invalidate(): void {
+    this.cached = null;
+  }
 }
