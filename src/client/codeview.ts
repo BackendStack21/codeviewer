@@ -145,6 +145,7 @@ export class CodeView {
       const ln = (e.target as HTMLElement).closest<HTMLElement>(".ln");
       if (!ln) return;
       this.sel = null;
+      this.applied = null;
       const n = Number(ln.dataset.n);
       if ((e.target as HTMLElement).classList.contains("g") && this.gitMarks[n]) {
         e.preventDefault();
@@ -174,6 +175,8 @@ export class CodeView {
   setSelection: (anchorEl: Node, anchorOffset: number, focusEl: Node, focusOffset: number) => void = (a, ao, f, fo) =>
     window.getSelection()?.setBaseAndExtent(a, ao, f, fo);
   private sel: SelRange | null = null;
+  /** Endpoints of the last DOM selection we applied; its selectionchange echo must not shrink the model. */
+  private applied: SelRange | null = null;
 
   /** The selection as a normalised model range, or null. */
   get selection(): SelRange | null {
@@ -183,6 +186,7 @@ export class CodeView {
   /** Sets the model range; the DOM selection is restored on the next render. */
   setRange(r: SelRange | null) {
     this.sel = r ? normalize(r) : null;
+    this.applied = null;
     this.schedule();
   }
 
@@ -206,7 +210,7 @@ export class CodeView {
   /** Re-applies the model range to the freshly rendered rows. */
   private restoreSelection() {
     if (!this.sel) return;
-    const last = Math.min(this.window.last, this.lines.length) - (this.window.last === Infinity ? 0 : 1);
+    const last = Math.min(this.window.last, this.lines.length) - 1;
     const plan = restorePlan(this.sel, this.window.first, last, (l) => Math.min(this.lines[l]?.length ?? 0, MAX_RENDER_COLS));
     if (!plan) return;
     const a = this.rowTx(plan.anchor.line);
@@ -214,6 +218,7 @@ export class CodeView {
     if (!a || !f) return;
     const [an, ao] = locate(a, plan.anchor.offset);
     const [fn, fo] = locate(f, plan.focus.offset);
+    this.applied = { start: { line: plan.anchor.line, col: plan.anchor.offset }, end: { line: plan.focus.line, col: plan.focus.offset } };
     this.setSelection(an, ao, fn, fo);
   }
 
@@ -230,7 +235,11 @@ export class CodeView {
     };
     const a = pos(ds.anchorNode, ds.anchorOffset);
     const f = pos(ds.focusNode, ds.focusOffset);
-    if (a && f) this.sel = normalize({ start: a, end: f });
+    if (!a || !f) return;
+    const ap = this.applied;
+    if (ap && a.line === ap.start.line && a.col === ap.start.col && f.line === ap.end.line && f.col === ap.end.col) return;
+    this.applied = null;
+    this.sel = normalize({ start: a, end: f });
   }
 
   get lineCount() {
