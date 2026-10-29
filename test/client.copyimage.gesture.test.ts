@@ -21,7 +21,6 @@ function mk(log: string[], over: Partial<CopyImageDeps> = {}): CopyImageDeps {
       },
     },
     ...({ download: () => void log.push("download") } as object), // must never be called
-    copyText: (t) => void log.push(`text:${t}`),
     notify: (m) => void log.push(`notify:${m}`),
     ...over,
   };

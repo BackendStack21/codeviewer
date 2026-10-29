@@ -27,9 +27,26 @@ export async function renderLayoutPng(layout: ImageLayout, scale: number, font: 
   ctx.scale(scale, scale);
   ctx.textBaseline = "top";
   for (const op of layout.ops) {
-    if (op.t === "rect") {
+    if (op.t === "gradient") {
+      const g = ctx.createLinearGradient(op.x0, op.y0, op.x1, op.y1);
+      for (const st of op.stops) g.addColorStop(st.at, st.color);
+      ctx.fillStyle = g;
+      ctx.fillRect(op.x, op.y, op.w, op.h);
+    } else if (op.t === "rect") {
+      ctx.save();
+      if (op.shadow) {
+        ctx.shadowColor = op.shadow.color;
+        ctx.shadowBlur = op.shadow.blur;
+        ctx.shadowOffsetY = op.shadow.offsetY;
+      }
       ctx.fillStyle = op.fill;
       roundRect(ctx, op.x, op.y, op.w, op.h, op.r);
+      ctx.fill();
+      ctx.restore();
+    } else if (op.t === "dot") {
+      ctx.fillStyle = op.fill;
+      ctx.beginPath();
+      ctx.arc(op.cx, op.cy, op.r, 0, Math.PI * 2);
       ctx.fill();
     } else {
       ctx.font = `${op.italic ? "italic " : ""}${op.bold ? "bold " : ""}${size}px ${font}`;
@@ -57,6 +74,12 @@ export function browserDeps(opts: { font: string; size: number; bridge?: Bridge;
   const bridge = opts.bridge;
   return {
     renderPng: (layout, scale) => renderLayoutPng(layout, scale, opts.font, opts.size),
+    measure: (t) => {
+      const c = document.createElement("canvas").getContext("2d");
+      if (!c) return t.length * opts.size * 0.6;
+      c.font = `${opts.size}px ${opts.font}`;
+      return c.measureText(t).width;
+    },
     clipboard: cb?.write && w.ClipboardItem ? { write: (items) => cb.write!(items), ClipboardItem: w.ClipboardItem } : undefined,
     native: bridge ? async (png) => bridge.postMessage({ t: "copyimage", png: await toBase64(png) }) : undefined,
     notify: opts.notify,

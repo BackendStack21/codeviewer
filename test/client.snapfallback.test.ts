@@ -23,7 +23,6 @@ function mk(log: string[], snap?: SnapshotDeps["snapshot"], over: Partial<CopyIm
   return {
     renderPng: async () => blob,
     native: async () => void log.push("native"),
-    copyText: () => {},
     notify: () => {},
     snapshot: snap,
     hideSelection: (on) => void log.push(on ? "hide" : "show"),

@@ -552,6 +552,8 @@ class App {
     return {
       bg: cssVar("--bg-editor"),
       fg: cssVar("--fg"),
+      muted: cssVar("--fg-muted"),
+      accent: cssVar("--accent"),
       tokenColors,
       tokenStyles: { c: { italic: true }, h: { bold: true }, b: { bold: true }, i: { italic: true } },
       font,
@@ -582,7 +584,7 @@ class App {
     }
     const input = tab?.code?.imageInput(snap?.code);
     if (!input) return notify(MSG_NO_SELECTION);
-    void copyCodeImage(deps, { ...input, theme, dpr: window.devicePixelRatio || 1 });
+    void copyCodeImage(deps, { ...input, theme, title: tab?.path, dpr: window.devicePixelRatio || 1 });
   }
 
   private notify(msg: string) {

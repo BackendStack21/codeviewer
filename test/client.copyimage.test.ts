@@ -1,3 +1,4 @@
+import { BACKDROP_PAD, MIN_CONTENT_W, frameGeometry } from "../src/client/imageframe.ts";
 import { describe, expect, test } from "bun:test";
 import * as copyMod from "../src/client/copyimage.ts";
 import { copyCodeImage, copyPng, MSG_CLIPBOARD_FAILED, MSG_NO_SELECTION, MSG_OK, MSG_TOO_LARGE, type CopyImageDeps, type CopyImageInput } from "../src/client/copyimage.ts";
@@ -25,7 +26,6 @@ function mk(over: Partial<CopyImageDeps> = {}, log: string[] = []) {
       },
     },
     ...({ download: (_b: unknown, name: string) => void log.push(`download:${name}`) } as object), // must never be called
-    copyText: (t) => void log.push(`text:${t}`),
     notify: (m) => void log.push(`notify:${m}`),
     ...over,
   };
@@ -130,7 +130,10 @@ describe("copyCodeImage (AC-4, AC-7)", () => {
       },
     });
     await copyCodeImage(deps, input({ opts: { charW: 6, padding: 10, lineH: 15 } }));
-    expect(w).toBe(2 * 10 + 2 * 6);
+    const f = frameGeometry(2 * 10 + 2 * 6, 2 * 10 + 15, "", { bg: "", fg: "", muted: "", accent: "" }, () => 0);
+    if ("tooLarge" in f) throw new Error("unexpected tooLarge");
+    expect(w).toBe(f.width);
+    expect(w).toBe(MIN_CONTENT_W + 2 * BACKDROP_PAD);
   });
   test("too many rows reports too large and never touches the clipboard", async () => {
     const lines = Array.from({ length: 20001 }, () => "x");

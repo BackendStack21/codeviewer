@@ -9,6 +9,10 @@ export interface TokenStyle {
 export interface ImageTheme {
   bg: string;
   fg: string;
+  /** Muted foreground for the frame title; falls back to fg. */
+  muted?: string;
+  /** Theme accent the frame backdrop gradient derives from; falls back to fg. */
+  accent?: string;
   tokenColors: Record<string, string>;
   tokenStyles?: Record<string, TokenStyle>;
   font: string;
@@ -21,8 +25,19 @@ export interface LayoutOptions {
   charW?: number;
   lineH?: number;
 }
+export interface Shadow {
+  blur: number;
+  offsetY: number;
+  color: string;
+}
+export interface GradStop {
+  at: number;
+  color: string;
+}
 export type DrawOp =
-  | { t: "rect"; x: number; y: number; w: number; h: number; r: number; fill: string }
+  | { t: "rect"; x: number; y: number; w: number; h: number; r: number; fill: string; shadow?: Shadow }
+  | { t: "gradient"; x: number; y: number; w: number; h: number; x0: number; y0: number; x1: number; y1: number; stops: GradStop[] }
+  | { t: "dot"; cx: number; cy: number; r: number; fill: string }
   | { t: "text"; x: number; y: number; text: string; fill: string; bold: boolean; italic: boolean };
 export interface ImageLayout {
   width: number;
@@ -30,6 +45,9 @@ export interface ImageLayout {
   cols: number;
   rows: number;
   ops: DrawOp[];
+  /** Set on framed layouts so the renderer draws with the theme font. */
+  font?: string;
+  size?: number;
 }
 export type LayoutResult = ImageLayout | { tooLarge: true };
 export type ScaleResult = { scale: number } | { tooLarge: true };

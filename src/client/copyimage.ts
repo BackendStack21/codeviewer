@@ -1,6 +1,7 @@
 // Image copy orchestration: layout -> render -> clipboard / native. Deps are injected.
 import type { Span } from "./highlight.ts";
-import { fitScale, layoutImage, type ImageLayout, type ImageTheme, type LayoutOptions } from "./imagelayout.ts";
+import { frameImage } from "./imageframe.ts";
+import { layoutImage, type ImageLayout, type ImageTheme, type LayoutOptions } from "./imagelayout.ts";
 import type { SelRange } from "./selection.ts";
 
 export const MSG_OK = "Copied as image";
@@ -14,6 +15,8 @@ export interface CopyImageDeps {
   renderPng(layout: ImageLayout, scale: number): Promise<Blob>;
   clipboard?: { write?(items: unknown[]): Promise<void>; ClipboardItem?: new (data: Record<string, Promise<Blob>>) => unknown };
   native?: (png: Blob) => Promise<void>;
+  /** Text width in layout px, for ellipsising the frame title. */
+  measure?: (text: string) => number;
   notify(msg: string): void;
 }
 export interface CopyImageInput {
@@ -22,6 +25,8 @@ export interface CopyImageInput {
   theme: ImageTheme;
   range: SelRange;
   dpr: number;
+  /** Active file path or name; its basename titles the frame. */
+  title?: string;
   opts?: LayoutOptions;
 }
 
@@ -72,9 +77,11 @@ export async function copyCodeImage(deps: CopyImageDeps, input: CopyImageInput):
   };
   const layout = layoutImage(input.lines, input.tokens, input.theme, input.range, input.opts);
   if ("tooLarge" in layout) return done(MSG_TOO_LARGE);
-  const fit = fitScale(layout.width, layout.height, input.dpr);
-  if ("tooLarge" in fit) return done(MSG_TOO_LARGE);
-  const result = await copyPng(deps, deps.renderPng(layout, fit.scale));
+  const size = input.theme.size;
+  const measure = deps.measure ?? ((t: string) => t.length * size * 0.6);
+  const framed = frameImage(layout, input.title ?? "", input.theme, measure, input.dpr);
+  if ("tooLarge" in framed) return done(MSG_TOO_LARGE);
+  const result = await copyPng(deps, deps.renderPng(framed, framed.scale));
   return done(result === "failed" ? MSG_CLIPBOARD_FAILED : MSG_OK);
 }
 
