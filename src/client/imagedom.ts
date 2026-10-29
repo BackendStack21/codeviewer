@@ -1,0 +1,68 @@
+// Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
+import type { CopyImageDeps } from "./copyimage.ts";
+import type { ImageLayout } from "./imagelayout.ts";
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+export function renderLayoutPng(layout: ImageLayout, scale: number, font: string, size: number): Promise<Blob> {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(layout.width * scale);
+  canvas.height = Math.ceil(layout.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return Promise.reject(new Error("no canvas"));
+  ctx.scale(scale, scale);
+  ctx.textBaseline = "top";
+  for (const op of layout.ops) {
+    if (op.t === "rect") {
+      ctx.fillStyle = op.fill;
+      roundRect(ctx, op.x, op.y, op.w, op.h, op.r);
+      ctx.fill();
+    } else {
+      ctx.font = `${op.italic ? "italic " : ""}${op.bold ? "bold " : ""}${size}px ${font}`;
+      ctx.fillStyle = op.fill;
+      ctx.fillText(op.text, op.x, op.y);
+    }
+  }
+  return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
+}
+
+export function downloadBlob(blob: Blob, name: string): void {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function toBase64(blob: Blob): Promise<string> {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(",")[1] ?? "");
+    fr.onerror = () => rej(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+type Bridge = { postMessage(m: unknown): void } | undefined;
+
+export function browserDeps(opts: { font: string; size: number; bridge?: Bridge; notify(msg: string): void }): CopyImageDeps {
+  const w = window as unknown as { ClipboardItem?: new (d: Record<string, Promise<Blob>>) => unknown };
+  const cb = navigator.clipboard as { write?(items: unknown[]): Promise<void> } | undefined;
+  const bridge = opts.bridge;
+  return {
+    renderPng: (layout, scale) => renderLayoutPng(layout, scale, opts.font, opts.size),
+    clipboard: cb?.write && w.ClipboardItem ? { write: (items) => cb.write!(items), ClipboardItem: w.ClipboardItem } : undefined,
+    download: downloadBlob,
+    native: bridge ? async (png) => bridge.postMessage({ t: "copyimage", png: await toBase64(png) }) : undefined,
+    copyText: (t) => navigator.clipboard.writeText(t),
+    notify: opts.notify,
+  };
+}

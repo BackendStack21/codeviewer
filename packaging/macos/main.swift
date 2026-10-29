@@ -240,6 +240,7 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     // Messages from the page:
     //   {t: "theme", dark, bg}  sync the window appearance
     //   {t: "drag"}            mouse-down on empty title bar: move the window
+    //   {t: "copyimage", png}  PNG (base64) to put on the general pasteboard
     //   {t: "dblclick"}        double-click on the title bar: system zoom/minimize action
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let t = body["t"] as? String else { return }
@@ -249,6 +250,14 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         }
         if t == "relaunch" {
             (NSApp.delegate as? AppDelegate)?.relaunch()
+            return
+        }
+        if t == "copyimage" {
+            if let b64 = body["png"] as? String, let data = Data(base64Encoded: b64) {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setData(data, forType: .png)
+            }
             return
         }
         if t == "dblclick" {
