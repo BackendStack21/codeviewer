@@ -132,22 +132,25 @@ export function clampSnapRect(rects: RectLike[], vp: Viewport): SnapRect | null 
 
 export interface SnapshotDeps {
   /** Native WKWebView snapshot of a viewport rect; resolves true when the PNG reached the pasteboard. */
-  snapshot?: (r: SnapRect) => Promise<boolean>;
-  /** Hides (true) / restores (false) the selection highlight. */
-  hideSelection(on: boolean): void;
+  snapshot?: (r: SnapRect, id?: number) => Promise<boolean>;
+  /** Starts a request: returns its id (supersedes any pending one) and makes it the owner of the highlight hide. */
+  begin?: () => number;
+  /** Hides (true) / restores (false) the selection highlight; a restore by a request that no longer owns the hide is ignored. */
+  hideSelection(on: boolean, id?: number): void;
 }
 
 /** Tries the native snapshot of the selection rects; true only when it succeeded. Always restores the highlight. */
 export async function copyViaSnapshot(deps: SnapshotDeps, rects: RectLike[], vp: Viewport): Promise<boolean> {
   const rect = deps.snapshot ? clampSnapRect(rects, vp) : null;
   if (!deps.snapshot || !rect) return false;
-  deps.hideSelection(true);
+  const id = deps.begin?.();
+  deps.hideSelection(true, id);
   try {
-    return (await deps.snapshot(rect)) === true;
+    return (await deps.snapshot(rect, id)) === true;
   } catch {
     return false;
   } finally {
-    deps.hideSelection(false);
+    deps.hideSelection(false, id);
   }
 }
 
@@ -170,10 +173,15 @@ export interface SnapTracker {
   accept(id: unknown): boolean;
   /** Cancels the pending request (or only `id`, when given and still pending): returns its id so the native side can be told, undefined otherwise. */
   cancel(id?: number): number | undefined;
+  /** Makes `id` the owner of the selection hide (a newer claim takes it over). */
+  claimHide(id: number): void;
+  /** True only when `id` still owns the hide (then ownership is dropped): a superseded request must not un-hide. */
+  releaseHide(id: number): boolean;
 }
 export function snapTracker(): SnapTracker {
   let next = 1;
   let pending: number | undefined;
+  let hideOwner: number | undefined;
   return {
     begin: () => (pending = next++),
     accept(id) {
@@ -186,6 +194,14 @@ export function snapTracker(): SnapTracker {
       const cur = pending;
       pending = undefined;
       return cur;
+    },
+    claimHide(id) {
+      hideOwner = id;
+    },
+    releaseHide(id) {
+      if (id !== hideOwner) return false;
+      hideOwner = undefined;
+      return true;
     },
   };
 }
