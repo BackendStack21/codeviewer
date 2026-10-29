@@ -30,10 +30,11 @@ describe("macOS snapshot handlers (AC-17)", () => {
     expect(h).toContain("clearContents");
     expect(h).toContain("pb.setData");
   });
+  // A cold swiftc start on CI runners takes well over bun's 5 s default.
   test("main.swift parses", async () => {
     const swiftc = Bun.which("swiftc");
     if (!swiftc) return;
     const p = Bun.spawn([swiftc, "-parse", path], { stdout: "ignore", stderr: "pipe" });
     expect(await p.exited).toBe(0);
-  });
+  }, 60_000);
 });

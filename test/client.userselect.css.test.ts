@@ -13,7 +13,13 @@ function rules(src: string): { sel: string; body: string }[] {
   return out;
 }
 const all = rules(css);
-const decl = (body: string, prop: string) => new RegExp(`(^|[;\\s])${prop.replace(/-/g, "\\-")}\\s*:\\s*([^;]+)`, "m").exec(body)?.[2]?.trim();
+/** Value of declaration `prop` in a rule body, matched by exact property name. */
+const decl = (body: string, prop: string) => {
+  for (const d of body.split(";")) {
+    const i = d.indexOf(":");
+    if (i > 0 && d.slice(0, i).trim() === prop) return d.slice(i + 1).trim();
+  }
+};
 
 describe("user-select prefix (AC-1)", () => {
   const nones = all.filter((r) => /(^|[;\s])user-select\s*:\s*none/.test(r.body));
