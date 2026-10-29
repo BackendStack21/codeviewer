@@ -1,6 +1,6 @@
 // Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
 import type { CopyImageDeps } from "./copyimage.ts";
-import type { SnapDeps, SnapFragment } from "./mdsnap.ts";
+import { fontFaceUrls, pairTrees, snapSize, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import type { ImageLayout } from "./imagelayout.ts";
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -109,23 +109,85 @@ export const markdownSnapDeps: SnapDeps = {
   },
 };
 
-/** Clones the range into an index-tagged fragment (element 0 is the wrapper) ready for snapshotMarkdown. */
-export function fragmentFromRange(range: Range, host: HTMLElement, bg: string): SnapFragment {
+// Same-origin faces declared in styles.css (@font-face); one face per family is embedded.
+const FONT_TABLE: Record<string, string[]> = {
+  "JetBrains Mono": ["/fonts/JetBrainsMono-Regular.woff2"],
+  Inter: ["/fonts/InterVariable.woff2"],
+};
+const PAD = 12;
+
+const elChildren = (n: Node) => ({ node: n, children: Array.from(n.childNodes).filter((c) => c.nodeType === 1).map(elChildren) });
+type ElTree = ReturnType<typeof elChildren>;
+
+async function inlineImage(img: HTMLImageElement, live: HTMLImageElement) {
+  try {
+    const src = live.currentSrc || live.src;
+    img.setAttribute("src", await blobToDataUri(await (await fetch(src)).blob()));
+    img.removeAttribute("srcset");
+  } catch {
+    img.removeAttribute("src");
+    img.removeAttribute("srcset");
+  }
+}
+
+/** Clones the live subtree under the range's common ancestor, pruned to the range, as a fragment for snapshotMarkdown. */
+export async function fragmentFromRange(range: Range, host: HTMLElement, bg: string): Promise<SnapFragment> {
+  let root: Node = range.commonAncestorContainer;
+  if (root.nodeType !== 1) root = root.parentNode ?? host;
+  const liveRoot = root as Element;
+  const cloneRoot = liveRoot.cloneNode(true) as Element;
+  const pairs = pairTrees(elChildren(liveRoot), elChildren(cloneRoot)) as [ElTree, ElTree][];
+  const liveOf = new Map<Node, Node>(pairs.map(([l, c]) => [c.node, l.node]));
+  // trim the partially selected boundary text nodes in the clone
+  const textClone = (liveText: Node): Text | null => {
+    const parent = liveText.parentNode && pairs.find(([l]) => l.node === liveText.parentNode)?.[1].node;
+    const idx = liveText.parentNode ? Array.prototype.indexOf.call(liveText.parentNode.childNodes, liveText) : -1;
+    return parent && idx >= 0 ? ((parent.childNodes[idx] as Text) ?? null) : null;
+  };
+  const { startContainer: sc, endContainer: ec } = range;
+  if (ec.nodeType === 3) {
+    const t = textClone(ec);
+    if (t) t.data = t.data.slice(0, range.endOffset);
+  }
+  if (sc.nodeType === 3) {
+    const t = textClone(sc);
+    if (t) t.data = t.data.slice(range.startOffset);
+  }
+  // prune clone elements/text outside the range (children first so removal is safe)
+  for (const [l, c] of [...pairs].reverse()) {
+    if (c.node !== cloneRoot && !range.intersectsNode(l.node)) (c.node as Element).remove();
+  }
+  for (const [l, c] of pairs) {
+    for (const t of Array.from(c.node.childNodes)) {
+      if (t.nodeType !== 3) continue;
+      const lt = l.node.childNodes[Array.prototype.indexOf.call(c.node.childNodes, t)];
+      if (lt && !range.intersectsNode(lt)) c.node.removeChild(t);
+    }
+  }
   const wrap = document.createElement("div");
-  wrap.appendChild(range.cloneContents());
-  const live = Array.from(host.querySelectorAll("*")).filter((e) => range.intersectsNode(e));
-  const clones = [wrap, ...Array.from(wrap.querySelectorAll("*"))];
-  clones.forEach((c, n) => c.setAttribute("data-snap", String(n)));
-  const rect = host.getBoundingClientRect();
-  // clone styles come from the live elements of the same tag order; the wrapper takes the host's style
-  const elements: Element[] = [host, ...live.slice(0, clones.length - 1)];
-  while (elements.length < clones.length) elements.push(host);
+  wrap.appendChild(cloneRoot);
+  const kept = [wrap, ...Array.from(wrap.querySelectorAll("*"))];
+  const elements: Element[] = [host];
+  const imgs: Promise<void>[] = [];
+  kept.slice(1).forEach((c, n) => {
+    const live = liveOf.get(c) as Element | undefined;
+    elements.push(live ?? host);
+    c.setAttribute("data-snap", String(n + 1));
+    if (live && c.tagName === "IMG") imgs.push(inlineImage(c as HTMLImageElement, live as HTMLImageElement));
+  });
+  const hs = getComputedStyle(host);
+  wrap.setAttribute("style", `padding:${PAD}px;box-sizing:border-box;font:${hs.font};color:${hs.color};line-height:${hs.lineHeight}`);
+  await Promise.all(imgs);
+  const size = snapSize(Array.from(range.getClientRects()), PAD);
+  const faces = fontFaceUrls(`${getComputedStyle(host).fontFamily},JetBrains Mono,Inter`, FONT_TABLE);
+  const fontUrls: Record<string, string> = {};
+  for (const f of faces) fontUrls[f.family] ??= f.url;
   return {
     html: new XMLSerializer().serializeToString(wrap),
     elements,
-    fontUrls: {},
-    width: Math.ceil(rect.width),
-    height: Math.ceil(Math.min(rect.height, host.scrollHeight)),
+    fontUrls,
+    width: Math.ceil(Math.max(size.width, 1)),
+    height: Math.ceil(Math.max(size.height, 1)),
     bg,
     text: range.toString(),
   };
