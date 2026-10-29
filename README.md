@@ -33,8 +33,11 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
   - Colored tabs.
   - Gutter markers vs `HEAD`; click one to peek at the old lines.
   - Inline blame on the active line.
-  - Status bar: branch, ahead/behind, merge/rebase state, stash count, and change counts that open
-    a changed-files list (⌘⇧G).
+  - Status bar: branch, ahead/behind, merge/rebase state, stash count, and change counts.
+  - **Review changes (⌘⇧G):** a Changes view in the sidebar lists every file the branch touched
+    (vs its base branch, working tree included) or only the uncommitted ones (vs `HEAD`), with
+    `+/−` per file and a one-line summary. Each file opens as a read-only unified diff; ⌥F5 walks
+    the changes and moves on to the next file. Reviewed files dim until they change again.
   - Everything updates live as files, the index or refs change.
 - **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
   update pill in the status bar when a new version is out. Installing verifies the release's
@@ -86,7 +89,7 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘B · ⌘⇧E | Toggle sidebar · focus explorer |
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs |
 | ⌘= ⌘- ⌘0 | Font size |
-| ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changed files · next / previous change in file |
+| ⌘⇧G · ⌥F5 / ⌥⇧F5 | Review changes · next / previous change (then next file) |
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
 

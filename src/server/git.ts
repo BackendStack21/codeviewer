@@ -2,6 +2,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { HEAVY_DIRS } from "./index.ts";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { looksBinary, openRegular } from "./files.ts";
 
 /**
  * Read-only git integration via the system `git` CLI.
@@ -44,6 +45,47 @@ export interface BlameLine {
   uncommitted: boolean;
 }
 
+/** One changed file in a Changes listing. `status` is git's raw letter; "?" = untracked. */
+export interface ChangeEntry {
+  /** root-relative, "/" separated */
+  path: string;
+  /** Previous path of a rename or copy. */
+  oldPath?: string;
+  status: "M" | "A" | "D" | "R" | "C" | "T" | "U" | "X" | "?";
+  /** Lines added/removed; null for binary files and files that were not counted. */
+  added: number | null;
+  removed: number | null;
+  binary: boolean;
+}
+
+export interface Changes {
+  scope: "head" | "branch";
+  /** The base branch comparison, or null when no base branch could be found. */
+  base: { name: string; oid: string; mergeBase: string; same: boolean } | null;
+  /** Commit the working tree is compared with: HEAD, or the merge-base in branch scope. Null on an unborn branch. */
+  rev: string | null;
+  files: ChangeEntry[];
+  /** The file list was cut at MAX_CHANGES entries. */
+  truncated: boolean;
+  /** Commits between the merge-base and HEAD (branch scope only), and up to 20 of their subjects. */
+  commits: number;
+  subjects: string[];
+}
+
+/** Most entries a Changes listing carries (tracked diffs and untracked files each). */
+export const MAX_CHANGES = 1000;
+/** Untracked files whose lines are counted (the rest show no counts). */
+const COUNT_UNTRACKED = 200;
+const COUNT_MAX_BYTES = 1 << 20;
+/** Local branches tried as the base when the remote has no HEAD. */
+const BASE_NAMES = ["main", "master", "develop", "trunk"];
+const OID = /^[0-9a-f]{40}$|^[0-9a-f]{64}$/;
+
+/** True for a full hex object id (the only form of revision the HTTP layer accepts). */
+export function isOid(s: string): boolean {
+  return OID.test(s);
+}
+
 const ENV = {
   ...process.env,
   GIT_OPTIONAL_LOCKS: "0",
@@ -61,7 +103,16 @@ const HARDEN = [
   "-c", "core.attributesFile=/dev/null",
   "-c", "submodule.recurse=false",
   "-c", "status.submoduleSummary=false",
+  // A mailmap file is read whole by log/blame: a hostile config can point it at /dev/zero.
+  "-c", "mailmap.file=/dev/null",
+  "-c", "mailmap.blob=",
+  "-c", "log.mailmap=false",
+  // Counts must not silently turn into "binary" because a config set the threshold to 1.
+  "-c", "core.bigFileThreshold=512m",
 ];
+
+/** Wall clock for one git run; a hostile config can make git read /dev/zero forever. */
+const RUN_TIMEOUT_MS = 30_000;
 
 /** Empty tree ids (always known to git, even if absent from the object store). */
 const EMPTY_TREE: Record<string, string> = {
@@ -86,6 +137,8 @@ export class Git {
     private prefix: string,
     private gitDirs: string[],
     private env: Record<string, string | undefined>,
+    /** The empty tree of this repository's object format (the diff base of an unborn branch). */
+    private emptyTree: string,
   ) {}
 
   static async open(root: string): Promise<Git | null> {
@@ -99,8 +152,9 @@ export class Git {
     if (rel.startsWith("..")) return null;
     const prefix = rel ? rel.split(path.sep).join("/") + "/" : "";
     const commonDir = common ? path.resolve(root, common) : gitDir;
-    const env = { ...ENV, GIT_ATTR_SOURCE: EMPTY_TREE[format ?? "sha1"] ?? EMPTY_TREE.sha1 };
-    return new Git(bin, root, prefix, [...new Set([gitDir, commonDir])], env);
+    const emptyTree = EMPTY_TREE[format ?? "sha1"] ?? EMPTY_TREE.sha1!;
+    const env = { ...ENV, GIT_ATTR_SOURCE: emptyTree };
+    return new Git(bin, root, prefix, [...new Set([gitDir, commonDir])], env, emptyTree);
   }
 
   private overrides: Promise<string[]> | null = null;
@@ -156,7 +210,7 @@ export class Git {
     const [st, stash, head] = await Promise.all([
       this.git(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal", "--ignored=traditional", "--ignore-submodules=all", "--", "."]),
       this.git(["rev-list", "--walk-reflogs", "--count", "refs/stash"]),
-      this.git(["log", "-1", "--no-show-signature", "--format=%H%x00%s%x00%an%x00%ct"]),
+      this.git(["log", "-1", "--no-show-signature", "--no-mailmap", "--format=%H%x00%s%x00%an%x00%ct"]),
     ]);
     const s: GitStatus = {
       repo: true, branch: null, detached: false, oid: null, upstream: null, ahead: 0, behind: 0,
@@ -217,10 +271,213 @@ export class Git {
     return null;
   }
 
-  /** File content at HEAD (raw blob, no filters), or null if the file is not in HEAD. */
-  async base(rel: string, maxBytes: number): Promise<Uint8Array | null> {
-    const r = await this.git(["cat-file", "blob", `HEAD:./${rel}`], maxBytes);
+  /**
+   * File content at HEAD (raw blob, no filters), or null if the file is not in HEAD.
+   * `rev` (a full object id) reads the file as of that commit instead.
+   */
+  async base(rel: string, maxBytes: number, rev = "HEAD"): Promise<Uint8Array | null> {
+    if (rev !== "HEAD" && !isOid(rev)) return null;
+    const r = await this.git(["cat-file", "blob", `${rev}:./${rel}`], maxBytes);
     return r.code === 0 && !r.truncated ? r.out : null;
+  }
+
+  // ───────────────────────────── changes ─────────────────────────────
+
+  private async rev(...args: string[]): Promise<string | null> {
+    const r = await this.git(["rev-parse", "-q", "--verify", ...args], 1 << 16);
+    const s = new TextDecoder().decode(r.out).trim();
+    return r.code === 0 && s ? s : null;
+  }
+
+  /**
+   * The branch this one is reviewed against: the remote's default branch (origin/HEAD), else
+   * the first of main/master/develop/trunk that exists and is not the current branch, else the
+   * upstream. `same` means the merge-base is HEAD itself (nothing committed on top of the base).
+   */
+  async detectBase(headOid: string): Promise<Changes["base"]> {
+    const dec = (r: { code: number; out: Uint8Array }) => (r.code === 0 ? new TextDecoder().decode(r.out).trim() : "");
+    const [branch, originHead, upstream] = await Promise.all([
+      this.git(["symbolic-ref", "-q", "--short", "HEAD"], 1 << 16).then(dec),
+      this.git(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], 1 << 16).then(dec),
+      this.git(["rev-parse", "-q", "--symbolic-full-name", "@{upstream}"], 1 << 16).then(dec),
+    ]);
+    const refs: string[] = [];
+    if (originHead.startsWith("refs/remotes/")) refs.push(originHead);
+    for (const n of BASE_NAMES) if (n !== branch) refs.push(`refs/heads/${n}`);
+    if (upstream.startsWith("refs/remotes/") && !refs.includes(upstream)) refs.push(upstream);
+    for (const ref of refs) {
+      const oid = await this.rev(`${ref}^{commit}`);
+      if (!oid) continue;
+      const mergeBase = dec(await this.git(["merge-base", headOid, oid], 1 << 16));
+      if (!isOid(mergeBase)) continue; // unrelated histories
+      return { name: ref.replace(/^refs\/(heads|remotes)\//, ""), oid, mergeBase, same: mergeBase === headOid };
+    }
+    return null;
+  }
+
+  private inflight: Partial<Record<"head" | "branch", Promise<Changes>>> = {};
+
+  /**
+   * Files changed in the working tree against HEAD ("head") or against the merge-base with the
+   * base branch ("branch", which therefore includes uncommitted work), plus untracked files.
+   * Concurrent callers of the same scope share one run.
+   */
+  changes(scope: "head" | "branch"): Promise<Changes> {
+    return (this.inflight[scope] ??= this.computeChanges(scope).finally(() => {
+      delete this.inflight[scope];
+    }));
+  }
+
+  private async computeChanges(scope: "head" | "branch"): Promise<Changes> {
+    const headOid = await this.rev("HEAD^{commit}");
+    const base = headOid ? await this.detectBase(headOid) : null;
+    const branch = scope === "branch" && !!base && !base.same;
+    // An unborn branch (no commits yet) diffs against the empty tree, so staged files show as added.
+    const rev = branch ? base!.mergeBase : headOid ?? this.emptyTree;
+    const [tracked, untracked, unmerged] = await Promise.all([this.diffFiles(rev), this.untracked(), this.unmerged()]);
+    const byPath = new Map(tracked.files.map((e) => [e.path, e]));
+    for (const u of untracked.files) {
+      const t = byPath.get(u.path);
+      // Deleted from the index but present on disk (git rm --cached): one entry, as a modification.
+      if (t) Object.assign(t, { status: "M", added: null, removed: null, binary: u.binary });
+      else byPath.set(u.path, u);
+    }
+    for (const p of unmerged) {
+      const t = byPath.get(p);
+      if (t) t.status = "U";
+      else byPath.set(p, { path: p, status: "U", added: null, removed: null, binary: false });
+    }
+    const files = [...byPath.values()];
+    let commits = 0;
+    let subjects: string[] = [];
+    if (branch) {
+      const [n, log] = await Promise.all([
+        this.git(["rev-list", "--count", `${base!.mergeBase}..${headOid}`], 1 << 16),
+        this.git(["log", "-z", "--no-show-signature", "--no-mailmap", "--format=%s", "-n", "20", `${base!.mergeBase}..${headOid}`], 1 << 20),
+      ]);
+      if (n.code === 0) commits = Number(new TextDecoder().decode(n.out).trim()) || 0;
+      if (log.code === 0) subjects = new TextDecoder().decode(log.out).split("\0").map((s) => s.trim()).filter(Boolean);
+    }
+    return { scope: branch ? "branch" : "head", base, rev: headOid ? rev : null, files, truncated: tracked.truncated || untracked.truncated, commits, subjects };
+  }
+
+  /**
+   * `git diff --raw --numstat` of the working tree against `rev`, restricted to the viewed folder.
+   * Hostile configs are neutralized: no order file (read whole), paths never cwd-relative.
+   */
+  private async diffFiles(rev: string): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
+    const r = await this.git([
+      "diff", "--raw", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "-O/dev/null", rev, "--", ".",
+    ]);
+    if (r.code !== 0) return { files: [], truncated: false };
+    const recs = new TextDecoder().decode(r.out).split("\0");
+    const byPath = new Map<string, ChangeEntry>();
+    let truncated = false;
+    const strip = (p: string) => (p.startsWith(this.prefix) ? p.slice(this.prefix.length) : null);
+    for (let i = 0; i < recs.length; i++) {
+      const rec = recs[i]!;
+      if (!rec) continue;
+      if (rec[0] === ":") {
+        // raw: ":srcmode dstmode sha sha STATUS[score]" then the path record(s)
+        const parts = rec.slice(1).split(" ");
+        const st = parts[4]?.[0] ?? "M";
+        const two = st === "R" || st === "C";
+        const oldP = two ? recs[++i] ?? "" : "";
+        const newP = recs[++i] ?? "";
+        if (parts[0] === "160000" || parts[1] === "160000") continue; // submodules: nothing to diff here
+        const rel = strip(newP);
+        if (rel === null || !rel) continue;
+        if (byPath.size >= MAX_CHANGES) {
+          truncated = true;
+          continue; // keep consuming: the numstat records of kept entries follow
+        }
+        const status = (/^[MADRCTUX]$/.test(st) ? st : "M") as ChangeEntry["status"];
+        const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false };
+        if (two) {
+          const o = strip(oldP);
+          // A rename from outside the viewed folder: show it as new, never a path above the root.
+          if (o) e.oldPath = o;
+          else e.status = "A";
+        }
+        byPath.set(rel, e);
+        continue;
+      }
+      const m = /^(\d+|-)\t(\d+|-)\t(.*)$/s.exec(rec);
+      if (!m) continue;
+      let p = m[3]!;
+      if (!p) {
+        i++; // rename: old path, then new path
+        p = recs[++i] ?? "";
+      }
+      const rel = strip(p);
+      const e = rel ? byPath.get(rel) : undefined;
+      if (!e) continue;
+      if (m[1] === "-") e.binary = true;
+      else {
+        e.added = Number(m[1]);
+        e.removed = Number(m[2]);
+      }
+    }
+    return { files: [...byPath.values()], truncated };
+  }
+
+  /** Paths with unresolved merge conflicts (root-relative): `git diff <commit>` never reports them. */
+  private async unmerged(): Promise<string[]> {
+    const r = await this.git(["ls-files", "-z", "--unmerged", "--", "."], 1 << 22);
+    if (r.code !== 0) return [];
+    const out = new Set<string>();
+    for (const rec of new TextDecoder().decode(r.out).split("\0")) {
+      const tab = rec.indexOf("\t");
+      if (tab > 0) out.add(rec.slice(tab + 1));
+    }
+    return [...out];
+  }
+
+  /** Untracked, not ignored files under the root, with line counts for the first few text files. */
+  private async untracked(): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
+    const r = await this.git(["ls-files", "-z", "--others", "--exclude-standard", "--", "."]);
+    if (r.code !== 0) return { files: [], truncated: false };
+    const all = new TextDecoder()
+      .decode(r.out)
+      .split("\0")
+      .filter((f) => f && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
+    const paths = all.slice(0, MAX_CHANGES);
+    const files: ChangeEntry[] = paths.map((p) => ({ path: p, status: "?", added: null, removed: null, binary: false }));
+    // A few files at a time through one 64 KiB buffer each: never 200 MiB of buffers per request.
+    const queue = files.slice(0, COUNT_UNTRACKED);
+    await Promise.all(Array.from({ length: 8 }, async () => {
+      for (let e = queue.shift(); e; e = queue.shift()) await this.countLines(e);
+    }));
+    return { files, truncated: all.length > MAX_CHANGES };
+  }
+
+  private async countLines(e: ChangeEntry) {
+    try {
+      const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")));
+      try {
+        if (st.size > COUNT_MAX_BYTES) return;
+        const buf = new Uint8Array(64 * 1024);
+        let n = 0;
+        let last = 10;
+        let total = 0;
+        for (;;) {
+          const { bytesRead } = await fh.read(buf, 0, buf.length, total);
+          if (!bytesRead) break;
+          if (total === 0 && looksBinary(buf.subarray(0, bytesRead))) {
+            e.binary = true;
+            return;
+          }
+          for (let i = 0; i < bytesRead; i++) if (buf[i] === 10) n++;
+          last = buf[bytesRead - 1]!;
+          total += bytesRead;
+        }
+        if (total && last !== 10) n++;
+        e.added = n;
+        e.removed = 0;
+      } finally {
+        await fh.close();
+      }
+    } catch {}
   }
 
   async blame(rel: string, line: number): Promise<BlameLine | null> {
@@ -308,6 +565,10 @@ async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT,
   const chunks: Uint8Array[] = [];
   let size = 0;
   let truncated = false;
+  const timer = setTimeout(() => {
+    truncated = true;
+    p.kill();
+  }, RUN_TIMEOUT_MS);
   const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
   for (let r = await reader.read(); !r.done; r = await reader.read()) {
     if (size + r.value.length > maxBytes) {
@@ -319,6 +580,7 @@ async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT,
     size += r.value.length;
   }
   const code = await p.exited;
+  clearTimeout(timer);
   const out = new Uint8Array(size);
   let o = 0;
   for (const c of chunks) {

@@ -12,6 +12,8 @@ import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
+import { ChangesView } from "./changes.ts";
+import type { ChangeFile } from "./api.ts";
 import { normSideView, searchKey, type SideView } from "./keys.ts";
 
 type ThemeName = "dark" | "light" | "system";
@@ -71,6 +73,7 @@ class App {
   private info!: Info;
   private tree!: FileTree;
   private search!: SearchView;
+  private changes!: ChangesView;
   private sideTabs = new Map<SideView, HTMLElement>();
   private sideTools!: HTMLElement;
   private editor!: Editor;
@@ -115,9 +118,12 @@ class App {
     this.git.onChange(() => {
       this.tree.onGitChanged();
       this.editor.onGitChanged();
+      this.changes.setRepo(this.git.repo);
+      this.changes.onGitChanged();
       this.renderStatus(this.lastStatus);
     });
     await api.gitStatus().then((s) => this.git.set(s), () => {});
+    this.changes.setRepo(this.git.repo);
     await this.tree.init();
     this.bindKeys();
     this.connectEvents();
@@ -127,7 +133,10 @@ class App {
     const tabs = store.get<{ tabs: string[]; active: string | null }>(`tabs:${this.info.root}`, { tabs: [], active: null });
     for (const p of tabs.tabs) await this.editor.open(p, { pin: true, focus: false });
     if (tabs.active) await this.editor.open(tabs.active, { focus: false });
-    this.editor.onChange = () => store.set(`tabs:${this.info.root}`, this.editor.serialize());
+    this.editor.onChange = () => {
+      store.set(`tabs:${this.info.root}`, this.editor.serialize());
+      this.changes.watching = this.editor.tabs.some((t) => t.isDiff);
+    };
   }
 
   private build() {
@@ -172,6 +181,12 @@ class App {
     this.tree.onSearchIn = (dir, ignored) => this.search.searchIn(dir, ignored);
     this.search.onReveal = () => this.showSearch();
     this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
+    this.changes = new ChangesView();
+    this.changes.onOpen = (f, pin) => void this.openDiff(f, pin);
+    this.changes.onData = (d) => {
+      this.editor.refreshDiffs({ rev: d?.rev ?? null, vs: this.changes.vs }, this.changes.files);
+      this.editor.setDiffPositions((p) => this.changes.position(p));
+    };
     const sideTab = (v: SideView, label: string) => {
       const b = h("button", { class: "side-tab", type: "button", onclick: () => this.setSideView(v) }, label);
       this.sideTabs.set(v, b);
@@ -186,9 +201,10 @@ class App {
     this.sidebar = h(
       "aside",
       { class: "sidebar" },
-      h("div", { class: "side-head" }, sideTab("explorer", "Explorer"), sideTab("search", "Search"), h("span", { class: "side-title" }), this.sideTools),
+      h("div", { class: "side-head" }, sideTab("explorer", "Explorer"), sideTab("search", "Search"), sideTab("changes", "Changes"), h("span", { class: "side-title" }), this.sideTools),
       this.tree.el,
       this.search.el,
+      this.changes.el,
     );
     this.setSideView(this.L.sideView, false);
     const sideSplit = h("div", { class: "splitter vertical", role: "separator" });
@@ -211,6 +227,7 @@ class App {
         kb(IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F", "Search in files"),
         kb("F4", "Next search result"),
         kb(IS_MAC ? "⌃G" : "Ctrl+G", "Go to line"),
+        kb(`${MOD}⇧G`, "Review changes"),
         kb(`${MOD}B`, "Toggle sidebar"),
       ),
       h("p", { class: "welcome-hint" }, "Tip: run ", h("code", null, "codeviewer open <file>:<line>"), " in the terminal, or ", h("kbd", null, IS_MAC ? "⌘" : "Ctrl"), "-click a path."),
@@ -236,6 +253,7 @@ class App {
       }
       return false;
     };
+    this.editor.onDiffStep = (dir) => this.changes.step(dir);
     this.editor.onReveal = (p) => {
       if (!L.sidebar) this.toggleSidebar();
       void this.tree.reveal(p);
@@ -349,15 +367,16 @@ class App {
       c("tree.collapse", "Collapse All Folders", () => this.tree.collapseAll()),
       c("tree.clear", "Clear Change Markers", () => this.tree.clearChanges()),
       c("tree.focus", "Focus Explorer", () => this.tree.focus(), `${MOD}⇧E`),
-      c("git.changes", "Git: Show Changed Files", () => this.showChanges(), `${MOD}⇧G`),
+      c("git.changes", "Git: Review Changes", () => this.showChanges(), `${MOD}⇧G`),
+      c("git.scope", "Git: Compare With Base Branch / HEAD", () => this.changes.toggleScope()),
       c("app.update", "Check for Updates…", () => void this.updates.checkNow()),
       c("app.autoUpdate", "Toggle Automatic Update Checks", () => {
         const auto = !(store.get<{ auto?: boolean }>("updates", {}).auto ?? true);
         store.set("updates", { auto });
         this.notify(`Automatic update checks ${auto ? "on" : "off"} (from the next launch)`);
       }),
-      c("git.next", "Git: Next Change in File", () => this.editor.nextChange(1), "⌥F5"),
-      c("git.prev", "Git: Previous Change in File", () => this.editor.nextChange(-1), "⌥⇧F5"),
+      c("git.next", "Git: Next Change", () => this.editor.nextChange(1), "⌥F5"),
+      c("git.prev", "Git: Previous Change", () => this.editor.nextChange(-1), "⌥⇧F5"),
     ];
   }
 
@@ -390,10 +409,19 @@ class App {
     this.notify(`Not found in ${this.info.name}: ${p}`);
   }
 
+  /** ⌘⇧G: the Changes view, focused on the list. */
   private showChanges() {
     if (!this.git.repo) return this.notify("Not a git repository");
-    const items = this.git.changedFiles().map(({ path, git }) => ({ path, badge: git.letter, cls: `git-${git.letter}`, detail: git.label }));
-    this.palette.openList(items, `${items.length} changed file${items.length === 1 ? "" : "s"}: type to filter`);
+    if (!this.L.sidebar) this.toggleSidebar(true);
+    this.setSideView("changes");
+    this.changes.focus();
+  }
+
+  private async openDiff(f: ChangeFile, pin: boolean) {
+    const d = this.changes.data;
+    await this.editor.openDiff(f, { rev: d?.rev ?? null, vs: this.changes.vs }, { pin, focus: false });
+    this.changes.setCurrent(f.path);
+    this.editor.setDiffPositions((p) => this.changes.position(p));
   }
 
   private trackRecent(p: string) {
@@ -413,7 +441,10 @@ class App {
     this.L.sideView = v;
     this.tree.el.hidden = v !== "explorer";
     this.search.el.hidden = v !== "search";
+    this.changes.el.hidden = v !== "changes";
     if (v === "search") this.search.onShown();
+    if (v === "changes") this.changes.onShown();
+    else this.changes.onHidden();
     this.sideTools.hidden = v !== "explorer";
     for (const [k, b] of this.sideTabs) {
       b.classList.toggle("active", k === v);
@@ -604,7 +635,9 @@ class App {
           if (e.shiftKey) this.newTerminal();
           else if (this.L.panel && !inTerm) this.terms.focus();
           else this.togglePanel();
-        } else if (mod && e.shiftKey && k === "p") this.palette.open(">");
+        } else if (mod && e.shiftKey && k === "g") this.showChanges();
+        else if (e.altKey && e.key === "F5" && !inTerm) this.editor.nextChange(e.shiftKey ? -1 : 1);
+        else if (mod && e.shiftKey && k === "p") this.palette.open(">");
         else if (mod && !e.shiftKey && k === "p") this.palette.open();
         else if (mod && e.shiftKey && k === "e") {
           if (!this.L.sidebar) this.toggleSidebar(true);

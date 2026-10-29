@@ -1,5 +1,7 @@
-import { api } from "./api.ts";
+import { api, type ChangeFile } from "./api.ts";
 import { CodeView } from "./codeview.ts";
+import { DiffView, type DiffInfo } from "./diffview.ts";
+import { labelOf, letterOf } from "./changes.ts";
 import { languageFor, languageName } from "./highlight.ts";
 import { fileIcon, icons } from "./icons.ts";
 import { isMarkdown } from "./markdown.ts";
@@ -21,6 +23,12 @@ export interface Tab {
   /** Rendered Markdown preview; mutually exclusive with `code`. */
   md?: MarkdownView;
   image?: ImageView;
+  /** Read-only diff of a changed file (a "diff tab"): `file` is the change it shows. */
+  diff?: DiffView;
+  isDiff?: boolean;
+  file?: ChangeFile;
+  /** The old side of a diff tab, kept across reloads of the live file (keyed by rev and path). */
+  oldBlob?: { key: string; text: string | null };
   lang: string;
   size: number;
   mtime: number;
@@ -58,6 +66,14 @@ export interface StatusInfo {
   git?: string;
 }
 
+/** What diff tabs compare the working tree with. */
+export interface DiffContext {
+  /** Full object id of the old side; null when there is none (unborn branch). */
+  rev: string | null;
+  /** "vs main", "vs HEAD" */
+  vs: string;
+}
+
 /** Tabs + content area. Dispatches files to the code, image or binary views. */
 export class Editor {
   readonly el: HTMLElement;
@@ -79,7 +95,10 @@ export class Editor {
   };
   /** Called whenever the set of tabs or the active tab changes. */
   onChange: () => void = () => {};
+  /** A diff tab asked for the next/previous changed file. */
+  onDiffStep: (dir: 1 | -1) => void = () => {};
   git: GitState | null = null;
+  private diffContext: DiffContext = { rev: null, vs: "vs HEAD" };
 
   constructor(emptyContent: HTMLElement) {
     this.tabsEl = h("div", { class: "tabs", role: "tablist" });
@@ -94,7 +113,7 @@ export class Editor {
   }
 
   async open(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
-    let tab = this.tabs.find((t) => t.path === path);
+    let tab = this.tabs.find((t) => t.path === path && !t.isDiff);
     if (!tab) {
       // A single unpinned "preview" tab is reused while browsing.
       const preview = !opts.pin ? this.tabs.find((t) => !t.pinned) : undefined;
@@ -123,13 +142,115 @@ export class Editor {
     this.render();
   }
 
-  private createTab(path: string, pinned: boolean): Tab {
+  /**
+   * Opens (or re-shows) the diff tab of a changed file. Like `open`, an unpinned tab is reused
+   * while stepping through the list; a double-click or Shift+Enter pins it.
+   */
+  async openDiff(file: ChangeFile, ctx: DiffContext, opts: { pin?: boolean; focus?: boolean } = {}) {
+    this.diffContext = ctx;
+    let tab = this.tabs.find((t) => t.isDiff && t.path === file.path);
+    if (!tab) {
+      const preview = !opts.pin ? this.tabs.find((t) => !t.pinned) : undefined;
+      tab = this.createTab(file.path, !!opts.pin, true);
+      tab.file = file;
+      if (preview) {
+        const i = this.tabs.indexOf(preview);
+        this.disposeTab(preview);
+        this.tabs.splice(i, 1, tab);
+      } else {
+        const i = this.active ? this.tabs.indexOf(this.active) + 1 : this.tabs.length;
+        this.tabs.splice(i, 0, tab);
+      }
+      this.activate(tab);
+      await this.loadDiff(tab);
+    } else {
+      if (opts.pin) tab.pinned = true;
+      const same = tab.gitKey === (ctx.rev ?? "") && tab.file?.status === file.status && tab.file.oldPath === file.oldPath;
+      tab.file = file;
+      this.activate(tab);
+      if (!same) await this.loadDiff(tab);
+    }
+    if (opts.focus !== false) tab.diff?.focus();
+    this.render();
+  }
+
+  /**
+   * New comparison data: diff tabs follow the base (a commit moved HEAD, the scope changed) and
+   * pick up their file's new status. Files that left the list keep their tab (it shows no differences).
+   */
+  refreshDiffs(ctx: DiffContext, files: readonly ChangeFile[]) {
+    this.diffContext = ctx;
+    for (const t of this.tabs) {
+      if (!t.isDiff || !t.file) continue;
+      // A file that left the list now equals the base: diff it as a plain modification (no differences).
+      const f = files.find((x) => x.path === t.path) ?? { ...t.file, status: "M" as const, oldPath: undefined, added: null, removed: null };
+      const moved = f.status !== t.file.status || f.oldPath !== t.file.oldPath;
+      t.file = f;
+      if (t.gitKey !== (ctx.rev ?? "") || moved) void this.loadDiff(t);
+      else t.diff?.setInfo(this.diffInfo(t.file));
+    }
+  }
+
+  /** Shows "n/N" in every diff tab's header. */
+  setDiffPositions(pos: (path: string) => { i: number; n: number } | null) {
+    for (const t of this.tabs) if (t.isDiff) t.diff?.setPosition(pos(t.path));
+  }
+
+  private diffInfo(f: ChangeFile): DiffInfo {
+    return { path: f.path, oldPath: f.oldPath, letter: letterOf(f.status), label: labelOf(f), vs: this.diffContext.vs };
+  }
+
+  private async loadDiff(tab: Tab) {
+    const f = tab.file!;
+    const ctx = this.diffContext;
+    const gen = ++tab.gen;
+    const letter = letterOf(f.status);
+    if (!tab.diff) {
+      tab.diff = new DiffView(this.diffInfo(f), tab.lang, this.fontSize);
+      tab.diff.onStep = (d) => this.onDiffStep(d);
+      tab.diff.onOpenFile = () => void this.open(tab.path, { pin: true }).then(() => this.active?.code?.nextChange(1));
+      tab.el.replaceChildren(tab.diff.el);
+    } else tab.diff.setInfo(this.diffInfo(f));
+    const diff = tab.diff;
+    tab.gitKey = ctx.rev ?? "";
+    tab.kind = "text";
+    if (f.binary) diff.setTexts(null, null, "Binary file changed.");
+    else {
+      // Untracked and added files have no old side; deleted files no new side.
+      const wantOld = !!ctx.rev && letter !== "U" && letter !== "A";
+      const wantNew = letter !== "D";
+      // The old side only changes with the base: reuse it while the live file is reloaded.
+      const oldKey = `${ctx.rev}:${f.oldPath ?? f.path}`;
+      const cached = wantOld && tab.oldBlob?.key === oldKey ? tab.oldBlob : null;
+      const [oldText, nf] = await Promise.all([
+        !wantOld ? Promise.resolve("") : cached ? Promise.resolve(cached.text) : api.gitBase(f.oldPath ?? f.path, ctx.rev!),
+        wantNew ? api.file(f.path).catch(() => null) : Promise.resolve(null),
+      ]);
+      if (gen !== tab.gen || tab.diff !== diff) return;
+      if (wantOld) tab.oldBlob = { key: oldKey, text: oldText };
+      if (nf) {
+        tab.size = nf.size;
+        tab.mtime = nf.mtime;
+        tab.truncated = nf.truncated;
+        tab.encoding = nf.encoding;
+      }
+      if (wantOld && oldText === null) diff.setTexts(null, null, "The previous version can't be shown (binary or too large).");
+      else if (nf && nf.kind !== "text") diff.setTexts(null, null, "Binary file changed.");
+      else diff.setTexts(oldText ?? "", nf ? nf.text : ""); // a file gone from disk diffs as deleted
+    }
+    tab.deleted = false;
+    if (tab === this.active) this.status();
+    this.render();
+  }
+
+  private createTab(path: string, pinned: boolean, isDiff = false): Tab {
     const el = h("div", { class: "view" });
     const tabEl = h("div", { class: "tab", role: "tab", title: path });
     const tab: Tab = {
       path, pinned, kind: "text", el, tabEl, lang: languageFor(path), size: 0, mtime: 0, truncated: false,
       eol: "LF", encoding: "UTF-8", gen: 0, gitKey: "", gitStale: false, asSource: false, changedOnDisk: false, deleted: false,
     };
+    if (isDiff) tab.isDiff = true;
     tabEl.addEventListener("mousedown", (e) => {
       if (e.button === 1) {
         e.preventDefault();
@@ -144,6 +265,7 @@ export class Editor {
   }
 
   private async load(tab: Tab, reload = false) {
+    if (tab.isDiff) return this.loadDiff(tab);
     const gen = ++tab.gen;
     try {
       const f = await api.file(tab.path, tab.asSource);
@@ -279,6 +401,7 @@ export class Editor {
     this.body.replaceChildren(tab.el);
     tab.code?.setVisible(true);
     tab.code?.schedule();
+    tab.diff?.schedule();
     if (tab.gitStale) void this.refreshGit(tab);
     this.render();
     this.status();
@@ -324,6 +447,7 @@ export class Editor {
 
   private disposeTab(tab: Tab) {
     tab.code?.dispose();
+    tab.diff?.dispose();
     tab.md?.dispose();
     tab.el.remove();
     tab.tabEl.remove();
@@ -388,6 +512,7 @@ export class Editor {
     for (const t of this.tabs) {
       t.code?.setFontSize(px);
       t.md?.setFontSize(px);
+      t.diff?.setFontSize(px);
     }
   }
 
@@ -397,8 +522,14 @@ export class Editor {
     t?.code?.openFind();
   }
 
+  /** Next/previous change in the file; in a diff tab, past the last change it moves on to the next file. */
   nextChange(dir: 1 | -1) {
-    this.active?.code?.nextChange(dir);
+    const t = this.active;
+    if (t?.diff) {
+      if (!t.diff.nextChange(dir)) this.onDiffStep(dir);
+      return;
+    }
+    t?.code?.nextChange(dir);
   }
 
   goToLine(line: number) {
@@ -411,6 +542,13 @@ export class Editor {
     const t = this.active;
     if (!t) return this.onStatus(null);
     const s: StatusInfo = { path: t.path, kind: t.kind, size: t.size, truncated: t.truncated };
+    if (t.diff && t.file) {
+      s.lang = languageName(t.lang);
+      s.git = `${labelOf(t.file)} ${this.diffContext.vs}`;
+      s.diff = t.diff.stats;
+      s.encoding = t.encoding;
+      return this.onStatus(s);
+    }
     const g = this.git?.repo ? this.git.file(t.path) : null;
     if (g && g.letter !== "I") s.git = g.label;
     if (t.code) {
@@ -439,12 +577,13 @@ export class Editor {
       if (t === this.active) cls.push("active");
       if (!t.pinned) cls.push("preview");
       if (t.deleted) cls.push("deleted");
-      const g = this.git?.repo ? this.git.file(t.path) : null;
+      if (t.isDiff) cls.push("diff");
+      const g = t.isDiff && t.file ? { letter: letterOf(t.file.status), label: labelOf(t.file) } : this.git?.repo ? this.git.file(t.path) : null;
       if (g) cls.push(`git-${g.letter}`);
       t.tabEl.className = cls.join(" ");
-      t.tabEl.title = g ? `${t.path} · ${g.label}` : t.path;
+      t.tabEl.title = g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path;
       t.tabEl.setAttribute("aria-selected", String(t === this.active));
-      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span><button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
+      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
       t.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(t);
@@ -463,6 +602,7 @@ export class Editor {
         );
         if (!isLast) this.crumbs.append(h("span", { class: "crumb-sep" }, "›"));
       });
+      if (this.active.isDiff) this.crumbs.append(h("span", { class: "pill" }, `diff ${this.diffContext.vs}`));
       if (this.active.truncated) this.crumbs.append(h("span", { class: "pill warn" }, `showing first ${formatBytes(8 * 1024 * 1024)}`));
       if (this.active.deleted) this.crumbs.append(h("span", { class: "pill warn" }, "deleted on disk"));
     }
@@ -471,7 +611,8 @@ export class Editor {
   }
 
   serialize() {
-    return { tabs: this.tabs.filter((t) => t.pinned).map((t) => t.path), active: this.active?.path ?? null };
+    // Diff tabs are not restored: the changes they showed are gone by the next session.
+    return { tabs: this.tabs.filter((t) => t.pinned && !t.isDiff).map((t) => t.path), active: this.active && !this.active.isDiff ? this.active.path : null };
   }
 }
 
