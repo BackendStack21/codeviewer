@@ -215,8 +215,11 @@ export class CodeView {
   private sel: SelRange | null = null;
   /** True when the user's anchor is the end of the normalised range (bottom-to-top selection). */
   private rev = false;
+  /** This view was last used and keyboard focus is still in it (or nowhere in particular). */
   private get active() {
-    return current === this;
+    if (current !== this) return false;
+    const f = document.activeElement;
+    return !f || f === document.body || this.el.contains(f);
   }
   /** The primary button went down in the rows and has not been released. */
   private held = false;
@@ -257,9 +260,12 @@ export class CodeView {
   private restoreSelection() {
     if (!this.sel) return;
     if (this.held) {
-      // Never fight the browser mid-drag unless the render destroyed the anchor.
+      // Never fight the browser mid-drag unless the render destroyed the anchor (the selection then
+      // collapses onto a container such as .code-lines, which is not inside any row's text).
       const an = window.getSelection?.()?.anchorNode;
-      if (an && this.linesEl.contains(an)) return;
+      const el = an ? (an.nodeType === 3 ? an.parentElement : (an as HTMLElement)) : null;
+      const tx = el?.closest?.<HTMLElement>(".tx");
+      if (tx && this.linesEl.contains(tx)) return;
     }
     const last = Math.min(this.window.last, this.lines.length) - 1;
     const plan = restorePlan(this.sel, this.window.first, last, (l) => Math.min(this.lines[l]?.length ?? 0, MAX_RENDER_COLS));
