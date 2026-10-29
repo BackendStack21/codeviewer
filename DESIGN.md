@@ -647,14 +647,3 @@ and no new endpoint.
 5. Fenced code with `lexLine` highlighting, size caps, info-string allowlist.
 6. Images (relative via blob, remote placeholder), size gate with "Render anyway", palette command, README and
    SECURITY notes, fuzz test.
-
-## 15. Copy as Image
-
-The code view keeps its selection as a model range (line/column), so Select All, copy and image export cover lines
-that are not in the DOM and never include decorations (gutter, "more characters"). **Copy as Image** (right-click
-menu with a selection, palette command `selection.copyImage`, Cmd/Ctrl+Shift+C; not in the terminal) lays the range
-out as canvas draw ops (`imagelayout.ts`, pure) in the theme colours and writes a PNG; a Markdown preview selection
-is serialised into an SVG `foreignObject` snapshot (`mdsnap.ts`). The ClipboardItem is created synchronously inside
-the gesture with a promise of the blob. Fallbacks: macOS app posts `copyimage` to the native bridge, no image
-clipboard downloads the PNG, a render failure copies plain text; selections over 20,000 rows or 4,000 columns, or whose canvas would exceed 16M pixels even at scale 1, are refused (the scale drops from 2 to fit). Toasts reuse the
-app toast.
