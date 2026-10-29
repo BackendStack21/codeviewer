@@ -191,7 +191,6 @@ describe("R-06 copyPng does not leave the png promise unhandled", () => {
       const deps: CopyImageDeps = {
         renderPng: async () => new Blob(),
         clipboard: { ClipboardItem: Item, write: () => new Promise<void>((_, rej) => setTimeout(() => rej(new Error("w")), 30)) },
-        download: () => {},
         copyText: () => {},
         notify: () => {},
       };

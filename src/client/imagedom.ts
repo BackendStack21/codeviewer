@@ -1,4 +1,4 @@
-// Thin browser glue for image copy (canvas, clipboard, download, native bridge). Verified manually.
+// Thin browser glue for image copy (canvas, clipboard, native bridge). Verified manually.
 import { snapTracker, type CopyImageDeps, type SnapRect, type SnapshotDeps } from "./copyimage.ts";
 import { isInlinableImage, pruneToRange, snapFaces, snapSize, type PNode, type PrunedNode, type SnapDeps, type SnapFragment } from "./mdsnap.ts";
 import type { ImageLayout } from "./imagelayout.ts";
@@ -40,14 +40,6 @@ export async function renderLayoutPng(layout: ImageLayout, scale: number, font: 
   return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
 }
 
-export function downloadBlob(blob: Blob, name: string): void {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
 function toBase64(blob: Blob): Promise<string> {
   return new Promise((res, rej) => {
     const fr = new FileReader();
@@ -66,9 +58,7 @@ export function browserDeps(opts: { font: string; size: number; bridge?: Bridge;
   return {
     renderPng: (layout, scale) => renderLayoutPng(layout, scale, opts.font, opts.size),
     clipboard: cb?.write && w.ClipboardItem ? { write: (items) => cb.write!(items), ClipboardItem: w.ClipboardItem } : undefined,
-    download: downloadBlob,
     native: bridge ? async (png) => bridge.postMessage({ t: "copyimage", png: await toBase64(png) }) : undefined,
-    copyText: (t) => navigator.clipboard.writeText(t),
     notify: opts.notify,
   };
 }

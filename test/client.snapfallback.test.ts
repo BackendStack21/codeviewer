@@ -22,7 +22,6 @@ describe("clampSnapRect", () => {
 function mk(log: string[], snap?: SnapshotDeps["snapshot"], over: Partial<CopyImageDeps> = {}): CopyImageDeps & SnapshotDeps {
   return {
     renderPng: async () => blob,
-    download: () => void log.push("download"),
     native: async () => void log.push("native"),
     copyText: () => {},
     notify: () => {},

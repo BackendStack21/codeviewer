@@ -20,7 +20,7 @@ function mk(log: string[], over: Partial<CopyImageDeps> = {}): CopyImageDeps {
         await (items[0] as Item).data["image/png"];
       },
     },
-    download: () => void log.push("download"),
+    ...({ download: () => void log.push("download") } as object), // must never be called
     copyText: (t) => void log.push(`text:${t}`),
     notify: (m) => void log.push(`notify:${m}`),
     ...over,
@@ -52,7 +52,7 @@ describe("clipboard.write is called inside the gesture (R-01)", () => {
     expect(await copyPng(mk(log), Promise.reject(new Error("render")))).toBe("failed");
     expect(log).toEqual(["write"]);
   });
-  test("write rejecting while the png is fine falls back to download", async () => {
+  test("write rejecting while the png is fine fails without download", async () => {
     const log: string[] = [];
     const deps = mk(log, {
       clipboard: {
@@ -63,10 +63,10 @@ describe("clipboard.write is called inside the gesture (R-01)", () => {
         },
       },
     });
-    expect(await copyPng(deps, Promise.resolve(blob))).toBe("downloaded");
-    expect(log).toEqual(["write", "download"]);
+    expect(await copyPng(deps, Promise.resolve(blob))).toBe("failed");
+    expect(log).toEqual(["write"]);
   });
-  test("render failure copies plain text, reports the failed message, never downloads", async () => {
+  test("render failure reports the clipboard-failed message, copies no text, never downloads", async () => {
     const log: string[] = [];
     const deps = mk(log, {
       renderPng: async () => {
@@ -74,8 +74,8 @@ describe("clipboard.write is called inside the gesture (R-01)", () => {
       },
     });
     const msg = await copyCodeImage(deps, { lines: ["ab", "cd"], tokens: [[], []], theme, range, dpr: 1 });
-    expect(msg).toBe("Could not create image; copied text instead");
-    expect(log).toContain("text:ab\ncd");
+    expect(msg).toBe("Could not copy image to the clipboard");
+    expect(log.some((l) => l.startsWith("text:"))).toBe(false);
     expect(log).not.toContain("download");
   });
   test("too large is decided before write is called", async () => {

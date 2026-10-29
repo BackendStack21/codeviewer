@@ -12,7 +12,7 @@ import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
 import { isContextMenuOpen, showContextMenu } from "./menu.ts";
 import { bindEditorSelectionMenu, readSelection, snapshotText, copyImageCommand, selectionSnapshot, type SelectionHost } from "./copyentry.ts";
-import { copyCodeImage, copyPngOrSnapshot, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
+import { copyCodeImage, copyPngOrSnapshot, MSG_CLIPBOARD_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
 import { browserDeps, fragmentFromRange, markdownSnapDeps, snapshotDeps } from "./imagedom.ts";
 import { snapshotMarkdown } from "./mdsnap.ts";
 import type { ImageTheme } from "./imagelayout.ts";
@@ -569,7 +569,6 @@ class App {
     if (tab?.md) {
       const range = snap?.md ?? tab.md.selectionRange();
       if (!range) return notify(MSG_NO_SELECTION);
-      const text = range.toString();
       const png = fragmentFromRange(range, tab.md.el, cssVar("--bg-editor"))
         .then((f) => snapshotMarkdown(markdownSnapDeps, f))
         .then((r) => {
@@ -578,13 +577,7 @@ class App {
         });
       const rects = Array.from(range.getClientRects());
       const vp = { width: window.innerWidth, height: window.innerHeight };
-      void copyPngOrSnapshot({ ...deps, ...snapshotDeps(nativeBridge()) }, png, rects, vp).then(async (res) => {
-        if (res === "failed") {
-          await Promise.resolve(deps.copyText(text)).catch(() => {});
-          return notify(MSG_FAILED);
-        }
-        notify(res === "downloaded" ? MSG_DOWNLOADED : MSG_OK);
-      });
+      void copyPngOrSnapshot({ ...deps, ...snapshotDeps(nativeBridge()) }, png, rects, vp).then((res) => notify(res === "failed" ? MSG_CLIPBOARD_FAILED : MSG_OK));
       return;
     }
     const input = tab?.code?.imageInput(snap?.code);

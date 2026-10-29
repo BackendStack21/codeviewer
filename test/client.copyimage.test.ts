@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { copyCodeImage, copyPng, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK, MSG_TOO_LARGE, type CopyImageDeps, type CopyImageInput } from "../src/client/copyimage.ts";
+import * as copyMod from "../src/client/copyimage.ts";
+import { copyCodeImage, copyPng, MSG_CLIPBOARD_FAILED, MSG_NO_SELECTION, MSG_OK, MSG_TOO_LARGE, type CopyImageDeps, type CopyImageInput } from "../src/client/copyimage.ts";
 import type { ImageTheme } from "../src/client/imagelayout.ts";
 
 const theme: ImageTheme = { bg: "#000", fg: "#fff", tokenColors: {}, font: "monospace", size: 10 };
@@ -23,7 +24,7 @@ function mk(over: Partial<CopyImageDeps> = {}, log: string[] = []) {
         log.push(`write:${items.length}`);
       },
     },
-    download: (_b, name) => void log.push(`download:${name}`),
+    ...({ download: (_b: unknown, name: string) => void log.push(`download:${name}`) } as object), // must never be called
     copyText: (t) => void log.push(`text:${t}`),
     notify: (m) => void log.push(`notify:${m}`),
     ...over,
@@ -36,8 +37,9 @@ describe("messages (AC-7b)", () => {
   test("exact strings", () => {
     expect(MSG_OK).toBe("Copied as image");
     expect(MSG_TOO_LARGE).toBe("Selection too large for an image");
-    expect(MSG_DOWNLOADED).toBe("Clipboard unavailable: image downloaded");
-    expect(MSG_FAILED).toBe("Could not create image; copied text instead");
+    expect(MSG_CLIPBOARD_FAILED).toBe("Could not copy image to the clipboard");
+    expect((copyMod as Record<string, unknown>).MSG_DOWNLOADED).toBeUndefined();
+    expect((copyMod as Record<string, unknown>).MSG_FAILED).toBeUndefined();
     expect(MSG_NO_SELECTION).toBe("Nothing selected");
   });
 });
@@ -53,18 +55,19 @@ describe("copyPng (AC-8)", () => {
     expect(await copyPng(deps, Promise.resolve(blob))).toBe("clipboard");
     expect(log).toEqual(["item", "write:1"]);
   });
-  test("missing ClipboardItem downloads", async () => {
+  test("missing ClipboardItem fails without downloading", async () => {
     const { deps, log } = mk({ clipboard: { write: async () => {} } });
-    expect(await copyPng(deps, Promise.resolve(blob))).toBe("downloaded");
-    expect(log.filter((l) => l.startsWith("download"))).toHaveLength(1);
+    expect(await copyPng(deps, Promise.resolve(blob))).toBe("failed");
+    expect(log.filter((l) => l.startsWith("download"))).toHaveLength(0);
   });
-  test("missing clipboard or write downloads", async () => {
+  test("missing clipboard or write fails without downloading", async () => {
     const a = mk({ clipboard: undefined });
-    expect(await copyPng(a.deps, Promise.resolve(blob))).toBe("downloaded");
+    expect(await copyPng(a.deps, Promise.resolve(blob))).toBe("failed");
     const b = mk({ clipboard: { ClipboardItem: class {} as never } });
-    expect(await copyPng(b.deps, Promise.resolve(blob))).toBe("downloaded");
+    expect(await copyPng(b.deps, Promise.resolve(blob))).toBe("failed");
+    expect([...a.log, ...b.log].filter((l) => l.startsWith("download"))).toEqual([]);
   });
-  test("write rejection falls back to download", async () => {
+  test("write rejection fails without downloading", async () => {
     const { deps, log } = mk({
       clipboard: {
         ClipboardItem: class {} as never,
@@ -73,9 +76,8 @@ describe("copyPng (AC-8)", () => {
         },
       },
     });
-    expect(await copyPng(deps, Promise.resolve(blob))).toBe("downloaded");
-    expect(log).toHaveLength(1);
-    expect(log[0]).toStartWith("download:");
+    expect(await copyPng(deps, Promise.resolve(blob))).toBe("failed");
+    expect(log.some((l) => l.startsWith("download"))).toBe(false);
   });
   test("native handler is preferred over the clipboard", async () => {
     const got: Blob[] = [];
@@ -84,14 +86,14 @@ describe("copyPng (AC-8)", () => {
     expect(got).toEqual([blob]);
     expect(log.some((l) => l.startsWith("write"))).toBe(false);
   });
-  test("native failure falls back to download", async () => {
+  test("native failure fails without downloading", async () => {
     const { deps, log } = mk({
       native: async () => {
         throw new Error("x");
       },
     });
-    expect(await copyPng(deps, Promise.resolve(blob))).toBe("downloaded");
-    expect(log.filter((l) => l.startsWith("download"))).toHaveLength(1);
+    expect(await copyPng(deps, Promise.resolve(blob))).toBe("failed");
+    expect(log.filter((l) => l.startsWith("download"))).toHaveLength(0);
   });
   test("a rejected render promise reports failed without download", async () => {
     const { deps, log } = mk();
@@ -144,18 +146,19 @@ describe("copyCodeImage (AC-4, AC-7)", () => {
     expect(msg).toBe("Selection too large for an image");
     expect(log.some((l) => l === "item" || l.startsWith("write") || l === "render")).toBe(false);
   });
-  test("clipboard unavailable reports the download message", async () => {
-    const { deps } = mk({ clipboard: undefined });
-    expect(await copyCodeImage(deps, input())).toBe("Clipboard unavailable: image downloaded");
+  test("clipboard unavailable reports the clipboard-failed message, no text, no download", async () => {
+    const { deps, log } = mk({ clipboard: undefined });
+    expect(await copyCodeImage(deps, input())).toBe("Could not copy image to the clipboard");
+    expect(log).toEqual(["render", "notify:Could not copy image to the clipboard"]);
   });
-  test("render failure copies plain text and reports MSG_FAILED", async () => {
+  test("render failure reports MSG_CLIPBOARD_FAILED and copies no text", async () => {
     const { deps, log } = mk({
       renderPng: async () => {
         throw new Error("canvas");
       },
     });
-    expect(await copyCodeImage(deps, input({ range: range(0, 1, 1, 1) }))).toBe("Could not create image; copied text instead");
-    expect(log).toContain("text:b\nc");
-    expect(log).toContain("notify:Could not create image; copied text instead");
+    expect(await copyCodeImage(deps, input({ range: range(0, 1, 1, 1) }))).toBe("Could not copy image to the clipboard");
+    expect(log.some((l) => l.startsWith("text:"))).toBe(false);
+    expect(log).toContain("notify:Could not copy image to the clipboard");
   });
 });
