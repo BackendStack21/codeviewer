@@ -10,9 +10,14 @@ import { icons } from "./icons.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
-import { isContextMenuOpen } from "./menu.ts";
+import { isContextMenuOpen, showContextMenu } from "./menu.ts";
+import { copyImageCommand, selectionMenuItems, type SelectionHost } from "./copyentry.ts";
+import { copyCodeImage, copyPng, MSG_DOWNLOADED, MSG_FAILED, MSG_NO_SELECTION, MSG_OK } from "./copyimage.ts";
+import { browserDeps, fragmentFromRange, markdownSnapDeps } from "./imagedom.ts";
+import { snapshotMarkdown } from "./mdsnap.ts";
+import type { ImageTheme } from "./imagelayout.ts";
 import { SearchView } from "./search.ts";
-import { normSideView, searchKey, type SideView } from "./keys.ts";
+import { copyImageKey, normSideView, searchKey, type SideView } from "./keys.ts";
 
 type ThemeName = "dark" | "light" | "system";
 
@@ -222,6 +227,10 @@ class App {
       if (t) this.trackRecent(t.path);
     };
     this.editor.onStatus = (s) => this.renderStatus(s);
+    this.editor.onSelectionMenu = (e) => {
+      const items = selectionMenuItems(this.selectionHost);
+      if (items.length) showContextMenu(e, items);
+    };
     this.editor.onOpenLink = async (p, hash) => {
       const type = await api.stat(p);
       if (type === "file") {
@@ -338,6 +347,7 @@ class App {
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
       c("search.prev", "Previous Search Result", () => this.search.step(-1), "⇧F4"),
       c("view.explorer", "Show Explorer", () => this.setSideView("explorer")),
+      copyImageCommand(this.selectionHost, IS_MAC ? "⌘⇧C" : "Ctrl+Shift+C"),
       markdownToggleCommand({ isMarkdownTab: () => this.editor.isMarkdownTab(), toggleMarkdown: () => this.editor.toggleMarkdown() }),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
       c("file.line", "Go to Line…", () => this.palette.open(":"), IS_MAC ? "⌃G" : "Ctrl+G"),
@@ -510,6 +520,67 @@ class App {
 
   private saveLayout = debounce(() => store.set("layout", { ...this.L, v: LAYOUT_VERSION }), 200);
 
+  // ───────────────────────────── copy as image ─────────────────────────────
+
+  private selectionHost: SelectionHost = {
+    hasSelection: () => {
+      const t = this.editor.active;
+      return t?.md ? !!t.md.selectionRange() : !!t?.code?.selection;
+    },
+    copy: () => {
+      const t = this.editor.active;
+      if (t?.md) {
+        const r = t.md.selectionRange();
+        if (r) void navigator.clipboard?.writeText(r.toString()).catch(() => {});
+      } else t?.code?.copySelection();
+    },
+    copyImage: () => this.copyImage(),
+  };
+
+  private imageTheme(): ImageTheme {
+    const tokenColors: Record<string, string> = {};
+    for (const t of "kscnftpovmhaxl") tokenColors[t] = cssVar(`--sx-${t}`);
+    const font = "JetBrains Mono";
+    return {
+      bg: cssVar("--bg-editor"),
+      fg: cssVar("--fg"),
+      tokenColors,
+      tokenStyles: { c: { italic: true }, h: { bold: true }, b: { bold: true }, i: { italic: true } },
+      font,
+      size: this.L.codeSize,
+    };
+  }
+
+  /** Must run synchronously from the click/keydown handler: nothing is awaited before the clipboard write. */
+  private copyImage() {
+    const tab = this.editor.active;
+    const notify = (m: string) => this.notify(m);
+    const theme = this.imageTheme();
+    const deps = browserDeps({ font: theme.font, size: theme.size, bridge: nativeBridge(), notify });
+    if (tab?.md) {
+      const range = tab.md.selectionRange();
+      if (!range) return notify(MSG_NO_SELECTION);
+      const text = range.toString();
+      const png = fragmentFromRange(range, tab.md.el, cssVar("--bg-editor"))
+        .then((f) => snapshotMarkdown(markdownSnapDeps, f))
+        .then((r) => {
+          if (!(r instanceof Blob)) throw new Error("snapshot failed");
+          return r;
+        });
+      void copyPng(deps, png).then(async (res) => {
+        if (res === "failed") {
+          await Promise.resolve(deps.copyText(text)).catch(() => {});
+          return notify(MSG_FAILED);
+        }
+        notify(res === "downloaded" ? MSG_DOWNLOADED : MSG_OK);
+      });
+      return;
+    }
+    const input = tab?.code?.imageInput();
+    if (!input) return notify(MSG_NO_SELECTION);
+    void copyCodeImage(deps, { ...input, theme, dpr: window.devicePixelRatio || 1 });
+  }
+
   private notify(msg: string) {
     this.toast.textContent = msg;
     this.toast.hidden = false;
@@ -597,6 +668,13 @@ class App {
         const k = e.key.toLowerCase();
         const inTerm = (e.target as HTMLElement).classList?.contains("term-input");
         let handled = true;
+        if (copyImageKey(e, { isMac: IS_MAC, inTerm: !!inTerm })) {
+          // Runs synchronously inside the keydown so the clipboard write keeps the user gesture.
+          this.copyImage();
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
         if (sk === "search") this.showSearch();
         else if (sk === "next" || sk === "prev") this.search.step(sk === "next" ? 1 : -1);

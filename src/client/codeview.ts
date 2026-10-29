@@ -1,4 +1,4 @@
-import { Highlighter, type Tok } from "./highlight.ts";
+import { Highlighter, type Span, type Tok } from "./highlight.ts";
 import { dismissable, esc, h } from "./util.ts";
 import { icons } from "./icons.ts";
 import { normalize, restorePlan, selectAll as selectAllRange, textOf, type SelRange } from "./selection.ts";
@@ -166,8 +166,14 @@ export class CodeView {
       e.preventDefault();
       e.clipboardData?.setData("text/plain", this.selectedText());
     });
+    this.scroller.addEventListener("contextmenu", (e) => {
+      if (this.sel) this.onContextMenu(e);
+    });
     document.addEventListener("selectionchange", () => this.readDomSelection());
   }
+
+  /** Set by the app: shows the Copy / Copy as Image menu (only called when a selection exists). */
+  onContextMenu: (e: MouseEvent) => void = () => {};
 
   // ───────────────────────────── selection (model range) ─────────────────────────────
 
@@ -193,6 +199,23 @@ export class CodeView {
   /** Selects the whole file as a model range. */
   selectAll() {
     this.setRange(selectAllRange(this.lines));
+  }
+
+  /** Inputs for copying the selection as an image, or null without a selection. */
+  imageInput(): { lines: string[]; tokens: Span[][]; range: SelRange } | null {
+    if (!this.sel) return null;
+    const tokens: Span[][] = this.lines.map(() => []);
+    // Beyond the row cap the layout reports "too large" anyway; skip lexing then.
+    if (this.sel.end.line - this.sel.start.line < 20000) {
+      for (let i = this.sel.start.line; i <= this.sel.end.line; i++) tokens[i] = this.hl.line(i);
+    }
+    return { lines: this.lines, tokens, range: this.sel };
+  }
+
+  /** Copies the model selection as plain text (context-menu "Copy"). */
+  copySelection() {
+    const t = this.selectedText();
+    if (t) void navigator.clipboard?.writeText(t).catch(() => {});
   }
 
   /** Text of the model selection ("" when none), never including decorations. */
