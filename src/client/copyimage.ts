@@ -168,8 +168,8 @@ export interface SnapTracker {
   begin(): number;
   /** True exactly once for the pending id; stale, unknown, repeated or non-number ids are ignored. */
   accept(id: unknown): boolean;
-  /** Cancels the pending request (timeout): returns its id so the native side can be told, undefined when none. */
-  cancel(): number | undefined;
+  /** Cancels the pending request (or only `id`, when given and still pending): returns its id so the native side can be told, undefined otherwise. */
+  cancel(id?: number): number | undefined;
 }
 export function snapTracker(): SnapTracker {
   let next = 1;
@@ -181,10 +181,11 @@ export function snapTracker(): SnapTracker {
       pending = undefined;
       return true;
     },
-    cancel() {
-      const id = pending;
+    cancel(id) {
+      if (id !== undefined && id !== pending) return undefined;
+      const cur = pending;
       pending = undefined;
-      return id;
+      return cur;
     },
   };
 }

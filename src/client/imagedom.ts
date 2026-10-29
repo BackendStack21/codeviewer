@@ -90,6 +90,12 @@ export function snapshotDeps(bridge: Bridge): SnapshotDeps {
     snapshot: bridge
       ? (r: SnapRect) =>
           new Promise<boolean>((res) => {
+            // A new request supersedes a pending one: its late PNG must never reach the pasteboard.
+            const old = tracker.cancel();
+            if (old !== undefined) {
+              bridge.postMessage({ t: "snapshotcancel", id: old });
+              snapDone?.(false);
+            }
             const id = tracker.begin();
             const finish = (ok: boolean) => {
               clearTimeout(timer);
@@ -97,8 +103,7 @@ export function snapshotDeps(bridge: Bridge): SnapshotDeps {
               res(ok);
             };
             const timer = setTimeout(() => {
-              const cancelled = tracker.cancel();
-              if (cancelled !== undefined) bridge.postMessage({ t: "snapshotcancel", id: cancelled });
+              if (tracker.cancel(id) !== undefined) bridge.postMessage({ t: "snapshotcancel", id });
               finish(false);
             }, SNAP_TIMEOUT);
             snapDone = finish;
