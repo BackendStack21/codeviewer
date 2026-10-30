@@ -30,3 +30,16 @@ export function searchKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): S
 export function normSideView(v: unknown): SideView {
   return v === "search" || v === "changes" ? v : "explorer";
 }
+
+/**
+ * True for the "show all shortcuts" key: Cmd/Ctrl+/. On layouts where "/" needs Shift (German,
+ * Swiss, Nordic, Spanish, Italian…: Shift+7), WebKit on macOS reports Cmd+Shift+7 as key "7",
+ * code "Digit7", so the physical Shift+7 chord also counts. The Slash code is not matched: on
+ * those layouts that key is "-" and Cmd+- is zoom out.
+ */
+export function helpKey(e: KeyLike, o: { isMac: boolean }): boolean {
+  const mod = o.isMac ? !!e.metaKey : !!e.ctrlKey;
+  if (!mod) return false;
+  if (e.key === "/") return true;
+  return !!e.shiftKey && e.code === "Digit7" && e.key === "7";
+}

@@ -13,7 +13,7 @@ export class Help {
     this.box = h(
       "div",
       { class: "upd help", role: "dialog", "aria-modal": "true", "aria-label": "Keyboard shortcuts", tabindex: "-1" },
-      h("div", { class: "upd-head" }, h("div", { class: "upd-logo", html: icons.search }), h("div", null, h("h2", null, "Keyboard shortcuts"), h("p", null, `Press ${key("⌘/", "Ctrl+/")} any time to see this sheet.`)), h("button", { class: "btn", onclick: () => this.close() }, "Close")),
+      h("div", { class: "upd-head" }, h("div", { class: "upd-logo", html: icons.search }), h("div", null, h("h2", null, "Keyboard shortcuts"), h("p", null, `Press ${key("⌘/", "Ctrl+/")} any time to see this sheet${IS_MAC ? " (⌘⇧7 where / is Shift+7)" : ""}.`)), h("button", { class: "btn", onclick: () => this.close() }, "Close")),
       ...group("Files", [
         row(key("⌘P", "Ctrl+P"), "Go to file (path:line works)"),
         row(key("⌘⇧P", "Ctrl+Shift+P"), "Command palette"),

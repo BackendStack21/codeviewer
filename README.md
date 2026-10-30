@@ -101,7 +101,7 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…", "View Changes") |
 | ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
-| ⌘/ | Every shortcut and the terminal tips, in your platform's key names |
+| ⌘/ | Every shortcut and the terminal tips, in your platform's key names (⌘⇧7 on layouts where "/" is Shift+7, such as German) |
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
 
