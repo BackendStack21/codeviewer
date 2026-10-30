@@ -46,7 +46,7 @@ export class Help {
       ]),
       h("p", { class: "welcome-hint" }, "Tip: run ", h("code", null, "codeviewer open <file>:<line>"), " inside the terminal and the viewer opens that file. Agents can use it to show you what they mean."),
     );
-    this.el = h("div", { class: "overlay upd-overlay", hidden: true }, this.box);
+    this.el = h("div", { class: "overlay upd-overlay", hidden: true }, h("div", { class: "upd-shell" }, this.box));
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.el) this.close();
     });

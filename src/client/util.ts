@@ -182,3 +182,10 @@ export function showHidden(s: string): string {
     return n < 256 ? `\\x${n.toString(16).padStart(2, "0")}` : `\\u${n.toString(16).padStart(4, "0")}`;
   });
 }
+
+/** True for targets that own Cmd+A / Cmd+C themselves (inputs, textareas such as the terminal's, editable hosts). */
+export function isEditable(t: EventTarget | null): boolean {
+  const e = t as HTMLElement | null;
+  const tag = e?.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!e?.isContentEditable;
+}

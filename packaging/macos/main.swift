@@ -467,6 +467,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The standard About panel with the owner and the project links as clickable credits.
+    @objc func showAbout(_ sender: Any?) {
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        let base: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), .paragraphStyle: para]
+        let credits = NSMutableAttributedString(string: "Read the code. Run the agent. Same window.\n\n", attributes: base)
+        func link(_ text: String, _ url: String) {
+            var a = base
+            a[.link] = URL(string: url)!
+            credits.append(NSAttributedString(string: text, attributes: a))
+        }
+        credits.append(NSAttributedString(string: "Made by ", attributes: base))
+        link("21no.de", "https://21no.de")
+        credits.append(NSAttributedString(string: "\n", attributes: base))
+        link("codeviewer.21no.de", "https://codeviewer.21no.de")
+        credits.append(NSAttributedString(string: "  ·  ", attributes: base))
+        link("Source on GitHub", "https://github.com/BackendStack21/codeviewer")
+        NSApp.orderFrontStandardAboutPanel(options: [.credits: credits])
+    }
+
     /// Runs the update check in the front window's page (which owns the update UI).
     @objc func checkForUpdates(_ sender: Any?) {
         let w = windows.first { $0.window == NSApp.keyWindow } ?? windows.first
@@ -510,7 +530,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return i
         }
         submenu("Codeviewer", [
-            item("About Codeviewer", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            item("About Codeviewer", #selector(showAbout(_:))),
             item("Check for Updates…", #selector(checkForUpdates(_:))),
             .separator(),
             item("Install ‘codeviewer’ Command…", #selector(installCommandLineTool(_:))),

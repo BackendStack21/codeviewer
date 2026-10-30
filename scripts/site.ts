@@ -24,7 +24,7 @@ const SITE = `https://${DOMAIN}/`;
 // Search and social metadata. The card image is docs/assets/og.png (bun run og).
 const TITLE = "Codeviewer: a read-only code viewer with a built-in terminal for coding agents";
 const DESCRIPTION =
-  "Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Free and open source (MIT) for macOS and Linux.";
+  "Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Private by design: no telemetry, nothing leaves your machine. Free and open source (MIT) for macOS and Linux.";
 const OG_TITLE = "Codeviewer: read the code, run the agent, same window";
 const OG_DESCRIPTION = "A fast, read-only code viewer with a real terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source.";
 const OG_IMAGE = `${SITE}assets/og.png`;
@@ -110,10 +110,10 @@ const fileName = (id: string) => `<code data-name="${id}">${esc(placeholder(id))
 const FEATURES: [string, string, string][] = [
   ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code."],
   ["live", "Live while agents work", "Files reload in place as they change on disk. Changed lines flash, the explorer marks them, and nothing you are reading jumps."],
-  ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state. It never writes to your repository."],
+  ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, and a Changes view that lists every file the branch touched as read-only diffs. It never writes to your repository."],
   ["fast", "Fast at any size", "Virtualized everything: 100k-line files open instantly, quick-open searches 200k paths as you type, and the terminal streams megabytes per second."],
-  ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, and git hardened against hostile repositories. Reviewed adversarially."],
-  ["native", "Native and small", "A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies."],
+  ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, read-only file access with symlink containment, git hardened against hostile repositories and signed updates. Seven adversarial review rounds so far."],
+  ["native", "Native and small", "A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies, so there is no supply chain to audit but this repository."],
 ];
 
 const FEATURE_ICONS: Record<string, string> = {
@@ -184,6 +184,7 @@ const html = `<!doctype html>
   <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" width="22" height="22"><span>Codeviewer</span></a>
   <nav>
     <a href="#features">Features</a>
+    <a href="#privacy">Privacy</a>
     <a href="#security">Security</a>
     <a href="#download">Download</a>
     <a class="gh" href="${REPO}" aria-label="Source on GitHub">${ICON.github}<span>GitHub</span></a>
@@ -192,7 +193,7 @@ const html = `<!doctype html>
 
 <main id="top">
   <section class="hero">
-    <p class="eyebrow"><span class="pill">Free</span> Open source · MIT licensed</p>
+    <p class="eyebrow"><span class="pill">Free</span> Open source · MIT licensed · No telemetry</p>
     <h1>Read the code.<br><span class="grad">Run the agent.</span> Same window.</h1>
     <p class="lede">Codeviewer is a fast, read-only code viewer with a real terminal built in. Point your favourite CLI agent at a project and watch every file it touches update live, with git telling you exactly what changed.</p>
     <div class="cta">
@@ -225,7 +226,7 @@ ${FEATURES.map(
   <section class="split">
     <div>
       <h2>See what HEAD had</h2>
-      <p>Click any gutter marker to peek at the lines as they were in the last commit. Inline blame follows your cursor; the status bar shows the branch, how far ahead or behind you are, and every changed file is one <kbd>⌘⇧G</kbd> away.</p>
+      <p>Click any gutter marker to peek at the lines as they were in the last commit. Inline blame follows your cursor; the status bar shows the branch and how far ahead or behind you are. <kbd>⌘⇧G</kbd> opens the Changes view: everything the branch touched since it left <code>main</code>, or just what is uncommitted, each file one click from a read-only diff. Press <kbd>⌘/</kbd> for every shortcut; the whole app works from the keyboard and with a screen reader.</p>
       <ul class="ticks">
         <li>Explorer letters: <b class="gM">M</b> modified, <b class="gA">A</b> added, <b class="gU">U</b> untracked, <b class="gD">D</b> deleted, <b class="gC">C</b> conflict</li>
         <li>Live as you or an agent edit, stage, commit or switch branch</li>
@@ -235,13 +236,26 @@ ${FEATURES.map(
     <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1508" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
   </section>
 
+  <section id="privacy" class="security">
+    <h2>Private by design</h2>
+    <p class="sub">Your code, your terminal and what you look at never leave your computer. There is no account, no cloud, no telemetry and no crash reporting: nothing to opt out of, because nothing is collected.</p>
+    <div class="grid three">
+      <article class="card"><h3>Local only</h3><p>Codeviewer is a small server on <code>127.0.0.1</code> and a window that can talk only to it. Settings live in one JSON file in your profile; no browser history, cookies or cache are kept.</p></article>
+      <article class="card"><h3>One optional request</h3><p>The single outbound connection is a launch-time look at GitHub's releases API for a newer version. Switch it off with <b>Toggle Automatic Update Checks</b> or <code>CODEVIEWER_NO_UPDATE_CHECK=1</code> and the app never opens a socket to the internet.</p></article>
+      <article class="card"><h3>Read-only, by construction</h3><p>It never writes to your files or your repository: files open read-only with symlink containment, git runs without hooks, filters or drivers and never touches the index. The terminal is yours; what you type there is the only way anything changes.</p></article>
+    </div>
+  </section>
+
   <section id="security" class="security">
     <h2>A shell in a window deserves care</h2>
-    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in. Every confirmed finding was fixed and pinned with a test.</p>
+    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in, seven rounds so far. Every confirmed finding was fixed and pinned with a test.</p>
     <div class="grid three">
-      <article class="card"><h3>Only its own server</h3><p>The Mac window blocks every request except its own local port. External links open in your browser, never inside the app.</p></article>
-      <article class="card"><h3>No ambient credentials</h3><p>A random 256-bit token lives in the URL fragment and a request header. No cookies, no token in process lists, Host and Origin checked on every request.</p></article>
+      <article class="card"><h3>Only its own server</h3><p>The Mac window blocks every request except its own local port, with a strict Content-Security-Policy on top. External links open in your browser, never inside the app.</p></article>
+      <article class="card"><h3>No ambient credentials</h3><p>A random 256-bit token lives in the URL fragment and a request header. No cookies, no token in process lists, Host and Origin checked on every request. Terminals get a narrower token that can only ask the viewer to open a file.</p></article>
       <article class="card"><h3>Hostile repos are fine</h3><p>Git runs without filters, textconv, signature checks, fsmonitor or submodules, and never writes your index. Read the <a href="${REPO}/blob/main/DESIGN.md">design and review notes</a>.</p></article>
+      <article class="card"><h3>Signed updates</h3><p>The updater installs a release only when its <code>SHA256SUMS</code> carries a valid Ed25519 signature from the release key, downloads come from GitHub over https alone, and every file's SHA-256 is checked before an atomic swap.</p></article>
+      <article class="card"><h3>Untrusted content stays text</h3><p>Markdown previews are built without <code>innerHTML</code>: raw HTML is shown as text, remote images never load, link schemes are allow-listed and the policy never widens for a file.</p></article>
+      <article class="card"><h3>Built in the open</h3><p>Every release is built by GitHub Actions from a tagged commit with Sigstore provenance you can check yourself. <a href="#verify">Verify a download</a> in four commands, or build it from source.</p></article>
     </div>
   </section>
 

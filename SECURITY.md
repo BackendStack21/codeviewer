@@ -9,6 +9,27 @@ Please **do not open a public issue**. Report privately through GitHub's
 [private vulnerability reporting](https://github.com/BackendStack21/codeviewer/security/advisories/new).
 Include the version, OS, and the steps to reproduce. Expect an acknowledgement within a few days.
 
+## Privacy
+
+Codeviewer collects nothing. It is a local server bound to `127.0.0.1` and a window locked to that
+server; file contents, terminal output and usage never leave the machine. The only outbound request is
+the launch-time check of GitHub's releases API for a newer version, which "Toggle Automatic Update
+Checks" or `CODEVIEWER_NO_UPDATE_CHECK=1` disables entirely. Any other network access by Codeviewer
+itself would be a bug: please report it as a vulnerability.
+
+## Terminals and tokens
+
+The session token travels only in the URL fragment and a request header, never in a cookie or a
+process environment. Shells started by Codeviewer receive a separate, narrower token that the server
+honours for one purpose: `codeviewer open <file:line>` asking the viewer to show a file. It cannot read
+files, search or attach to terminals.
+
+## Updates
+
+The in-app updater downloads only from GitHub over https, caps the sizes it will read, requires a
+valid Ed25519 signature on `SHA256SUMS` from `packaging/update-key.pub`, verifies the file's SHA-256
+and swaps the installation atomically. Prerelease versions are never offered.
+
 ## Markdown preview
 
 The content of every viewed file, Markdown included, is untrusted. The Markdown renderer builds its DOM

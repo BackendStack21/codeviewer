@@ -1,5 +1,5 @@
 import { Highlighter, type Tok } from "./highlight.ts";
-import { dismissable, esc, h } from "./util.ts";
+import { dismissable, esc, h, isEditable } from "./util.ts";
 import { icons } from "./icons.ts";
 import { allRange, normalize, restorePlan, selectionText, type SelRange } from "./selection.ts";
 import { diffLines, gutterMarks, ADDED, MODIFIED, DELETED_BELOW, DELETED_ABOVE, type Hunk } from "./diff.ts";
@@ -783,13 +783,6 @@ export class CodeView {
     s.scrollLeft = revealCol(s.scrollLeft, s.clientWidth, this.gutterW, this.charW, this.mStart[this.mCur]!);
     this.schedule();
   }
-}
-
-/** True for targets that own Cmd+A / Cmd+C themselves (inputs, textareas such as the terminal's, editable hosts). */
-function isEditable(t: EventTarget | null): boolean {
-  const e = t as HTMLElement | null;
-  const tag = e?.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!e?.isContentEditable;
 }
 
 /** Text node and offset for a text offset inside a row's text element (the truncation label is skipped). */

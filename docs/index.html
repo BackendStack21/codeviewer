@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Codeviewer: a read-only code viewer with a built-in terminal for coding agents</title>
-<meta name="description" content="Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Free and open source (MIT) for macOS and Linux.">
+<meta name="description" content="Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Private by design: no telemetry, nothing leaves your machine. Free and open source (MIT) for macOS and Linux.">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="author" content="21no.de">
 <meta name="color-scheme" content="dark light">
@@ -28,7 +28,7 @@
 <meta name="twitter:description" content="A fast, read-only code viewer with a real terminal and live git indicators. Watch your coding agent work, right next to the code. Free and open source.">
 <meta name="twitter:image" content="https://codeviewer.21no.de/assets/og.png">
 <meta name="twitter:image:alt" content="Codeviewer: Read the code. Run the agent. Same window. Next to a screenshot of the app with its file explorer, code view and terminal.">
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Codeviewer","description":"Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Free and open source (MIT) for macOS and Linux.","url":"https://codeviewer.21no.de/","image":"https://codeviewer.21no.de/assets/og.png","screenshot":"https://codeviewer.21no.de/assets/screenshot-dark.jpg","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"downloadUrl":"https://github.com/BackendStack21/codeviewer/releases/latest","codeRepository":"https://github.com/BackendStack21/codeviewer","author":{"@type":"Organization","name":"21no.de","url":"https://21no.de"}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Codeviewer","description":"Codeviewer is a fast, read-only code viewer with a real built-in terminal and live git indicators. Run Claude Code, Codex or aider and watch every file change, right next to the code. Private by design: no telemetry, nothing leaves your machine. Free and open source (MIT) for macOS and Linux.","url":"https://codeviewer.21no.de/","image":"https://codeviewer.21no.de/assets/og.png","screenshot":"https://codeviewer.21no.de/assets/screenshot-dark.jpg","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"downloadUrl":"https://github.com/BackendStack21/codeviewer/releases/latest","codeRepository":"https://github.com/BackendStack21/codeviewer","author":{"@type":"Organization","name":"21no.de","url":"https://21no.de"}}</script>
 <link rel="preload" href="fonts/SpaceGrotesk.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="site.css">
 <script type="application/json" id="platforms">{"repo":"BackendStack21/codeviewer","platforms":[{"id":"macos-arm64","os":"macos","detail":"Apple silicon","suffix":"-macos-arm64.dmg"},{"id":"macos-x64","os":"macos","detail":"Intel","suffix":"-macos-x64.dmg"},{"id":"linux-x64","os":"linux","detail":"x86-64","suffix":"-linux-x64.tar.gz"},{"id":"linux-arm64","os":"linux","detail":"ARM64","suffix":"-linux-arm64.tar.gz"},{"id":"cli-macos-arm64","os":"macos","detail":"Apple silicon","suffix":"-macos-arm64"},{"id":"cli-macos-x64","os":"macos","detail":"Intel","suffix":"-macos-x64"},{"id":"cli-linux-x64","os":"linux","detail":"x86-64 (glibc)","suffix":"-linux-x64"},{"id":"cli-linux-arm64","os":"linux","detail":"ARM64 (glibc)","suffix":"-linux-arm64"},{"id":"cli-linux-x64-musl","os":"linux","detail":"x86-64 (musl / Alpine)","suffix":"-linux-x64-musl"}]}</script>
@@ -39,6 +39,7 @@
   <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" width="22" height="22"><span>Codeviewer</span></a>
   <nav>
     <a href="#features">Features</a>
+    <a href="#privacy">Privacy</a>
     <a href="#security">Security</a>
     <a href="#download">Download</a>
     <a class="gh" href="https://github.com/BackendStack21/codeviewer" aria-label="Source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.6 0 0 3.6 0 8c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3s1.4.1 2 .3c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.7-3.6 3.9.3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4C13.7 14.5 16 11.5 16 8c0-4.4-3.6-8-8-8z"/></svg><span>GitHub</span></a>
@@ -47,7 +48,7 @@
 
 <main id="top">
   <section class="hero">
-    <p class="eyebrow"><span class="pill">Free</span> Open source · MIT licensed</p>
+    <p class="eyebrow"><span class="pill">Free</span> Open source · MIT licensed · No telemetry</p>
     <h1>Read the code.<br><span class="grad">Run the agent.</span> Same window.</h1>
     <p class="lede">Codeviewer is a fast, read-only code viewer with a real terminal built in. Point your favourite CLI agent at a project and watch every file it touches update live, with git telling you exactly what changed.</p>
     <div class="cta">
@@ -80,7 +81,7 @@
       <article class="card">
         <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v10M7 14a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17 9c0 4-10 3-10 5" /></g></svg>
         <h3>Git, read-only</h3>
-        <p>Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state. It never writes to your repository.</p>
+        <p>Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, and a Changes view that lists every file the branch touched as read-only diffs. It never writes to your repository.</p>
       </article>
       <article class="card">
         <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 14h6l-1 7 8-11h-6z" /></g></svg>
@@ -90,12 +91,12 @@
       <article class="card">
         <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" /></g></svg>
         <h3>Locked down</h3>
-        <p>The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, and git hardened against hostile repositories. Reviewed adversarially.</p>
+        <p>The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, read-only file access with symlink containment, git hardened against hostile repositories and signed updates. Seven adversarial review rounds so far.</p>
       </article>
       <article class="card">
         <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 8.5h16M7 6.2h.01M9 6.2h.01" /></g></svg>
         <h3>Native and small</h3>
-        <p>A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies.</p>
+        <p>A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies, so there is no supply chain to audit but this repository.</p>
       </article>
     </div>
   </section>
@@ -103,7 +104,7 @@
   <section class="split">
     <div>
       <h2>See what HEAD had</h2>
-      <p>Click any gutter marker to peek at the lines as they were in the last commit. Inline blame follows your cursor; the status bar shows the branch and how far ahead or behind you are. <kbd>⌘⇧G</kbd> opens the Changes view: everything the branch touched since it left <code>main</code>, or just what is uncommitted, each file one click from a read-only diff.</p>
+      <p>Click any gutter marker to peek at the lines as they were in the last commit. Inline blame follows your cursor; the status bar shows the branch and how far ahead or behind you are. <kbd>⌘⇧G</kbd> opens the Changes view: everything the branch touched since it left <code>main</code>, or just what is uncommitted, each file one click from a read-only diff. Press <kbd>⌘/</kbd> for every shortcut; the whole app works from the keyboard and with a screen reader.</p>
       <ul class="ticks">
         <li>Explorer letters: <b class="gM">M</b> modified, <b class="gA">A</b> added, <b class="gU">U</b> untracked, <b class="gD">D</b> deleted, <b class="gC">C</b> conflict</li>
         <li>Live as you or an agent edit, stage, commit or switch branch</li>
@@ -113,13 +114,26 @@
     <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1508" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
   </section>
 
+  <section id="privacy" class="security">
+    <h2>Private by design</h2>
+    <p class="sub">Your code, your terminal and what you look at never leave your computer. There is no account, no cloud, no telemetry and no crash reporting: nothing to opt out of, because nothing is collected.</p>
+    <div class="grid three">
+      <article class="card"><h3>Local only</h3><p>Codeviewer is a small server on <code>127.0.0.1</code> and a window that can talk only to it. Settings live in one JSON file in your profile; no browser history, cookies or cache are kept.</p></article>
+      <article class="card"><h3>One optional request</h3><p>The single outbound connection is a launch-time look at GitHub's releases API for a newer version. Switch it off with <b>Toggle Automatic Update Checks</b> or <code>CODEVIEWER_NO_UPDATE_CHECK=1</code> and the app never opens a socket to the internet.</p></article>
+      <article class="card"><h3>Read-only, by construction</h3><p>It never writes to your files or your repository: files open read-only with symlink containment, git runs without hooks, filters or drivers and never touches the index. The terminal is yours; what you type there is the only way anything changes.</p></article>
+    </div>
+  </section>
+
   <section id="security" class="security">
     <h2>A shell in a window deserves care</h2>
-    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in. Every confirmed finding was fixed and pinned with a test.</p>
+    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in, seven rounds so far. Every confirmed finding was fixed and pinned with a test.</p>
     <div class="grid three">
-      <article class="card"><h3>Only its own server</h3><p>The Mac window blocks every request except its own local port. External links open in your browser, never inside the app.</p></article>
-      <article class="card"><h3>No ambient credentials</h3><p>A random 256-bit token lives in the URL fragment and a request header. No cookies, no token in process lists, Host and Origin checked on every request.</p></article>
+      <article class="card"><h3>Only its own server</h3><p>The Mac window blocks every request except its own local port, with a strict Content-Security-Policy on top. External links open in your browser, never inside the app.</p></article>
+      <article class="card"><h3>No ambient credentials</h3><p>A random 256-bit token lives in the URL fragment and a request header. No cookies, no token in process lists, Host and Origin checked on every request. Terminals get a narrower token that can only ask the viewer to open a file.</p></article>
       <article class="card"><h3>Hostile repos are fine</h3><p>Git runs without filters, textconv, signature checks, fsmonitor or submodules, and never writes your index. Read the <a href="https://github.com/BackendStack21/codeviewer/blob/main/DESIGN.md">design and review notes</a>.</p></article>
+      <article class="card"><h3>Signed updates</h3><p>The updater installs a release only when its <code>SHA256SUMS</code> carries a valid Ed25519 signature from the release key, downloads come from GitHub over https alone, and every file's SHA-256 is checked before an atomic swap.</p></article>
+      <article class="card"><h3>Untrusted content stays text</h3><p>Markdown previews are built without <code>innerHTML</code>: raw HTML is shown as text, remote images never load, link schemes are allow-listed and the policy never widens for a file.</p></article>
+      <article class="card"><h3>Built in the open</h3><p>Every release is built by GitHub Actions from a tagged commit with Sigstore provenance you can check yourself. <a href="#verify">Verify a download</a> in four commands, or build it from source.</p></article>
     </div>
   </section>
 
