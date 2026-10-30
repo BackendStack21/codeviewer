@@ -157,7 +157,6 @@ export class FileTree {
       if (n.path === this.active) cls.push("active");
       if (n.type === "link-broken") cls.push("broken");
       if (n.name.startsWith(".")) cls.push("hidden");
-      const changed = isDir ? this.changedDirs.has(n.path) : this.changed.has(n.path);
       let gitBadge = "";
       let gitTitle = "";
       if (this.git?.repo) {
@@ -165,7 +164,7 @@ export class FileTree {
           const l = this.git.dir(n.path);
           if (l) {
             cls.push(`git-${l}`);
-            if (l !== "I") gitBadge = `<span class="gdot"></span>`;
+            if (l !== "I") gitBadge = `<span class="gdot" title="Contains changes"></span>`;
           }
         } else {
           const g = this.git.file(n.path);
@@ -176,6 +175,8 @@ export class FileTree {
           }
         }
       }
+      // A folder git already flags gets one marker, not a second look-alike dot for disk activity.
+      const changed = isDir ? this.changedDirs.has(n.path) && !gitBadge : this.changed.has(n.path);
       const indent = n.depth * 12 + 8;
       html +=
         `<div class="${cls.join(" ")}" role="treeitem" id="tr-${i}" data-i="${i}" aria-level="${n.depth + 1}" aria-selected="${n.path === this.selected}"${gitTitle} style="transform:translateY(${i * ROW}px);padding-left:${indent}px;--d:${n.depth}"` +
