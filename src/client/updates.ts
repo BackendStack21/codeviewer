@@ -27,7 +27,7 @@ export class Updates {
   onInfo: (info: UpdateInfo) => void = () => {};
 
   constructor() {
-    this.box = h("div", { class: "upd", role: "dialog", "aria-modal": "true", "aria-label": "Software update" });
+    this.box = h("div", { class: "upd", role: "dialog", "aria-modal": "true", "aria-label": "Software update", tabindex: "-1" });
     this.el = h("div", { class: "overlay upd-overlay", hidden: true }, this.box);
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.el && !this.installing) this.close();
@@ -61,13 +61,19 @@ export class Updates {
     }
   }
 
+  private returnTo: Element | null = null;
+
   open() {
+    this.returnTo = document.activeElement;
     this.el.hidden = false;
     if (this.info) this.render();
+    (this.box.querySelector<HTMLElement>(".btn") ?? this.box).focus();
   }
 
   close() {
     this.el.hidden = true;
+    (this.returnTo as HTMLElement | null)?.focus?.();
+    this.returnTo = null;
   }
 
   private header(title: string, sub: string) {

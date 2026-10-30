@@ -77,3 +77,57 @@ test("output is coalesced into few frames", async () => {
   c.send("exit\n");
   c.ws.close();
 }, 30_000);
+
+test("a shell that exits while nobody is attached still delivers its last output and exit code on reattach", async () => {
+  const a = connect("exit-while-detached-1");
+  await a.opened;
+  a.send("echo READY\n");
+  for (let i = 0; i < 100 && !a.term.lines.some((l) => l.toString() === "READY"); i++) await Bun.sleep(100);
+  // The exit lands after the socket is gone (a reload in the middle of it).
+  a.send("echo LAST; sleep 0.2; exit 7\n");
+  a.ws.close();
+  await Bun.sleep(300);
+
+  const b = connect("exit-while-detached-1");
+  const texts: string[] = [];
+  const closed = new Promise<CloseEvent>((r) => (b.ws.onclose = r));
+  const inner = b.ws.onmessage!;
+  b.ws.onmessage = (e) => {
+    if (typeof e.data === "string") texts.push(e.data);
+    inner.call(b.ws, e);
+  };
+  await b.opened;
+  const ev = await closed;
+  expect(ev.code).toBe(1000);
+  expect(texts[0]).toBe(JSON.stringify({ t: "replay" }));
+  expect(texts).toContain(JSON.stringify({ t: "exit", code: 7 }));
+  expect(b.term.lines.some((l) => l.toString() === "LAST")).toBe(true);
+
+  // After that the id is free: a new attach starts a fresh shell with no stale exit notice.
+  const c = connect("exit-while-detached-1");
+  const cTexts: string[] = [];
+  const cInner = c.ws.onmessage!;
+  c.ws.onmessage = (e) => {
+    if (typeof e.data === "string") cTexts.push(e.data);
+    cInner.call(c.ws, e);
+  };
+  await c.opened;
+  c.send("echo FRESH\n");
+  for (let i = 0; i < 100 && !c.term.lines.some((l) => l.toString() === "FRESH"); i++) await Bun.sleep(100);
+  expect(c.term.lines.some((l) => l.toString() === "FRESH")).toBe(true);
+  expect(cTexts.some((t) => t.includes('"exit"'))).toBe(false);
+  c.send("exit\n");
+  c.ws.close();
+}, 30_000);
+
+test("terminals get the narrow open token, never the session token", async () => {
+  const a = connect("env-token-1");
+  await a.opened;
+  a.send("echo TOK=$CODEVIEWER_TOKEN\n");
+  for (let i = 0; i < 100 && !a.term.lines.some((l) => l.toString().startsWith("TOK=")); i++) await Bun.sleep(100);
+  const line = a.term.lines.map((l) => l.toString()).find((l) => l.startsWith("TOK=") && !l.includes("$"))!;
+  expect(line).toBe(`TOK=${app.openToken}`);
+  expect(line).not.toContain(token);
+  a.send("exit\n");
+  a.ws.close();
+}, 30_000);

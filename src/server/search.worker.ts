@@ -48,9 +48,16 @@ function run({ req, cancel }: WorkerJob): void {
     let fd = -1;
     try {
       // Containment: a symlinked parent (or file) that resolves outside the root is never opened.
-      if (!within(rootReal, realpathSync(path.join(rootReal, rel)))) throw new Error("skip");
+      let real: string;
+      try {
+        real = realpathSync(path.join(rootReal, rel));
+      } catch {
+        continue; // gone since it was listed (deleted but still in the index): nothing was skipped
+      }
+      if (!within(rootReal, real)) throw new Error("skip");
       fd = openSync(path.join(rootReal, rel), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const st = fstatSync(fd);
+      if (st.isDirectory()) continue; // submodules and nested repositories are listed as paths, not files
       if (!st.isFile() || st.size > MAX_TEXT_BYTES) throw new Error("skip");
       const id = `${st.dev}:${st.ino}`;
       if (seen.has(id)) continue;

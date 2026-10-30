@@ -138,3 +138,30 @@ test("a new file in a freshly added directory is found after dirs cache refresh"
   await ix.apply(["src/c.ts"]);
   expect(await ix.apply(["src/deep"])).toBe(false);
 });
+
+test("symlinked directories inside the root are walked; links out of the root and cycles are not", async () => {
+  const { symlink } = await import("node:fs/promises");
+  const outside = await realpath(await mkdtemp(path.join(tmpdir(), "cv-index-out-")));
+  try {
+    await writeFile(path.join(outside, "secret.txt"), "");
+    await symlink(path.join(root, "src", "deep"), path.join(root, "linked"));
+    await symlink(outside, path.join(root, "out"));
+    await symlink(path.join(outside, "secret.txt"), path.join(root, "outfile"));
+    await symlink(root, path.join(root, "src", "loop")); // a link to an ancestor
+    await symlink(path.join(root, "top.txt"), path.join(root, "src", "toplink"));
+    const ix = new FileIndex(root);
+    const files = await list(ix);
+    expect(files).toContain("linked/b.ts");
+    expect(files).toContain("src/toplink");
+    expect(files).toContain("src/deep/b.ts");
+    expect(files.some((f) => f.startsWith("out"))).toBe(false);
+    expect(files.some((f) => f.startsWith("src/loop"))).toBe(false);
+    // A symlinked directory is a known directory: events inside it are churn, not a rebuild.
+    expect(await ix.apply(["linked"])).toBe(false);
+    // A link out of the root is never a reason to rescan.
+    expect(await ix.apply(["out"])).toBe(false);
+    expect(await list(ix)).toEqual(files);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});

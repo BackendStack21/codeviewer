@@ -108,8 +108,11 @@ export class Palette {
   onGoToLine: (line: number) => void = () => {};
 
   constructor() {
-    this.input = h("input", { class: "palette-input", spellcheck: "false", "aria-label": "Search files or commands" });
-    this.list = h("div", { class: "palette-list", role: "listbox" });
+    this.input = h("input", {
+      class: "palette-input", spellcheck: "false", "aria-label": "Search files or commands",
+      role: "combobox", "aria-expanded": "false", "aria-haspopup": "listbox", "aria-controls": "pal-list", "aria-autocomplete": "list",
+    });
+    this.list = h("div", { class: "palette-list", role: "listbox", id: "pal-list" });
     const box = h("div", { class: "palette" }, h("div", { class: "palette-field" }, h("span", { html: icons.search }), this.input), this.list);
     this.el = h("div", { class: "overlay", hidden: true }, box);
     this.el.addEventListener("mousedown", (e) => {
@@ -155,6 +158,7 @@ export class Palette {
   open(prefix = "") {
     this.prevFocus = document.activeElement;
     this.el.hidden = false;
+    this.input.setAttribute("aria-expanded", "true");
     this.input.value = prefix;
     this.input.focus();
     this.update();
@@ -163,7 +167,14 @@ export class Palette {
 
   close() {
     this.el.hidden = true;
+    this.input.setAttribute("aria-expanded", "false");
     (this.prevFocus as HTMLElement | null)?.focus?.();
+  }
+
+  /** Tells assistive tech which option is current. */
+  private syncActive() {
+    if (this.items.length) this.input.setAttribute("aria-activedescendant", `pal-${this.sel}`);
+    else this.input.removeAttribute("aria-activedescendant");
   }
 
   get isOpen() {
@@ -221,11 +232,15 @@ export class Palette {
       if (!this.items.length) {
         const msg = this.stale && this.loading ? "Indexing files…" : q ? "No matching files" : "No files";
         this.list.innerHTML = `<div class="pal-empty">${msg}</div>`;
+        this.syncActive();
         return;
       }
     }
     this.sel = 0;
-    this.list.innerHTML = this.items.map((it, i) => it.html.replace("<div class=\"pal-item\"", `<div class="pal-item${i === 0 ? " sel" : ""}" data-i="${i}"`)).join("");
+    this.list.innerHTML = this.items
+      .map((it, i) => it.html.replace("<div class=\"pal-item\"", `<div class="pal-item${i === 0 ? " sel" : ""}" data-i="${i}" id="pal-${i}" aria-selected="${i === 0}"`))
+      .join("");
+    this.syncActive();
   }
 
   private row(icon: string, main: string, detail: string, keys?: string): string {
@@ -235,7 +250,11 @@ export class Palette {
   private move(d: number) {
     if (!this.items.length) return;
     this.sel = (this.sel + d + this.items.length) % this.items.length;
-    this.list.querySelectorAll(".pal-item").forEach((el, i) => el.classList.toggle("sel", i === this.sel));
+    this.list.querySelectorAll(".pal-item").forEach((el, i) => {
+      el.classList.toggle("sel", i === this.sel);
+      el.setAttribute("aria-selected", String(i === this.sel));
+    });
+    this.syncActive();
     this.list.querySelector(".sel")?.scrollIntoView({ block: "nearest" });
   }
 

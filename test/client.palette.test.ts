@@ -95,6 +95,24 @@ describe("Palette", () => {
     return { p, input, list, type, key, rows, flush, calls: m.calls };
   };
 
+  test("combobox semantics: expanded while open, the current option named for assistive tech", async () => {
+    const t = await make();
+    expect(t.input.getAttribute("role")).toBe("combobox");
+    expect(t.input.getAttribute("aria-expanded")).toBe("false");
+    t.p.open();
+    await t.flush();
+    expect(t.input.getAttribute("aria-expanded")).toBe("true");
+    expect(t.input.getAttribute("aria-activedescendant")).toBe("pal-0");
+    expect(t.list.innerHTML).toContain('data-i="0" id="pal-0" aria-selected="true"');
+    t.key("ArrowDown");
+    expect(t.input.getAttribute("aria-activedescendant")).toBe("pal-1");
+    // (The fake DOM does not materialise innerHTML children, so only the input's attribute is observable here.)
+    t.type("zzzz-no-such-file");
+    expect(t.input.getAttribute("aria-activedescendant")).toBeNull();
+    t.p.close();
+    expect(t.input.getAttribute("aria-expanded")).toBe("false");
+  });
+
   test("starts hidden; open shows, focuses and loads the index once", async () => {
     const t = await make();
     expect(t.p.isOpen).toBe(false);

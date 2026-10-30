@@ -211,3 +211,28 @@ describe("DiffView", () => {
     expect(t.el.style["--code-size"]).toBe("20px");
   });
 });
+
+describe("live reload keeps the reader's place", () => {
+  const make = () => {
+    const v = new D.DiffView({ path: "a.ts", letter: "M", label: "Modified", vs: "vs main" }, "ts", 13);
+    return { v, el: v.el as unknown as FakeElement };
+  };
+  const body = (n: number, edits: Record<number, string>) => Array.from({ length: n }, (_, i) => edits[i] ?? `line ${i}`).join("\n") + "\n";
+
+  test("an edit inside a hunk keeps opened gaps and the current hunk; a new hunk starts over", () => {
+    const t = make();
+    const old = body(60, {});
+    t.v.setTexts(old, body(60, { 10: "changed A", 50: "changed B" }));
+    flush();
+    const v = t.v as unknown as { open: Set<number>; cur: number; hunks: unknown[] };
+    expect(v.hunks.length).toBe(2);
+    v.open.add(1);
+    v.cur = 1;
+    t.v.setTexts(old, body(60, { 10: "changed A again", 50: "changed B" }));
+    expect([...v.open]).toEqual([1]);
+    expect(v.cur).toBe(1);
+    t.v.setTexts(old, body(60, { 10: "changed A", 30: "new hunk", 50: "changed B" }));
+    expect(v.open.size).toBe(0);
+    expect(v.cur).toBe(-1);
+  });
+});

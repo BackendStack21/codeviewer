@@ -68,7 +68,7 @@ export class SearchView {
     this.input = h("input", { class: "sv-query", spellcheck: "false", placeholder: "Search", "aria-label": "Search in files" });
     this.include = h("input", { class: "sv-include", spellcheck: "false", placeholder: "files to include", "aria-label": "Files to include" });
     this.exclude = h("input", { class: "sv-exclude", spellcheck: "false", placeholder: "files to exclude", "aria-label": "Files to exclude" });
-    this.results = h("div", { class: "sv-results", role: "listbox", tabindex: "0" });
+    this.results = h("div", { class: "sv-results", role: "listbox", tabindex: "0", "aria-label": "Search results" });
     this.progress = h("div", { class: "sv-progress", hidden: true });
     const refresh = h("button", { class: "sv-refresh", type: "button" }, "Refresh");
     refresh.addEventListener("click", () => void this.run());
@@ -369,15 +369,17 @@ export class SearchView {
         if (g.collapsed) continue;
         const pv = m.preview;
         const on = i === this.sel;
-        html += `<div class="sv-row${on ? " sel" : ""}" data-i="${i}" role="option"${on ? ' aria-selected="true"' : ""}><span class="sv-ln">${m.line}</span><span class="sv-pv">${safe(pv.slice(0, m.pcol))}<mark>${safe(pv.slice(m.pcol, m.pcol + m.len))}</mark>${safe(pv.slice(m.pcol + m.len))}</span></div>`;
+        html += `<div class="sv-row${on ? " sel" : ""}" data-i="${i}" id="sv-${i}" role="option" aria-selected="${on}"><span class="sv-ln">${m.line}</span><span class="sv-pv">${safe(pv.slice(0, m.pcol))}<mark>${safe(pv.slice(m.pcol, m.pcol + m.len))}</mark>${safe(pv.slice(m.pcol + m.len))}</span></div>`;
       }
     });
     const n = d ? d.matches : total;
     const files = d ? d.files : this.groups.length;
-    let head = `<div class="sv-summary">${plural(n, "result", "results")} in ${plural(files, "file", "files")}</div>`;
+    let head = `<div class="sv-summary"${d ? ' role="status"' : ""}>${plural(n, "result", "results")} in ${plural(files, "file", "files")}</div>`;
     if (d?.truncated === "matches") head += `<div class="sv-note sv-warn">Showing first 2,000 results</div>`;
     if (d?.truncated === "time") head += `<div class="sv-note sv-warn">Search timed out - showing partial results</div>`;
     if (d?.error || (!d && !this.running)) head += `<div class="sv-note sv-warn">Search ended early - showing partial results</div>`;
     this.results.innerHTML = head + skipped + html;
+    if (this.sel >= 0 && this.visible(this.sel)) this.results.setAttribute("aria-activedescendant", `sv-${this.sel}`);
+    else this.results.removeAttribute("aria-activedescendant");
   }
 }

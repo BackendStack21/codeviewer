@@ -112,6 +112,15 @@ describe("parseGlobs / filterByGlobs (AC-13, AC-26)", () => {
     expect(S.filterByGlobs(all, ["src/**/*.ts"], [])).toEqual(["src/a.ts", "src/deep/b.ts"]);
     expect(S.filterByGlobs(all, ["src/**/*.ts", "docs/**"], [])).toEqual(["src/a.ts", "src/deep/b.ts", "docs/readme.md"]);
   });
+  test("editor-style patterns: no slash matches at any depth, a bare name is a folder, a trailing slash means contents", () => {
+    expect(S.filterByGlobs(all, ["*.ts"], [])).toEqual(["src/a.ts", "src/deep/b.ts"]);
+    expect(S.filterByGlobs(all, ["src"], [])).toEqual(["src/a.ts", "src/deep/b.ts", "src/c.md"]);
+    expect(S.filterByGlobs(all, ["deep"], [])).toEqual(["src/deep/b.ts"]);
+    expect(S.filterByGlobs(all, ["src/"], [])).toEqual(["src/a.ts", "src/deep/b.ts", "src/c.md"]);
+    expect(S.filterByGlobs(all, ["a.txt"], [])).toEqual(["a.txt"]);
+    expect(S.filterByGlobs(all, [], ["*.md"])).toEqual(["a.txt", "src/a.ts", "src/deep/b.ts"]);
+    expect(S.filterByGlobs(all, [], ["deep"])).toEqual(["a.txt", "src/a.ts", "src/c.md", "docs/readme.md"]);
+  });
   test("exclude removes matching paths and wins over include", () => {
     expect(S.filterByGlobs(all, [], ["src/**"])).toEqual(["a.txt", "docs/readme.md"]);
     expect(S.filterByGlobs(all, ["src/**"], ["**/*.md"])).toEqual(["src/a.ts", "src/deep/b.ts"]);

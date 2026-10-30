@@ -63,8 +63,12 @@ export function detectInstall(
 /** Compares "1.2.3" style versions (a pre-release sorts before its release). */
 export function compareVersions(a: string, b: string): number {
   const parse = (v: string) => {
-    const [core, pre] = v.replace(/^v/, "").split("-", 2);
-    return { nums: core!.split(".").map((n) => Number.parseInt(n, 10) || 0), pre: pre ?? "" };
+    // Build metadata (+sha) never orders; everything after the first "-" is the pre-release.
+    const base = v.replace(/^v/, "").replace(/\+.*$/, "");
+    const dash = base.indexOf("-");
+    const core = dash < 0 ? base : base.slice(0, dash);
+    const pre = dash < 0 ? "" : base.slice(dash + 1);
+    return { nums: core.split(".").map((n) => Number.parseInt(n, 10) || 0), pre };
   };
   const x = parse(a);
   const y = parse(b);
@@ -75,7 +79,24 @@ export function compareVersions(a: string, b: string): number {
   if (x.pre === y.pre) return 0;
   if (!x.pre) return 1;
   if (!y.pre) return -1;
-  return x.pre < y.pre ? -1 : 1;
+  // Semver §11: dot-separated identifiers, numeric ones numerically (rc.10 > rc.9), numeric
+  // before alphanumeric, and a prefix before anything longer.
+  const xs = x.pre.split(".");
+  const ys = y.pre.split(".");
+  for (let i = 0; i < Math.max(xs.length, ys.length); i++) {
+    const p = xs[i];
+    const q = ys[i];
+    if (p === undefined) return -1;
+    if (q === undefined) return 1;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn) {
+      const d = Number(p) - Number(q);
+      if (d) return Math.sign(d);
+    } else if (pn !== qn) return pn ? -1 : 1;
+    else if (p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
 }
 
 export interface Release {
@@ -106,7 +127,16 @@ export interface UpdaterOptions {
   publicKey?: string;
   install?: Install;
   api?: string;
+  /** Hosts release assets may be downloaded from (always over https); defaults to GitHub's. */
+  assetHosts?: string[];
 }
+
+/** Where GitHub serves release assets (the initial URL; GitHub's own redirects are followed). */
+export const ASSET_HOSTS = ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
+/** SHA256SUMS and its signature are tiny; a hostile host must not make us buffer gigabytes. */
+const MAX_SUMS_BYTES = 1 << 20;
+/** No release asset is anywhere near this; the download stops here before any verification. */
+const MAX_ASSET_BYTES = 1024 * 1024 * 1024;
 
 /** Parses a SHA256SUMS file into name → hex digest. */
 export function parseSums(text: string): Map<string, string> {
@@ -151,6 +181,7 @@ export class Updater {
   private fetch: typeof fetch;
   private publicKey: string;
   private api: string;
+  private assetHosts: string[];
   private cached: { info: UpdateInfo; release: Release | null } | null = null;
   private busy = false;
 
@@ -160,6 +191,19 @@ export class Updater {
     this.publicKey = o.publicKey ?? UPDATE_PUBLIC_KEY;
     this.install = o.install ?? detectInstall();
     this.api = o.api ?? `https://api.github.com/repos/${REPO}/releases/latest`;
+    this.assetHosts = o.assetHosts ?? ASSET_HOSTS;
+  }
+
+  /** Release assets come only from the release host, over TLS: the API answer names the URLs. */
+  private assetUrl(url: string): string {
+    let u: URL;
+    try {
+      u = new URL(url);
+    } catch {
+      throw new Error("release asset has an invalid URL");
+    }
+    if (u.protocol !== "https:" || !this.assetHosts.includes(u.hostname)) throw new Error(`refusing to download from ${u.host}`);
+    return u.href;
   }
 
   get installing() {
@@ -217,9 +261,12 @@ export class Updater {
   }
 
   private async get(url: string): Promise<Uint8Array> {
-    const res = await this.fetch(url, { headers: { "user-agent": `codeviewer/${this.version}` } });
+    const res = await this.fetch(this.assetUrl(url), { headers: { "user-agent": `codeviewer/${this.version}` } });
     if (!res.ok) throw new Error(`download failed (${res.status}): ${url}`);
-    return new Uint8Array(await res.arrayBuffer());
+    if (Number(res.headers.get("content-length")) > MAX_SUMS_BYTES) throw new Error("checksum file is too large");
+    const body = new Uint8Array(await res.arrayBuffer());
+    if (body.length > MAX_SUMS_BYTES) throw new Error("checksum file is too large");
+    return body;
   }
 
   /**
@@ -278,18 +325,23 @@ export class Updater {
 
   /** Streams a download to disk, hashing as it goes. Returns the hex SHA-256. */
   private async download(url: string, dest: string, pct: (n: number) => void): Promise<string> {
-    const res = await this.fetch(url, { headers: { "user-agent": `codeviewer/${this.version}` } });
+    const res = await this.fetch(this.assetUrl(url), { headers: { "user-agent": `codeviewer/${this.version}` } });
     if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
     const total = Number(res.headers.get("content-length")) || 0;
+    if (total > MAX_ASSET_BYTES) throw new Error("release asset is too large");
     const hash = new Bun.CryptoHasher("sha256");
     const sink = Bun.file(dest).writer();
     let got = 0;
     let last = -1;
     const reader = res.body.getReader();
     for (let r = await reader.read(); !r.done; r = await reader.read()) {
+      got += r.value.length;
+      if (got > MAX_ASSET_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw new Error("release asset is too large");
+      }
       hash.update(r.value);
       sink.write(r.value);
-      got += r.value.length;
       const p = total ? Math.floor((got / total) * 100) : 0;
       if (p !== last) {
         last = p;

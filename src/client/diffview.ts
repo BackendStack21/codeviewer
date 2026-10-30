@@ -167,11 +167,16 @@ export class DiffView {
     this.scroller.addEventListener("scroll", () => this.onScroll(), { passive: true });
     this.ro = new ResizeObserver(() => this.schedule());
     this.ro.observe(this.scroller);
-    this.rowsEl.addEventListener("click", (e) => {
+    const openGap = (e: Event) => {
       const gap = (e.target as HTMLElement).closest<HTMLElement>(".dr-gap");
       if (!gap) return;
+      e.preventDefault();
       this.open.add(Number(gap.dataset.g));
       this.rebuild();
+    };
+    this.rowsEl.addEventListener("click", openGap);
+    this.rowsEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") openGap(e);
     });
   }
 
@@ -221,8 +226,14 @@ export class DiffView {
       this.newLines = splitLines(newText ?? "");
       this.hlA = new Highlighter(this.lang, this.oldLines);
       this.hlB = new Highlighter(this.lang, this.newLines);
-      this.hunks = diffLines(this.oldLines, this.newLines);
-      this.open.clear();
+      const hunks = diffLines(this.oldLines, this.newLines);
+      // A reload that keeps the same number of hunks (an edit inside one) keeps the opened gaps
+      // and the current hunk; anything else starts over.
+      if (hunks.length !== this.hunks.length) {
+        this.open.clear();
+        this.cur = -1;
+      }
+      this.hunks = hunks;
       if (this.hunks.length) {
         this.notice.hidden = true;
         this.rows = buildRows(this.hunks, this.oldLines.length, this.newLines.length, this.open);
@@ -232,7 +243,7 @@ export class DiffView {
         this.showNotice(oldText === newText ? "No differences." : "Only line endings or the final newline changed.");
       }
     }
-    this.cur = -1;
+    if (this.cur >= this.hunks.length) this.cur = -1;
     this.updateCounts();
     this.relayout();
     this.scroller.scrollTop = Math.min(top, Math.max(0, this.rows.length * this.lh - (this.scroller.clientHeight || 0)));
@@ -342,7 +353,7 @@ export class DiffView {
     for (let i = first; i < last; i++) {
       const r = this.rows[i]!;
       if (r.k === "gap") {
-        html += `<div class="dr dr-gap" data-g="${r.g}" role="button" title="Show these lines"><span class="dn"></span><span class="dn"></span><span class="dm">⋯</span><span class="dt">${r.n.toLocaleString()} unchanged lines</span></div>`;
+        html += `<div class="dr dr-gap" data-g="${r.g}" role="button" tabindex="0" title="Show these lines"><span class="dn"></span><span class="dn"></span><span class="dm">⋯</span><span class="dt">${r.n.toLocaleString()} unchanged lines</span></div>`;
         continue;
       }
       let cls = `dr dr-${r.k}`;

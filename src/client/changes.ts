@@ -252,7 +252,13 @@ export class ChangesView {
         r.setAttribute("aria-selected", String(k === this.sel));
       });
     } else this.render();
+    this.syncActive();
     this.list.querySelector(".ch-row.sel")?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  private syncActive() {
+    if (this.sel >= 0 && this.sel < this.files.length) this.list.setAttribute("aria-activedescendant", `ch-${this.sel}`);
+    else this.list.removeAttribute("aria-activedescendant");
   }
 
   private accept(pin: boolean) {
@@ -326,10 +332,11 @@ export class ChangesView {
           ? `<span class="ch-bin">—</span>`
           : `<span class="ch-add">${f.added ? `+${f.added}` : ""}</span><span class="ch-del">${f.removed ? `−${f.removed}` : ""}</span>`;
       html +=
-        `<div class="${cls.join(" ")}" data-i="${i}" role="option" aria-selected="${i === this.sel}" title="${esc(showHidden(f.path))} · ${labelOf(f)}">` +
+        `<div class="${cls.join(" ")}" data-i="${i}" id="ch-${i}" role="option" aria-selected="${i === this.sel}" title="${esc(showHidden(f.path))} · ${labelOf(f)}${cls.includes("seen") ? " · reviewed (dims until the file changes again)" : ""}">` +
         `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${counts}</div>`;
     });
     if (d.truncated) html += `<div class="sv-note sv-warn">Showing the first ${files.length.toLocaleString()} files</div>`;
     this.list.innerHTML = html;
+    this.syncActive();
   }
 }

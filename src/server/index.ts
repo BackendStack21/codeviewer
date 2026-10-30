@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 
 /** Directories that are never worth walking for quick-open. */
@@ -69,11 +69,14 @@ export class FileIndex {
     await Promise.all(
       paths.map(async (p) => {
         if (p.split("/").some((seg) => HEAVY_DIRS.has(seg))) return;
-        const st = await stat(path.join(this.root, p)).catch(() => null);
+        const abs = path.join(this.root, p);
+        const st = await stat(abs).catch(() => null);
         if (st?.isDirectory()) {
           // Events for known directories are just content churn inside them. A new (or
           // moved-in) directory may hold many files: rescan from scratch.
           if (!this.knownDirs().has(p)) {
+            // Unless it is a symlink out of the root, which build() never lists.
+            if (!(await this.inside(abs))) return;
             this.invalidate();
             changed = true;
           }
@@ -95,14 +98,27 @@ export class FileIndex {
     return changed;
   }
 
+  private rootReal: Promise<string> | null = null;
+
+  /** True when `abs` resolves to the root or somewhere beneath it (symlinks followed). */
+  private async inside(abs: string): Promise<boolean> {
+    const root = await (this.rootReal ??= realpath(this.root).catch(() => this.root));
+    const real = await realpath(abs).catch(() => null);
+    return real !== null && (real === root || real.startsWith(root + path.sep));
+  }
+
   private async build(): Promise<Set<string>> {
     const out: string[] = [];
+    const root = await (this.rootReal ??= realpath(this.root).catch(() => this.root));
+    // Realpaths reached through a symlink: a link to its own ancestor, or a second link to the
+    // same target, is not walked again (real directories always are).
+    const linked = new Set<string>();
     // Breadth-first so shallow files win when the cap is hit.
-    let level: string[] = [""];
+    let level: { rel: string; real: string }[] = [{ rel: "", real: root }];
     while (level.length && out.length < MAX_FILES) {
-      const next: string[] = [];
+      const next: typeof level = [];
       await Promise.all(
-        level.map(async (rel) => {
+        level.map(async ({ rel, real }) => {
           let dirents;
           try {
             dirents = await readdir(path.join(this.root, rel), { withFileTypes: true });
@@ -111,8 +127,21 @@ export class FileIndex {
           }
           for (const d of dirents) {
             const p = rel ? rel + "/" + d.name : d.name;
-            if (d.isDirectory()) {
-              if (!HEAVY_DIRS.has(d.name)) next.push(p);
+            if (d.isSymbolicLink()) {
+              // Symlinks are followed only inside the root: a link to ~ or / is neither listed nor walked.
+              const abs = path.join(this.root, p);
+              const target = await realpath(abs).catch(() => null);
+              if (!target || !(target === root || target.startsWith(root + path.sep))) continue;
+              const st = await stat(abs).catch(() => null);
+              if (!st) continue;
+              if (!st.isDirectory()) {
+                if (out.length < MAX_FILES) out.push(p);
+              } else if (!HEAVY_DIRS.has(d.name) && !linked.has(target) && real !== target && !real.startsWith(target + path.sep)) {
+                linked.add(target);
+                next.push({ rel: p, real: target });
+              }
+            } else if (d.isDirectory()) {
+              if (!HEAVY_DIRS.has(d.name)) next.push({ rel: p, real: real + path.sep + d.name });
             } else if (out.length < MAX_FILES) {
               out.push(p);
             }

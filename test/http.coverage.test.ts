@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile, mkdir, realpath, symlink, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, realpath, symlink, readFile, truncate } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startServer, VERSION } from "../src/server/http.ts";
@@ -475,3 +475,54 @@ test("background auto-update check runs once per launch and feeds /api/update", 
     process.env.CODEVIEWER_NO_UPDATE_CHECK = prev ?? "1";
   }
 }, 10000);
+
+test("/api/raw honours a single byte range (206/416) so media can seek, also under ?limit", async () => {
+  const r = (range: string, extra = "") => get(`/api/raw?path=noext${extra}`, { ...auth, range });
+  expect((await get("/api/raw?path=noext")).headers.get("accept-ranges")).toBe("bytes");
+  const mid = await r("bytes=10-19");
+  expect(mid.status).toBe(206);
+  expect(mid.headers.get("content-range")).toBe("bytes 10-19/1000");
+  expect((await mid.text()).length).toBe(10);
+  const tail = await r("bytes=990-");
+  expect(tail.status).toBe(206);
+  expect(tail.headers.get("content-range")).toBe("bytes 990-999/1000");
+  expect((await tail.text()).length).toBe(10);
+  const suffix = await r("bytes=-5");
+  expect(suffix.headers.get("content-range")).toBe("bytes 995-999/1000");
+  expect((await suffix.text()).length).toBe(5);
+  const over = await r("bytes=0-5000");
+  expect(over.headers.get("content-range")).toBe("bytes 0-999/1000");
+  expect((await over.text()).length).toBe(1000);
+  const bad = await r("bytes=2000-");
+  expect(bad.status).toBe(416);
+  expect(bad.headers.get("content-range")).toBe("bytes */1000");
+  expect((await r("bytes=20-10")).status).toBe(416);
+  // The limit caps the resource the range applies to.
+  const lim = await r("bytes=90-200", "&limit=100");
+  expect(lim.status).toBe(206);
+  expect(lim.headers.get("content-range")).toBe("bytes 90-99/100");
+  expect((await lim.text()).length).toBe(10);
+  // Unparseable ranges are ignored, not refused.
+  expect((await r("bytes=a-b")).status).toBe(200);
+  expect((await get("/api/info")).status).toBe(200);
+});
+
+test("/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks", async () => {
+  const p = path.join(dir, "shrink.bin");
+  await writeFile(p, new Uint8Array(2 * 1024 * 1024));
+  const r = await get("/api/raw?path=shrink.bin");
+  expect(r.status).toBe(200);
+  const reader = r.body!.getReader();
+  const first = await reader.read();
+  expect(first.done).toBe(false);
+  await truncate(p, 10);
+  // The transfer fails (the stream is errored): never a quiet success with a truncated body.
+  let failed = false;
+  try {
+    for (let c = await reader.read(); !c.done; c = await reader.read());
+  } catch {
+    failed = true;
+  }
+  expect(failed).toBe(true);
+  expect((await get("/api/info")).status).toBe(200);
+});

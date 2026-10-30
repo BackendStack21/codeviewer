@@ -26,6 +26,8 @@ export class Line {
   wrapped = false;
   /** High-water mark: cells at or beyond `hw` are guaranteed blank (default attributes). */
   hw = 0;
+  /** True once the line was reported through `onLine` (cleared by any later print). */
+  spoken = false;
 
   constructor(cols: number, bg = DEFAULT) {
     this.text = new Array(cols).fill(" ");
@@ -104,6 +106,7 @@ export class Line {
     this.bg.fill(bg, 0, n);
     this.fl.fill(0, 0, n);
     this.wrapped = false;
+    this.spoken = false;
     this.hw = bg === DEFAULT ? 0 : this.text.length;
   }
 
@@ -167,6 +170,11 @@ export interface TerminalHost {
   cwd?(path: string): void;
   /** Colors for OSC 10/11/4 queries, as #rrggbb. */
   colors?(): { fg: string; bg: string; cursor: string; palette: string[] };
+  /**
+   * A line of output the program finished (line feed past it, or it scrolled into history),
+   * trimmed; for assistive technology. Not called in the alternate screen or while `silent`.
+   */
+  onLine?(text: string): void;
 }
 
 const enum S {
@@ -212,6 +220,9 @@ export class Terminal {
   /** Bumped when scrollback is trimmed, so absolute selections can be invalidated. */
   trimmed = 0;
   lastChar = "";
+  /** Where lastChar was printed; a ZWJ join only applies when the cursor is still there. */
+  private lastX = -1;
+  private lastY = -1;
 
   private state = S.Ground;
   private params: number[] = [];
@@ -340,6 +351,7 @@ export class Terminal {
           return;
         }
         if (c === 0x9c) return this.oscEnd();
+        if (c < 0x20) return; // other C0 controls are ignored inside a string (VT500)
         if (this.osc.length < 1 << 20) this.osc += s[i];
         return;
       case S.OscEsc:
@@ -491,8 +503,9 @@ export class Terminal {
       }
       return;
     }
-    // Emoji ZWJ sequences: the glyph after a ZWJ joins the previous cluster.
-    if (this.lastChar.endsWith("‍")) {
+    // Emoji ZWJ sequences: the glyph after a ZWJ joins the previous cluster (unless the
+    // cursor was moved in between: then it is an ordinary print at the new position).
+    if (this.lastChar.endsWith("‍") && cur.x === this.lastX && cur.y === this.lastY) {
       const line = this.lines[cur.y]!;
       let x = cur.wrapPending ? cur.x : cur.x - 1;
       if (x > 0 && line.text[x] === "") x--;
@@ -532,12 +545,15 @@ export class Terminal {
       line.fl[cur.x + 1] = cur.fl;
     }
     this.dirty[cur.y] = 1;
+    line.spoken = false;
     this.lastChar = ch;
     cur.x += w;
     if (cur.x >= this.cols) {
       cur.x = this.cols - 1;
       cur.wrapPending = this.modes.autowrap;
     }
+    this.lastX = cur.x;
+    this.lastY = cur.y;
   }
 
   /** Writing over half of a wide character must erase the other half. */
@@ -598,6 +614,7 @@ export class Terminal {
 
   /** IND: move down, scrolling the region when at its bottom margin. */
   index() {
+    if (this.host.onLine) this.announce(this.lines[this.cur.y]!);
     if (this.cur.y === this.bottom) this.scrollUp(1);
     else if (this.cur.y < this.rows - 1) this.cur.y++;
   }
@@ -624,6 +641,7 @@ export class Terminal {
       // and only the cells it actually used need clearing. History keeps a compact copy.
       const used = old.usedWidth();
       if (toScrollback) {
+        if (this.host.onLine) this.announce(old);
         this.scrollback.push(old.compactCopy(used));
         this.scrolledOff++;
       }
@@ -635,6 +653,15 @@ export class Terminal {
       this.trimmed++;
     }
     this.markRegion();
+  }
+
+  /** Reports a completed, non-empty line to the host once (screen reader log). */
+  private announce(line: Line) {
+    if (line.spoken || this.alt || line.hw === 0) return;
+    line.spoken = true; // replayed history is consumed silently, and never reported later
+    if (this.silent) return;
+    const text = line.toString();
+    if (text) this.host.onLine!(text);
   }
 
   scrollDown(n: number) {
@@ -651,8 +678,11 @@ export class Terminal {
     const line = this.lines[this.cur.y]!;
     const x = this.cur.x;
     n = Math.min(n, this.cols - x);
+    this.splitWide(line, x);
     for (let i = this.cols - 1; i >= x + n; i--) line.copyCell(i, line, i - n);
     line.clear(x, x + n, this.cur.bg);
+    // A wide character pushed onto the last column lost its second half.
+    if (line.fl[this.cols - 1]! & WIDE) line.clear(this.cols - 1, this.cols, this.cur.bg);
     this.markDirty(this.cur.y);
   }
 
@@ -660,9 +690,15 @@ export class Terminal {
     const line = this.lines[this.cur.y]!;
     const x = this.cur.x;
     n = Math.min(n, this.cols - x);
+    this.splitWide(line, x);
     for (let i = x; i < this.cols - n; i++) line.copyCell(i, line, i + n);
     line.clear(this.cols - n, this.cols, this.cur.bg);
     this.markDirty(this.cur.y);
+  }
+
+  /** Shifting cells from the second half of a wide character blanks the character (as xterm does). */
+  private splitWide(line: Line, x: number) {
+    if (x > 0 && line.text[x] === "" && line.fl[x - 1]! & WIDE) line.clear(x - 1, x, this.cur.bg);
   }
 
   private insertLines(n: number) {
@@ -1084,6 +1120,9 @@ export class Terminal {
       this.cur.bg = DEFAULT;
       this.cur.fl = 0;
       this.cur.originMode = false;
+      this.cur.charsets = [false, false];
+      this.cur.gl = 0;
+      this.saved = null;
       this.top = 0;
       this.bottom = this.rows - 1;
       return;

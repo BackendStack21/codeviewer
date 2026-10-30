@@ -7,6 +7,8 @@ const FLUSH_MS = 4;
 const FLUSH_BYTES = 64 * 1024;
 /** Above this much unsent data the client is lagging: stop streaming, resync on drain. */
 const HIGH_WATER = 8 * 1024 * 1024;
+/** A shell that exits while nobody is attached (page reload) is kept this long for its exit notice. */
+const EXIT_GRACE_MS = 60_000;
 
 /** Private modes that change how input/output must be interpreted; restored on replay. */
 const TRACKED = [1, 25, 1000, 1002, 1003, 1004, 1006, 2004, 47, 1047, 1049];
@@ -45,6 +47,7 @@ class PtySession {
   private lagging = false;
   ws: ServerWebSocket<PtySocketData> | null = null;
   exited: number | null = null;
+  private grace: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     readonly id: string,
@@ -65,11 +68,25 @@ class PtySession {
     this.term = (this.proc as unknown as { terminal: PtySession["term"] }).terminal;
     this.proc.exited.then((code) => {
       this.exited = code;
-      this.flush(); // deliver the last output before the exit notice
-      this.ws?.send(JSON.stringify({ t: "exit", code }));
-      this.ws?.close(1000, "exited");
-      this.onGone(this.id);
+      if (!this.ws) {
+        // Nobody attached (page reload mid-exit): keep the final output and exit code for the
+        // next attach, unless no one comes back within the grace period.
+        this.grace = setTimeout(() => this.onGone(this.id), EXIT_GRACE_MS);
+        this.grace.unref?.();
+        return;
+      }
+      // Deliver the last output before the exit notice; a lagging client gets it via the replay ring.
+      if (this.lagging) this.sendReplay(this.ws);
+      else this.flush();
+      this.finish(this.ws);
     });
+  }
+
+  /** Exit notice, then the socket is closed and the session forgotten. */
+  private finish(ws: ServerWebSocket<PtySocketData>) {
+    ws.send(JSON.stringify({ t: "exit", code: this.exited }));
+    ws.close(1000, "exited");
+    this.onGone(this.id);
   }
 
   private output(data: Uint8Array) {
@@ -148,6 +165,13 @@ class PtySession {
   }
 
   attach(ws: ServerWebSocket<PtySocketData>) {
+    if (this.exited !== null) {
+      // The shell ended while detached: replay what it printed last, then the exit notice.
+      if (this.grace) clearTimeout(this.grace);
+      this.sendReplay(ws);
+      this.finish(ws);
+      return;
+    }
     if (this.ws && this.ws !== ws) this.ws.close(4000, "replaced");
     this.ws = ws;
     this.lagging = false;
@@ -170,6 +194,11 @@ class PtySession {
   }
 
   kill() {
+    if (this.grace) {
+      clearTimeout(this.grace);
+      this.onGone(this.id);
+      return;
+    }
     try {
       // Closing the PTY hangs up the whole session (every job, not just the shell).
       this.term.close();

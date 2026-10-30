@@ -246,3 +246,72 @@ test("a corrupt repo yields a status with no file entries rather than throwing",
     await rename(path.join(gd, "HEAD.bak"), path.join(gd, "HEAD"));
   }
 });
+
+test("a linked worktree does not report the main worktree's merge, and a nested repo is not an untracked file", async () => {
+  const wt = path.join(dir, "wt");
+  sh(["worktree", "add", "-q", "-b", "wt-branch", wt]);
+  try {
+    const gitDir = sh(["rev-parse", "--absolute-git-dir"]).trim();
+    await writeFile(path.join(gitDir, "MERGE_HEAD"), sh(["rev-parse", "HEAD"]));
+    try {
+      expect((await git()).status().then((s) => s.state)).resolves.toBe("merging");
+      expect((await git(wt)).status().then((s) => s.state)).resolves.toBe(null);
+    } finally {
+      await rm(path.join(gitDir, "MERGE_HEAD"), { force: true });
+    }
+    await mkdir(path.join(wt, "inner"));
+    sh(["init", "-q"], path.join(wt, "inner"));
+    await writeFile(path.join(wt, "inner", "x.txt"), "x\n");
+    const c = await (await git(wt)).changes("head");
+    expect(c.files.map((f) => f.path)).not.toContain("inner/");
+  } finally {
+    sh(["worktree", "remove", "--force", wt]);
+  }
+});
+
+test("status: a viewed subfolder that is itself ignored is reported as rootIgnored", async () => {
+  await mkdir(path.join(repo, "ignoreddir"));
+  await writeFile(path.join(repo, "ignoreddir", "x.txt"), "x");
+  const { readFile } = await import("node:fs/promises");
+  const prior = await readFile(path.join(repo, ".gitignore"), "utf8").catch(() => null);
+  await writeFile(path.join(repo, ".gitignore"), `${prior ?? ""}ignoreddir/\n`);
+  try {
+    const sub = await git(path.join(repo, "ignoreddir"));
+    const s = await sub.status();
+    expect(s.rootIgnored).toBe(true);
+    expect(s.files).toEqual({});
+    const top = await (await git()).status();
+    expect(top.rootIgnored).toBe(false);
+    expect(top.files["ignoreddir/"]).toBe("!!");
+    const plain = await (await git(path.join(repo, "sub"))).status();
+    expect(plain.rootIgnored).toBe(false);
+  } finally {
+    if (prior === null) await rm(path.join(repo, ".gitignore"), { force: true });
+    else await writeFile(path.join(repo, ".gitignore"), prior);
+    await rm(path.join(repo, "ignoreddir"), { recursive: true, force: true });
+  }
+});
+
+test("detectBase: on main, the upstream origin/main wins over a stale local master", async () => {
+  const r = path.join(dir, "onmain");
+  await mkdir(r);
+  sh(["init", "-q", "-b", "main"], r);
+  await writeFile(path.join(r, "f.txt"), "1\n");
+  sh(["add", "."], r);
+  sh(["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qm", "one"], r);
+  sh(["branch", "master"], r); // stale: stays on the first commit
+  await writeFile(path.join(r, "f.txt"), "1\n2\n");
+  sh(["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-qam", "two"], r);
+  const remote = path.join(dir, "onmain-remote.git");
+  sh(["init", "-q", "--bare", "-b", "main", remote], dir);
+  sh(["remote", "add", "origin", remote], r);
+  sh(["push", "-q", "-u", "origin", "main"], r); // no origin/HEAD: `remote add` + push never sets it
+  expect(Bun.spawnSync(["git", "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], { cwd: r }).exitCode).not.toBe(0);
+  const g = await git(r);
+  const c = await g.changes("branch");
+  expect(c.base?.name).toBe("origin/main");
+  expect(c.base?.same).toBe(true);
+  // Off main, the local branches come first again.
+  sh(["checkout", "-qb", "topic"], r);
+  expect((await g.changes("branch")).base?.name).toBe("main");
+});

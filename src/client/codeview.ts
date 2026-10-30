@@ -106,7 +106,7 @@ export class CodeView {
     this.sizer = h("div", { class: "code-sizer" }, this.linesEl);
     this.scroller = h("div", { class: "code-scroll", tabindex: "-1" }, this.sizer);
     this.findInput = h("input", { class: "find-input", placeholder: "Find", spellcheck: "false", "aria-label": "Find in file" });
-    this.findCount = h("span", { class: "find-count" });
+    this.findCount = h("span", { class: "find-count", role: "status", "aria-live": "polite" });
     const toggle = (label: string, key: keyof CodeView["opts"], title: string) => {
       const b = h("button", { class: "find-opt", title, "aria-pressed": "false" }, label);
       b.addEventListener("click", () => {
@@ -412,7 +412,9 @@ export class CodeView {
       this.hunks = [{ a0: 0, a1: 0, b0: 0, b1: n }];
       this.gitMarks = new Uint8Array(n).fill(ADDED);
     } else if (this.gitBase) {
-      this.hunks = diffLines(this.gitBase, this.lines);
+      // An empty buffer is one empty line in the view but no lines for the diff (as the base is).
+      const cur = n === 1 && this.lines[0] === "" ? [] : this.lines;
+      this.hunks = diffLines(this.gitBase, cur);
       this.gitMarks = gutterMarks(this.hunks, n);
     } else {
       this.hunks = [];
@@ -478,8 +480,19 @@ export class CodeView {
     );
   }
 
-  /** Read-only peek at what HEAD had for the change under `line`. */
-  private togglePeek(line: number, rowEl: HTMLElement) {
+  /** Peeks at HEAD for the change on the active line; false when that line is unchanged. */
+  peekCurrent(): boolean {
+    const line = this.activeLine >= 0 ? this.activeLine : Math.floor(this.scroller.scrollTop / this.lh);
+    if (!this.gitMarks[line]) {
+      this.closePeek();
+      return false;
+    }
+    this.togglePeek(line, null);
+    return true;
+  }
+
+  /** Read-only peek at what HEAD had for the change under `line` (`rowEl` null: computed from the line). */
+  private togglePeek(line: number, rowEl: HTMLElement | null) {
     const hk = this.hunkAt(line);
     if (!hk || (this.peek && this.peek.dataset.hunk === `${hk.b0}:${hk.a0}`)) return this.closePeek();
     this.closePeek();
@@ -500,8 +513,8 @@ export class CodeView {
     box.insertAdjacentHTML("beforeend", body);
     box.dataset.hunk = `${hk.b0}:${hk.a0}`;
     const host = this.el.getBoundingClientRect();
-    const row = rowEl.getBoundingClientRect();
-    box.style.top = `${row.bottom - host.top + 2}px`;
+    const rowBottom = rowEl ? rowEl.getBoundingClientRect().bottom - host.top : this.scroller.getBoundingClientRect().top - host.top + (line + 1) * this.lh - this.scroller.scrollTop;
+    box.style.top = `${rowBottom + 2}px`;
     box.style.left = `${this.gutterW - 6}px`;
     this.el.append(box);
     this.peek = box;
@@ -522,7 +535,8 @@ export class CodeView {
     const lines = this.lines;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i]!;
-      if (l.length > max) max = l.length + (l.includes("\t") ? countTabs(l) * 3 : 0);
+      const w = l.length + (l.includes("\t") ? countTabs(l) * 3 : 0);
+      if (w > max) max = w;
     }
     max = Math.min(max, MAX_RENDER_COLS);
     const digits = String(lines.length).length;

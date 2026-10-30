@@ -38,6 +38,8 @@ const corpus: Record<string, (n: number) => string> = {
   "many bracket lines": (n) => "[a](\n".repeat(Math.floor(n / 10)),
   "many quote lines": (n) => "> x\n".repeat(n),
   "many list lines": (n) => "- x\n".repeat(n),
+  "lazy sibling markers after quotes": (n) => "> 1. a\n2. b\n".repeat(Math.floor(n / 10)),
+  "lazy lines after setext headings in quotes": (n) => "> a\n> ===\nb\n".repeat(Math.floor(n / 10)),
 };
 
 describe("AC-9 adversarial inputs", () => {

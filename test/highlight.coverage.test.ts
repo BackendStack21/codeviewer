@@ -82,6 +82,9 @@ describe("highlight: config formats", () => {
     expect(toks("yaml", "name: hello # c")).toEqual(["p:name", "c:# c"]);
     expect(toks("yaml", '  - "quoted": 1')).toEqual(['p:"quoted"', "n:1"]);
     expect(toks("yaml", "key: 'x'")).toEqual(["p:key", "s:'x'"]);
+    // A value's "http:" is not a key: only a colon followed by space or end of line makes a property.
+    expect(toks("yaml", "url: http://example.test/a")).toEqual(["p:url"]);
+    expect(toks("yaml", "flow: {a: 1, b: 2}").filter((t) => t.startsWith("p:"))).toEqual(["p:flow", "p:a", "p:b"]);
   });
 
   test("toml sections and keys", () => {

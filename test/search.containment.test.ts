@@ -27,12 +27,14 @@ afterAll(async () => {
 });
 
 describe("escaping candidates are counted in skipped (AC-7)", () => {
-  test("HTTP: ok.txt matches; the file symlink and the dir symlink count exactly 2 skipped", async () => {
+  test("HTTP: ok.txt matches; the file symlink and the dir symlink are never candidates (the index drops escaping links)", async () => {
     const r = await fx.search({ q: "needle" });
     expect(r.status).toBe(200);
     expect(files(r.events).map((f) => f.path)).toEqual(["ok.txt"]);
-    expect(done(r.events)).toMatchObject({ files: 1, matches: 1, skipped: 2, truncated: false });
+    expect(done(r.events)).toMatchObject({ files: 1, matches: 1, skipped: 0, truncated: false });
     expect(r.text).not.toContain("OUTSIDE-SECRET");
+    expect(r.text).not.toContain("link-file");
+    expect(r.text).not.toContain("linkdir");
   });
 
   test("worker: a file under a symlinked dir and a symlinked file are each skipped, never read", async () => {
@@ -46,7 +48,8 @@ describe("escaping candidates are counted in skipped (AC-7)", () => {
     );
     clearTimeout(timer);
     const d = events.find((e) => e.t === "done") as Extract<S.SearchEvent, { t: "done" }>;
-    expect(d).toMatchObject({ files: 1, matches: 1, skipped: 3, truncated: false });
+    // The two symlink escapes are skipped; a candidate deleted since it was listed is simply gone.
+    expect(d).toMatchObject({ files: 1, matches: 1, skipped: 2, truncated: false });
     expect(JSON.stringify(events)).not.toContain("OUTSIDE-SECRET");
   });
 });

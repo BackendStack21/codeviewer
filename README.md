@@ -87,9 +87,12 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘⇧F / Ctrl+Shift+F | Search in files |
 | F4 / ⇧F4 | Next / previous search result |
 | ⌘B · ⌘⇧E | Toggle sidebar · focus explorer |
-| ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs |
-| ⌘= ⌘- ⌘0 | Font size |
-| ⌘⇧G · ⌥F5 / ⌥⇧F5 | Review changes · next / previous change (then next file) |
+| ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs (in the terminal: switch terminals) |
+| ⌘W in the terminal | Close an exited terminal; a running one asks for a second press (Linux: Ctrl+W stays the shell's) |
+| Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…") |
+| ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
+| ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
+| ⌘/ | Every shortcut and the terminal tips, in your platform's key names |
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
 

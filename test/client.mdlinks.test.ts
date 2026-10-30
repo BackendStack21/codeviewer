@@ -133,12 +133,27 @@ describe("AC-13 repo links", () => {
     expect((v.el as FakeElement).textContent).not.toContain("File not found");
   });
 
-  test("external links are not intercepted", () => {
+  test("external links open in the default browser through the server, never by navigating the window", () => {
     const calls: string[] = [];
-    const v = new V.MarkdownView("[x](https://x.y)", 13, { path: "a.md", onOpen: (p) => void calls.push(p) });
-    const ev = click(one(v.el as FakeElement, "a"));
-    expect(calls).toEqual([]);
-    expect(ev.defaultPrevented).toBe(false);
+    const posted: { url: string; body: string }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = ((url: string, init?: RequestInit) => {
+      posted.push({ url, body: String(init?.body ?? "") });
+      return Promise.resolve(new Response("{}"));
+    }) as typeof fetch;
+    try {
+      const v = new V.MarkdownView("[x](https://x.y/p?q=1) [m](mailto:a@b.c)", 13, { path: "a.md", onOpen: (p) => void calls.push(p) });
+      const [ext, mail] = q(v.el as FakeElement, "a");
+      const ev = click(ext!);
+      expect(calls).toEqual([]);
+      expect(ev.defaultPrevented).toBe(true);
+      expect(posted).toEqual([{ url: "/api/external", body: JSON.stringify({ url: "https://x.y/p?q=1" }) }]);
+      // mailto: is left to the platform.
+      expect(click(mail!).defaultPrevented).toBe(false);
+      expect(posted.length).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   test("clicking non-link content does nothing", () => {

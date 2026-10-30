@@ -77,7 +77,7 @@ async function cli(r: Rel, version = "1.0.0") {
   await chmod(target, 0o755);
   const install: Install = { kind: "cli", target, asset: (v) => `codeviewer-${v}-linux-x64` };
   const g = fake({ files: { "codeviewer-1.1.0-linux-x64": enc("new") }, ...r });
-  return { dir, target, calls: g.calls, u: new Updater({ version, fetch: g.f, publicKey: keyPem, install }) };
+  return { dir, target, calls: g.calls, u: new Updater({ version, fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install }) };
 }
 
 test("compareVersions: pre-release ordering and padding", () => {
@@ -158,14 +158,14 @@ test("check: explains why an update cannot be installed", async () => {
   const g = fake({ files: { "codeviewer-1.1.0-linux-x64": enc("new") } });
   const dir = await tmp();
   const install: Install = { kind: "cli", target: path.join(dir, "cv"), asset: (v) => `codeviewer-${v}-linux-x64` };
-  expect((await new Updater({ version: "1.0.0", fetch: g.f, publicKey: "# none", install }).check(true)).reason).toContain("no update signing key");
+  expect((await new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: "# none", install }).check(true)).reason).toContain("no update signing key");
   // unwritable / missing target directory
   const bad: Install = { kind: "cli", target: path.join(dir, "missing", "cv"), asset: install.asset };
-  const info = await new Updater({ version: "1.0.0", fetch: g.f, publicKey: keyPem, install: bad }).check(true);
+  const info = await new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install: bad }).check(true);
   expect(info).toMatchObject({ available: true, canInstall: false });
   expect(info.reason).toContain("No permission");
   // source installs
-  const src = await new Updater({ version: "1.0.0", fetch: g.f, publicKey: keyPem, install: { kind: "source", target: "", asset: () => "" } }).check(true);
+  const src = await new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install: { kind: "source", target: "", asset: () => "" } }).check(true);
   expect(src.reason).toContain("git pull");
 });
 
@@ -204,7 +204,7 @@ test("apply rejects a signed file name that doesn't carry the release version", 
   const g = fake({ files: { "codeviewer-linux-x64": enc("new") } });
   // asset name has no version in it: a mix-up/rollback attempt
   const install: Install = { kind: "cli", target, asset: () => "codeviewer-linux-x64" };
-  await expect(new Updater({ version: "1.0.0", fetch: g.f, publicKey: keyPem, install }).apply()).rejects.toThrow("doesn't match the release version");
+  await expect(new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install }).apply()).rejects.toThrow("doesn't match the release version");
   expect(await readFile(target, "utf8")).toBe("old");
 });
 
@@ -224,7 +224,7 @@ test("apply fails when SHA256SUMS can't be fetched", async () => {
   const wrapped = (async (u: string | URL | Request, i?: RequestInit) =>
     String(u).endsWith("/SHA256SUMS") ? new Response("", { status: 404 }) : g.f(u, i)) as typeof fetch;
   const install: Install = { kind: "cli", target, asset: (v) => `codeviewer-${v}-linux-x64` };
-  await expect(new Updater({ version: "1.0.0", fetch: wrapped, publicKey: keyPem, install }).apply()).rejects.toThrow("download failed (404)");
+  await expect(new Updater({ version: "1.0.0", fetch: wrapped, assetHosts: ["example.test"], publicKey: keyPem, install }).apply()).rejects.toThrow("download failed (404)");
 });
 
 test("apply refuses to run concurrently", async () => {
@@ -253,10 +253,10 @@ test("linux package: bad layout is rejected and the install is untouched; good l
   };
   const name = "codeviewer-1.1.0-linux-x64.tar.gz";
   let g = fake({ files: { [name]: await pack(false) } });
-  await expect(new Updater({ version: "1.0.0", fetch: g.f, publicKey: keyPem, install }).apply()).rejects.toThrow("unexpected package layout");
+  await expect(new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install }).apply()).rejects.toThrow("unexpected package layout");
   expect(await readFile(path.join(target, "codeviewer"), "utf8")).toBe("old");
   g = fake({ files: { [name]: await pack(true) } });
-  await new Updater({ version: "1.0.0", fetch: g.f, publicKey: keyPem, install }).apply();
+  await new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install }).apply();
   expect(await readFile(path.join(target, "codeviewer"), "utf8")).toBe("new");
 });
 
@@ -267,5 +267,19 @@ test("linux package: a corrupt archive fails with the tool's message", async () 
   const name = "codeviewer-1.1.0-linux-x64.tar.gz";
   const install: Install = { kind: "linux-app", target, asset: (v) => `codeviewer-${v}-linux-x64.tar.gz` };
   const g = fake({ files: { [name]: enc("not a tarball") } });
-  await expect(new Updater({ version: "1.0.0", fetch: g.f, publicKey: keyPem, install }).apply()).rejects.toThrow(/tar failed/);
+  await expect(new Updater({ version: "1.0.0", fetch: g.f, assetHosts: ["example.test"], publicKey: keyPem, install }).apply()).rejects.toThrow(/tar failed/);
+});
+
+test("compareVersions: pre-release identifiers follow semver (numeric, then alphanumeric, then length)", () => {
+  expect(compareVersions("1.0.0-rc.10", "1.0.0-rc.9")).toBe(1);
+  expect(compareVersions("1.0.0-rc.9", "1.0.0-rc.10")).toBe(-1);
+  expect(compareVersions("1.0.0-alpha", "1.0.0-alpha.1")).toBe(-1);
+  expect(compareVersions("1.0.0-alpha.1", "1.0.0-alpha.beta")).toBe(-1); // numeric < alphanumeric
+  expect(compareVersions("1.0.0-alpha.beta", "1.0.0-beta")).toBe(-1);
+  expect(compareVersions("1.0.0-beta.2", "1.0.0-beta.11")).toBe(-1);
+  expect(compareVersions("1.0.0-beta.11", "1.0.0-rc.1")).toBe(-1);
+  expect(compareVersions("1.0.0-rc.1", "1.0.0")).toBe(-1);
+  expect(compareVersions("1.0.0-rc.1+build.5", "1.0.0-rc.1+build.9")).toBe(0); // build metadata never orders
+  expect(compareVersions("1.0.0+abc", "1.0.0")).toBe(0);
+  expect(compareVersions("v1.0.0-rc.2", "1.0.0-rc.2")).toBe(0);
 });

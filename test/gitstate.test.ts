@@ -48,3 +48,14 @@ test("cleared: only a changed-to-clean/ignored transition counts", () => {
   expect(g.cleared("d.ts")).toBe(false); // clean to modified
   expect(g.cleared("a.ts")).toBe(false); // clean to clean
 });
+
+test("a viewed folder that is itself ignored marks everything inside it ignored", () => {
+  const g = new GitState();
+  g.set({ ...base, rootIgnored: true, files: {} });
+  expect(g.file("deep/x.js")?.letter).toBe("I");
+  expect(g.dir("deep")).toBe("I");
+  expect(g.counts).toEqual({ changed: 0, staged: 0, untracked: 0, conflicts: 0 });
+  g.set({ ...base, files: {} });
+  expect(g.file("deep/x.js")).toBeNull();
+  expect(g.dir("deep")).toBeNull();
+});
