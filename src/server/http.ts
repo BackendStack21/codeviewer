@@ -1,7 +1,7 @@
 import type { Server, ServerWebSocket } from "bun";
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { listDir, readForView, resolveSafe, imageMime, toRel, looksBinary, openRegular, MAX_TEXT_BYTES } from "./files.ts";
 import { FileIndex } from "./index.ts";
 import { watchTree } from "./watch.ts";
@@ -45,8 +45,11 @@ const MIME: Record<string, string> = {
   wav: "audio/wav",
 };
 
-export function startServer(opts: ServeOptions): { server: Server<SocketData>; url: string; stop(): void } {
+export function startServer(opts: ServeOptions): { server: Server<SocketData>; url: string; openToken: string; stop(): void } {
   const assets = loadAssets();
+  // Terminals carry this narrower token (CODEVIEWER_TOKEN): only `codeviewer open` → POST /api/open
+  // honours it, so a process in the shell never holds the session token.
+  const openToken = randomBytes(32).toString("base64url");
   const index = new FileIndex(opts.root);
   const settings = new Settings();
   const updater = opts.updater ?? new Updater({ version: VERSION });
@@ -86,9 +89,13 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
 
   let ptys: PtyManager;
 
-  const tokenOk = (candidate: string | null | undefined) => {
-    if (!candidate || candidate.length !== opts.token.length) return false;
-    return timingSafeEqual(Buffer.from(candidate), Buffer.from(opts.token));
+  const tokenOk = (candidate: string | null | undefined, expected = opts.token) => {
+    if (!candidate) return false;
+    // Byte lengths: timingSafeEqual throws on unequal buffers, and a multibyte string's
+    // UTF-16 length can equal the token's while its UTF-8 length does not.
+    const a = Buffer.from(candidate);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual(a, b);
   };
 
   /**
@@ -97,8 +104,12 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
    * cross-site form. The page gets the token from the URL fragment, which is never sent
    * to any server.
    */
-  const authed = (req: Request, url: URL) =>
-    tokenOk(req.headers.get("x-cv-token")) || (url.pathname.startsWith("/ws/") && tokenOk(url.searchParams.get("t")));
+  const authed = (req: Request, url: URL) => {
+    const h = req.headers.get("x-cv-token");
+    if (tokenOk(h)) return true;
+    if (url.pathname.startsWith("/ws/")) return tokenOk(url.searchParams.get("t"));
+    return url.pathname === "/api/open" && tokenOk(h, openToken);
+  };
 
   /** DNS-rebinding guard: only our own loopback host names (unless --host opened it up). */
   const hostOk = (req: Request) => {
@@ -123,7 +134,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     h.set(
       "content-security-policy",
       `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self'; ` +
-        `connect-src 'self' ws://${req.headers.get("host") ?? ""}; object-src 'none'; frame-ancestors 'none'; base-uri 'none'`,
+        `connect-src 'self' ws://${new URL(req.url).host}; object-src 'none'; frame-ancestors 'none'; base-uri 'none'`,
     );
     if (req.headers.get("if-none-match") === a.etag) return new Response(null, { status: 304, headers: h });
     if (a.gzip && (req.headers.get("accept-encoding") ?? "").includes("gzip")) {
@@ -147,7 +158,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     const exclude = sp.get("exclude") ?? "";
     if (!globsOk(include) || !globsOk(exclude)) return fail(400, "Invalid include/exclude globs");
 
-    activeSearch?.abort();
+    activeSearch?.abort("superseded");
     const ac = new AbortController();
     activeSearch = ac;
     const onReqAbort = () => ac.abort();
@@ -166,6 +177,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     let ended = false;
     let nFiles = 0;
     let nMatches = 0;
+    const t0 = performance.now();
     const emit = (e: SearchEvent) => {
       started = true;
       if (e.t === "done") ended = true;
@@ -186,6 +198,11 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
         if (started && !ended) emit({ t: "done", files: nFiles, matches: nMatches, skipped: 0, truncated: false, ms: 0, error: true });
       })
       .finally(() => {
+        // Cancelled by a newer search (another window, say): its stream still gets a summary line,
+        // flagged as incomplete, instead of just ending. A client abort needs none.
+        if (started && !ended && ac.signal.reason === "superseded") {
+          emit({ t: "done", files: nFiles, matches: nMatches, skipped: 0, truncated: false, ms: Math.round(performance.now() - t0), error: true });
+        }
         finished = true;
         if (activeSearch === ac) activeSearch = null;
         req.signal.removeEventListener("abort", onReqAbort);
@@ -253,8 +270,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
         if (p === "/ws/pty") {
           const id = url.searchParams.get("id") ?? "";
           if (!/^[\w-]{6,64}$/.test(id)) return fail(400, "bad id");
-          const cols = Math.max(2, Number(url.searchParams.get("cols")) || 80);
-          const rows = Math.max(1, Number(url.searchParams.get("rows")) || 24);
+          // Same bounds as a resize message: an out-of-range size makes the PTY throw after the shell spawned.
+          const cols = Math.min(1000, Math.max(2, Number(url.searchParams.get("cols")) || 80));
+          const rows = Math.min(500, Math.max(1, Number(url.searchParams.get("rows")) || 24));
           return srv.upgrade(req, { data: { kind: "pty", id, cols, rows } }) ? undefined : fail(400, "upgrade failed");
         }
         return fail(404, "not found");
@@ -326,16 +344,37 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
             return fail(400, (e as Error).message);
           }
           const limit = Number(url.searchParams.get("limit"));
-          const size = limit > 0 ? Math.min(limit, opened.st.size) : opened.st.size;
+          const total = limit > 0 ? Math.min(limit, opened.st.size) : opened.st.size;
           const fh = opened.fh;
-          let pos = 0;
+          // One `bytes=a-b` / `bytes=a-` / `bytes=-n` range, so media elements can seek.
+          let start = 0;
+          let end = total - 1;
+          let status = 200;
+          h.set("accept-ranges", "bytes");
+          const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
+          if (range && (range[1] || range[2])) {
+            if (range[1]) {
+              start = Number(range[1]);
+              if (range[2]) end = Math.min(Number(range[2]), total - 1);
+            } else start = Math.max(0, total - Number(range[2]));
+            if (start >= total || start > end) {
+              await fh.close();
+              h.set("content-range", `bytes */${total}`);
+              return new Response(null, { status: 416, headers: h });
+            }
+            status = 206;
+            h.set("content-range", `bytes ${start}-${end}/${total}`);
+          }
+          const stop = end + 1;
+          let pos = start;
           const stream = new ReadableStream<Uint8Array>({
             async pull(ctl) {
-              const chunk = new Uint8Array(Math.min(256 * 1024, size - pos));
+              const chunk = new Uint8Array(Math.min(256 * 1024, stop - pos));
               const { bytesRead } = chunk.length ? await fh.read(chunk, 0, chunk.length, pos) : { bytesRead: 0 };
               if (bytesRead === 0) {
                 await fh.close();
-                return ctl.close();
+                // The file shrank after fstat: fail the body rather than send fewer bytes than promised.
+                return pos < stop ? ctl.error(new Error("file changed while reading")) : ctl.close();
               }
               pos += bytesRead;
               ctl.enqueue(chunk.subarray(0, bytesRead));
@@ -344,8 +383,10 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
               await fh.close();
             },
           });
-          h.set("content-length", String(size));
-          return new Response(stream, { headers: h });
+          // Bun streams a ReadableStream body chunked and drops this header; it documents the
+          // promise the short-read guard above keeps should that change.
+          h.set("content-length", String(stop - start));
+          return new Response(stream, { status, headers: h });
         }
 
         case "/api/search":
@@ -458,10 +499,14 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
         case "/api/open": {
           if (req.method !== "POST") return fail(405, "POST only");
           const body = (await req.json().catch(() => null)) as { path?: string; line?: number } | null;
-          if (!body?.path) return fail(400, "missing path");
-          const rel = path.isAbsolute(body.path) ? toRel(opts.root, body.path) : body.path;
+          if (!body?.path || typeof body.path !== "string") return fail(400, "missing path");
+          // `codeviewer open` from a shell whose cwd goes through a symlink (/tmp → /private/tmp):
+          // resolve the parent, keeping the name as given (the file itself may not exist yet).
+          const given = body.path;
+          const abs = path.isAbsolute(given) ? path.join(await realpath(path.dirname(given)).catch(() => path.dirname(given)), path.basename(given)) : null;
+          const rel = abs !== null ? toRel(opts.root, abs) : given;
           if (rel === null || !(await resolveSafe(opts.root, rel))) return fail(404, "path is outside the viewed directory");
-          broadcast({ t: "open", path: rel, line: body.line ?? 0 });
+          broadcast({ t: "open", path: rel, line: Number.isInteger(body.line) && body.line! > 0 ? body.line : 0 });
           return json({ ok: true, clients: events.size });
         }
       }
@@ -499,13 +544,14 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     TERM_PROGRAM: "codeviewer",
     TERM_PROGRAM_VERSION: VERSION,
     CODEVIEWER_URL: origin,
-    CODEVIEWER_TOKEN: opts.token,
+    CODEVIEWER_TOKEN: openToken,
   });
   ptys = new PtyManager({ shell: opts.shell, cwd: opts.root, env });
 
   return {
     server,
     url: `${origin}/#t=${opts.token}`,
+    openToken,
     stop() {
       stopWatch();
       void gitReady.then((g) => g?.stop());

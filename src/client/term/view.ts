@@ -28,6 +28,9 @@ export interface TerminalViewOptions {
 // The last path segment may contain dots (foo.test.ts, index.d.ts, jquery.min.js).
 const LINK_RE = /(https?:\/\/[^\s"'<>`]+[^\s"'<>`.,;:!?)\]}])|((?:~|\.{1,2})?\/?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.\w+(?::\d+(?::\d+)?)?)/g;
 
+/** Completed lines kept in the screen-reader log. */
+const LOG_LIMIT = 200;
+
 const KEYS: Record<string, [string, string?]> = {
   // key: [normal, application-cursor-mode]
   ArrowUp: ["\x1b[A", "\x1bOA"],
@@ -55,6 +58,26 @@ const KEYS: Record<string, [string, string?]> = {
 };
 
 /**
+ * Tooltip for a hyperlink whose label may lie about its destination: the URI, prefixed with
+ * "Link target:" when the visible text itself looks like a URL or host of a different site.
+ */
+export function linkTitle(text: string, uri: string): string {
+  const label = text.trim();
+  const looksLikeUrl = label.includes("://") || /^www\./i.test(label);
+  if (!looksLikeUrl) return uri;
+  const host = (s: string) => {
+    try {
+      return new URL(s.includes("://") ? s : `https://${s}`).host.toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+  const a = host(label);
+  const b = host(uri);
+  return a !== null && a === b ? uri : `Link target: ${uri}`;
+}
+
+/**
  * A complete terminal widget: emulator + canvas renderer + keyboard/mouse/clipboard.
  */
 export class TerminalView {
@@ -62,6 +85,10 @@ export class TerminalView {
   readonly term: Terminal;
   readonly renderer: Renderer;
   private input: HTMLTextAreaElement;
+  /** Visually hidden live region: completed output lines, for screen readers. */
+  private log: HTMLElement;
+  private pendingLines: string[] = [];
+  private logFrame = 0;
   private scrollbar: HTMLElement;
   private thumb: HTMLElement;
   private ro: ResizeObserver;
@@ -90,6 +117,10 @@ export class TerminalView {
         void this.el.offsetWidth;
         this.el.classList.add("bell");
       },
+      onLine: (text) => {
+        this.pendingLines.push(text);
+        if (!this.logFrame) this.logFrame = requestAnimationFrame(() => this.flushLog());
+      },
     });
     this.renderer = new Renderer(this.term);
     this.renderer.setTheme(opts.theme);
@@ -103,13 +134,20 @@ export class TerminalView {
     this.input.setAttribute("aria-label", "Terminal input");
     this.input.tabIndex = 0;
 
+    this.log = document.createElement("div");
+    this.log.className = "sr-only";
+    this.log.setAttribute("role", "log");
+    this.log.setAttribute("aria-live", "polite");
+    this.log.setAttribute("aria-atomic", "false");
+    this.log.setAttribute("aria-label", "Terminal output");
+
     this.scrollbar = document.createElement("div");
     this.scrollbar.className = "term-scrollbar";
     this.thumb = document.createElement("div");
     this.thumb.className = "term-thumb";
     this.scrollbar.append(this.thumb);
 
-    this.el.append(this.renderer.canvas, this.input, this.scrollbar);
+    this.el.append(this.renderer.canvas, this.input, this.log, this.scrollbar);
     this.bindKeyboard();
     this.bindMouse();
     this.ro = new ResizeObserver(() => this.fit());
@@ -117,19 +155,40 @@ export class TerminalView {
     this.renderer.setFont(opts.fontFamily, opts.fontSize, opts.lineHeight);
     // Browser zoom / moving between displays changes devicePixelRatio: re-measure the font.
     let dpr = window.devicePixelRatio;
-    window.addEventListener("resize", () => {
+    this.onWindowResize = () => {
       if (window.devicePixelRatio !== dpr) {
         dpr = window.devicePixelRatio;
         this.refreshFont();
       }
-    });
+    };
+    window.addEventListener("resize", this.onWindowResize);
   }
+
+  private onWindowResize: () => void = () => {};
+  private onWindowKeyUp = (e: KeyboardEvent) => {
+    if (e.code === "AltLeft") this.leftAltDown = false;
+  };
 
   write(data: Uint8Array | string, silent = false) {
     this.term.silent = silent;
     this.term.write(data);
     this.term.silent = false;
     this.renderer.schedule();
+  }
+
+  /** Appends the lines completed since the last frame to the live log (at most 200 kept). */
+  private flushLog() {
+    this.logFrame = 0;
+    const lines = this.pendingLines;
+    if (!lines.length) return;
+    this.pendingLines = [];
+    const start = Math.max(0, lines.length - LOG_LIMIT);
+    for (let i = start; i < lines.length; i++) {
+      const d = document.createElement("div");
+      d.textContent = lines[i]!;
+      this.log.append(d);
+    }
+    while (this.log.childElementCount > LOG_LIMIT) this.log.firstElementChild!.remove();
   }
 
   focus() {
@@ -171,6 +230,8 @@ export class TerminalView {
 
   reset() {
     this.term.reset();
+    this.pendingLines = [];
+    this.log.replaceChildren();
     this.renderer.viewOffset = 0;
     this.renderer.selection = null;
     this.renderer.invalidate();
@@ -180,6 +241,9 @@ export class TerminalView {
     this.disposed = true;
     this.ro.disconnect();
     clearInterval(this.blinkTimer);
+    cancelAnimationFrame(this.logFrame);
+    window.removeEventListener("resize", this.onWindowResize);
+    window.removeEventListener("keyup", this.onWindowKeyUp);
     this.el.remove();
   }
 
@@ -228,9 +292,7 @@ export class TerminalView {
       const text = e.clipboardData?.getData("text/plain");
       if (text) this.paste(text);
     });
-    window.addEventListener("keyup", (e) => {
-      if (e.code === "AltLeft") this.leftAltDown = false;
-    });
+    window.addEventListener("keyup", this.onWindowKeyUp);
     inp.addEventListener("keydown", (e) => this.onKey(e));
   }
 
@@ -257,7 +319,9 @@ export class TerminalView {
           void navigator.clipboard.writeText(sel);
           return;
         }
-        if (IS_MAC) return;
+        // No selection: the copy chord is a no-op (Ctrl+Shift+C must never reach the PTY as ^C).
+        e.preventDefault();
+        return;
       }
       if (k === "v") return; // native paste event follows
       if (k === "k") {
@@ -581,7 +645,7 @@ export class TerminalView {
 
   // ───────────────────────────── links ─────────────────────────────
 
-  private linkAt(x: number, y: number): { start: number; end: number; target: string; uri?: string } | null {
+  private linkAt(x: number, y: number): { start: number; end: number; target: string; uri?: string; text?: string } | null {
     const line = this.term.viewLine(y, this.renderer.viewOffset);
     if (!line) return null;
     const id = line.fl[x]! >>> 16;
@@ -590,7 +654,8 @@ export class TerminalView {
       let end = x + 1;
       while (start > 0 && line.fl[start - 1]! >>> 16 === id) start--;
       while (end < line.cols && line.fl[end]! >>> 16 === id) end++;
-      return { start, end, target: this.term.links[id] ?? "", uri: this.term.links[id] };
+      const uri = this.term.links[id] ?? "";
+      return { start, end, target: uri, uri, text: line.text.slice(start, end).join("") };
     }
     // Map string offsets to columns (wide chars occupy two cells, one string slot).
     let text = "";
@@ -619,6 +684,10 @@ export class TerminalView {
     if (prev?.row === next?.row && prev?.start === next?.start && prev?.end === next?.end) return;
     r.hoverLink = next;
     this.el.style.cursor = next ? "pointer" : "";
+    // OSC 8 text and target can differ ("README.md" → https://evil.example): show the real target.
+    const title = link?.uri ? linkTitle(link.text ?? "", link.uri) : "";
+    if (title) r.canvas.title = title;
+    else r.canvas.removeAttribute("title");
     r.touchAll();
   }
 

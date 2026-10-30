@@ -867,5 +867,291 @@
     ]
    }
   ]
+ },
+ {
+  "name": "a list marker that cannot interrupt a paragraph is a lazy continuation in a quote",
+  "src": "> The number of windows is\n14. The number of doors is 6.",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "The number of windows is\n14. The number of doors is 6."
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a list marker that cannot interrupt a paragraph is a lazy continuation in a list item",
+  "src": "- The number of windows is\n14. The number of doors is 6.",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "The number of windows is\n14. The number of doors is 6."
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a sibling marker is not a lazy continuation of a list inside a quote",
+  "src": "> 1. a\n2. b",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "tight": true,
+      "items": [
+       {
+        "type": "item",
+        "children": [
+         {
+          "type": "paragraph",
+          "children": [
+           {
+            "type": "text",
+            "value": "a"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "list",
+    "ordered": true,
+    "start": 2,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a bullet still interrupts a lazy paragraph in a quote",
+  "src": "> a\n- b",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "b"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a setext underline is not a lazy continuation of a quote",
+  "src": "> a\n===",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a\n==="
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a setext underline is not a lazy continuation of a list item",
+  "src": "- a\n===",
+  "ast": [
+   {
+    "type": "list",
+    "ordered": false,
+    "start": null,
+    "tight": true,
+    "items": [
+     {
+      "type": "item",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a\n==="
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a setext heading inside a quote leaves no paragraph open for lazy lines",
+  "src": "> a\n> ===\nb",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "heading",
+      "level": 1,
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "b"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a lazy line keeps the paragraph open for the next lazy line",
+  "src": "> > a\n> ===\nb",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "blockquote",
+      "children": [
+       {
+        "type": "paragraph",
+        "children": [
+         {
+          "type": "text",
+          "value": "a\n===\nb"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a lazy continuation after a quote with a fenced block in a list item",
+  "src": "> - ```\n>   x\nb",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "list",
+      "ordered": false,
+      "start": null,
+      "tight": true,
+      "items": [
+       {
+        "type": "item",
+        "children": [
+         {
+          "type": "code",
+          "lang": null,
+          "value": "x"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "b"
+     }
+    ]
+   }
+  ]
  }
 ]

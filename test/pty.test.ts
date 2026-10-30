@@ -46,12 +46,24 @@ function connect(id: string) {
   return { ws, term, opened, send, frames: () => frames };
 }
 
+/**
+ * Waits for a line that is `word` on its own or after a shell prompt: a command sent before the
+ * shell printed its first prompt is echoed by the tty first, so the prompt lands in front of the
+ * output ("# READY") rather than before the command. The echoed command line never matches.
+ */
+async function line(term: Terminal, word: string): Promise<string | undefined> {
+  const re = new RegExp(`^(\\S*[#$%>] )?${word}$`);
+  const find = () => term.lines.map((l) => l.toString()).find((l) => re.test(l));
+  for (let i = 0; i < 100 && !find(); i++) await Bun.sleep(100);
+  return find();
+}
+
 test("a reload restores alt screen, bracketed paste and mouse modes even after history was trimmed", async () => {
   const a = connect("modes-test-1");
   await a.opened;
   // Enter the modes, then push far more than the 512 KB replay window.
   a.send(`printf '\\033[?2004h\\033[?1049h\\033[?1000h'; i=0; while [ $i -lt 9000 ]; do echo "line $i ............................................................"; i=$((i+1)); done; echo DONE\n`);
-  for (let i = 0; i < 100 && !a.term.lines.some((l) => l.toString() === "DONE"); i++) await Bun.sleep(100);
+  expect(await line(a.term, "DONE")).toBeDefined();
   expect(a.term.modes.bracketedPaste).toBe(true);
   a.ws.close();
   await Bun.sleep(200);
@@ -62,7 +74,7 @@ test("a reload restores alt screen, bracketed paste and mouse modes even after h
   expect(b.term.alt).toBe(true);
   expect(b.term.modes.bracketedPaste).toBe(true);
   expect(b.term.modes.mouse).toBe(1000);
-  expect(b.term.lines.some((l) => l.toString() === "DONE")).toBe(true);
+  expect(await line(b.term, "DONE")).toBeDefined();
   b.send("exit\n");
   b.ws.close();
 }, 30_000);
@@ -71,9 +83,62 @@ test("output is coalesced into few frames", async () => {
   const c = connect("coalesce-test-1");
   await c.opened;
   c.send(`i=0; while [ $i -lt 20000 ]; do echo y; i=$((i+1)); done; echo END\n`);
-  for (let i = 0; i < 100 && !c.term.lines.some((l) => l.toString() === "END"); i++) await Bun.sleep(100);
+  expect(await line(c.term, "END")).toBeDefined();
   // 20k tiny writes must not become 20k WebSocket messages.
   expect(c.frames()).toBeLessThan(2000);
   c.send("exit\n");
   c.ws.close();
+}, 30_000);
+
+test("a shell that exits while nobody is attached still delivers its last output and exit code on reattach", async () => {
+  const a = connect("exit-while-detached-1");
+  await a.opened;
+  a.send("echo READY\n");
+  expect(await line(a.term, "READY")).toBeDefined();
+  // The exit lands after the socket is gone (a reload in the middle of it).
+  a.send("echo LAST; sleep 0.2; exit 7\n");
+  a.ws.close();
+  await Bun.sleep(300);
+
+  const b = connect("exit-while-detached-1");
+  const texts: string[] = [];
+  const closed = new Promise<CloseEvent>((r) => (b.ws.onclose = r));
+  const inner = b.ws.onmessage!;
+  b.ws.onmessage = (e) => {
+    if (typeof e.data === "string") texts.push(e.data);
+    inner.call(b.ws, e);
+  };
+  await b.opened;
+  const ev = await closed;
+  expect(ev.code).toBe(1000);
+  expect(texts[0]).toBe(JSON.stringify({ t: "replay" }));
+  expect(texts).toContain(JSON.stringify({ t: "exit", code: 7 }));
+  expect(await line(b.term, "LAST")).toBeDefined();
+
+  // After that the id is free: a new attach starts a fresh shell with no stale exit notice.
+  const c = connect("exit-while-detached-1");
+  const cTexts: string[] = [];
+  const cInner = c.ws.onmessage!;
+  c.ws.onmessage = (e) => {
+    if (typeof e.data === "string") cTexts.push(e.data);
+    cInner.call(c.ws, e);
+  };
+  await c.opened;
+  c.send("echo FRESH\n");
+  expect(await line(c.term, "FRESH")).toBeDefined();
+  expect(cTexts.some((t) => t.includes('"exit"'))).toBe(false);
+  c.send("exit\n");
+  c.ws.close();
+}, 30_000);
+
+test("terminals get the narrow open token, never the session token", async () => {
+  const a = connect("env-token-1");
+  await a.opened;
+  a.send("echo TOK=$CODEVIEWER_TOKEN\n");
+  const tok = await line(a.term, "TOK=[^$]+");
+  expect(tok).toBeDefined();
+  expect(tok).toEndWith(`TOK=${app.openToken}`);
+  expect(tok).not.toContain(token);
+  a.send("exit\n");
+  a.ws.close();
 }, 30_000);

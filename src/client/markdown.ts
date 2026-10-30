@@ -301,42 +301,87 @@ function unescapeStr(s: string): string {
 type Defs = Map<string, { href: string; title: string | null }>;
 const normLabel = (l: string) => l.trim().replace(/\s+/g, " ").toLowerCase();
 
-function parseDef(line: string): { label: string; href: string; title: string | null } | null {
-  let i = indent(line);
-  if (i > 3 || line[i] !== "[") return null;
-  let j = i + 1;
-  while (j < line.length && j - i <= MAX_LABEL && line[j] !== "]") {
-    if (line[j] === "[") return null;
-    if (line[j] === "\\") j++;
+interface Def {
+  label: string;
+  href: string;
+  title: string | null;
+  /** Offset of the line after the definition in the paragraph text. */
+  end: number;
+}
+
+/**
+ * A link reference definition starting at `s[p]` (the start of a paragraph line). The destination
+ * and the title may each sit on the line after (CommonMark 4.7); a title that does not take up the
+ * rest of its line(s) is dropped when it started on its own line and voids the definition otherwise.
+ */
+function parseDef(s: string, p: number): Def | null {
+  if (s[p] !== "[") return null;
+  let j = p + 1;
+  while (j < s.length && j - p <= MAX_LABEL && s[j] !== "]") {
+    if (s[j] === "[") return null;
+    if (s[j] === "\\") j++;
     j++;
   }
-  if (line[j] !== "]" || line[j + 1] !== ":") return null;
-  const label = line.slice(i + 1, j);
-  if (isBlank(label)) return null;
-  let k = j + 2;
-  while (isWs(line[k])) k++;
+  if (s[j] !== "]" || s[j + 1] !== ":") return null;
+  const label = s.slice(p + 1, j);
+  if (/^\s*$/.test(label)) return null;
+  // Whitespace with at most one line ending.
+  const skip = (k: number): number => {
+    while (isWs(s[k])) k++;
+    if (s[k] === "\n") {
+      k++;
+      while (isWs(s[k])) k++;
+    }
+    return k;
+  };
+  let k = skip(j + 2);
   let href: string;
-  if (line[k] === "<") {
-    const e = line.indexOf(">", k + 1);
-    if (e < 0) return null;
-    href = line.slice(k + 1, e);
+  if (s[k] === "<") {
+    let e = k + 1;
+    while (e < s.length && s[e] !== ">" && s[e] !== "<" && s[e] !== "\n") e += s[e] === "\\" ? 2 : 1;
+    if (s[e] !== ">") return null;
+    href = s.slice(k + 1, e);
     k = e + 1;
   } else {
     const st = k;
-    while (k < line.length && !isWs(line[k])) k++;
-    href = line.slice(st, k);
-    if (!href) return null;
+    let depth = 0;
+    while (k < s.length) {
+      const c = s[k]!;
+      if (c === "\\" && k + 1 < s.length && PUNCT.test(s[k + 1]!)) {
+        k += 2;
+        continue;
+      }
+      if (c <= " " || c === "\x7f") break;
+      if (c === "(") depth++;
+      else if (c === ")") {
+        if (depth === 0) break;
+        depth--;
+      }
+      k++;
+    }
+    if (k === st || depth !== 0) return null;
+    href = s.slice(st, k);
   }
   const afterDest = k;
-  while (isWs(line[k])) k++;
-  if (k >= line.length) return { label, href: unescapeStr(href), title: null };
-  if (k === afterDest) return null;
-  const open = line[k]!;
+  while (isWs(s[k])) k++;
+  // The definition can end here (no title) when nothing else follows on the line.
+  const lineEnd = k >= s.length || s[k] === "\n" ? (k >= s.length ? s.length : k + 1) : -1;
+  if (lineEnd < 0 && k === afterDest) return null;
+  k = skip(afterDest);
+  const open = s[k];
   const close = open === "(" ? ")" : open;
-  if (open !== '"' && open !== "'" && open !== "(") return null;
-  const rest = line.slice(k).trimEnd();
-  if (rest.length < 2 || rest[rest.length - 1] !== close) return null;
-  return { label, href: unescapeStr(href), title: unescapeStr(rest.slice(1, -1)) };
+  const def = (title: string | null, end: number): Def => ({ label, href: unescapeStr(href), title, end });
+  if (open === '"' || open === "'" || open === "(") {
+    let e = k + 1;
+    while (e < s.length && s[e] !== close && !(open === "(" && s[e] === "(")) e += s[e] === "\\" ? 2 : 1;
+    if (s[e] === close) {
+      let t = e + 1;
+      while (isWs(s[t])) t++;
+      if (t >= s.length) return def(unescapeStr(s.slice(k + 1, e)), s.length);
+      if (s[t] === "\n") return def(unescapeStr(s.slice(k + 1, e)), t + 1);
+    }
+  }
+  return lineEnd < 0 ? null : def(null, lineEnd);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -400,7 +445,44 @@ function track(t: FenceTrack, line: string) {
   } else t.f = fenceOpen(line);
 }
 
-function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[]; gap: boolean } {
+/** Takes the link reference definitions off the start of a paragraph; returns the lines left over. */
+function takeDefs(para: string[], ctx: Ctx): string[] {
+  if (para[0]![0] !== "[") return para;
+  const text = para.join("\n");
+  let pos = 0;
+  while (pos < text.length && ctx.defs.size < MAX_DEFS) {
+    const d = parseDef(text, pos);
+    if (!d) break;
+    const key = normLabel(d.label);
+    if (!ctx.defs.has(key)) ctx.defs.set(key, { href: d.href, title: d.title });
+    pos = d.end;
+  }
+  if (!pos) return para;
+  return pos >= text.length ? [] : text.slice(pos).split("\n");
+}
+
+interface Parsed {
+  blocks: Block[];
+  gap: boolean;
+  /** Index of the first lazy line that was not paragraph continuation text, or -1. */
+  reject: number;
+}
+
+interface QuoteLines {
+  start: number; // source index of lines[0]
+  end: number; // source index after the last collected line
+  lines: string[];
+  lazy: boolean[];
+  fenceClosed: boolean[]; // no fence was open right before this line
+}
+
+/**
+ * `lazy[i]` marks a line a container took as a lazy paragraph continuation: it must end up as
+ * paragraph text, so it never becomes a setext underline, a table delimiter row or a sibling list
+ * item. The first lazy line that cannot be used that way is reported as `reject`, so the caller
+ * closes the container right before it; the blocks already built are the parse of the lines before.
+ */
+function parseBlocks(lines: string[], from: number, depth: number, ctx: Ctx, lazy: boolean[] | null): Parsed {
   const blocks: Block[] = [];
   const n = lines.length;
   const canNest = depth < MAX_DEPTH;
@@ -408,6 +490,8 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
   let blank = false;
   let para: string[] = [];
   let paraBlank = false;
+  let reject = -1;
+  let hint: QuoteLines | null = null;
 
   const add = (b: Block) => {
     if (blank && blocks.length) gap = true;
@@ -420,25 +504,13 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
   };
   const flush = () => {
     if (!para.length) return;
-    let from = 0;
-    while (from < para.length && ctx.defs.size < MAX_DEFS) {
-      const d = parseDef(para[from]!);
-      if (!d) break;
-      const key = normLabel(d.label);
-      if (!ctx.defs.has(key)) ctx.defs.set(key, { href: d.href, title: d.title });
-      from++;
-    }
-    const rest = from ? para.slice(from) : para;
+    const rest = takeDefs(para, ctx);
     para = [];
-    if (!rest.length) {
-      if (paraBlank && blocks.length) gap = true;
-      return;
-    }
     if (paraBlank && blocks.length) gap = true;
-    addText({ type: "paragraph", children: [] }, rest.join("\n").trimEnd());
+    if (rest.length) addText({ type: "paragraph", children: [] }, rest.join("\n").trimEnd());
   };
 
-  let i = 0;
+  let i = from;
   while (i < n) {
     const line = lines[i]!;
     if (isBlank(line)) {
@@ -447,16 +519,23 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
       i++;
       continue;
     }
+    const lz = lazy !== null && lazy[i] === true;
+    if (lz && !para.length) {
+      reject = i;
+      break;
+    }
     if (para.length) {
-      const su = setext(line);
+      const su = lz ? null : setext(line);
       if (su) {
-        if (paraBlank && blocks.length) gap = true;
-        addText({ type: "heading", level: su, children: [] }, para.map((l) => l.trim()).join("\n"));
+        const rest = takeDefs(para, ctx);
         para = [];
+        if (paraBlank && blocks.length) gap = true;
+        if (rest.length) addText({ type: "heading", level: su, children: [] }, rest.map((l) => l.trim()).join("\n"));
+        else para.push(line.trimStart()); // only definitions before it: the underline is plain text
         i++;
         continue;
       }
-      const al = delimRow(line);
+      const al = lz ? null : delimRow(line);
       if (al) {
         const head = splitRow(para[para.length - 1]!);
         if (head.length === al.length) {
@@ -471,7 +550,7 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
           };
           for (const h of head) cell(h, tbl.head);
           i++;
-          while (i < n && !isBlank(lines[i]!) && !startsBlock(lines[i]!, canNest)) {
+          while (i < n && !isBlank(lines[i]!) && !(lazy !== null && lazy[i] === true) && !startsBlock(lines[i]!, canNest)) {
             const cells = splitRow(lines[i]!);
             const row: Inline[][] = [];
             for (let k = 0; k < al.length; k++) cell(cells[k] ?? "", row);
@@ -488,6 +567,10 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
         continue;
       }
       flush();
+      if (lz) {
+        reject = i;
+        break;
+      }
     }
     const ind = indent(line);
     if (ind >= 4) {
@@ -533,20 +616,45 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
       continue;
     }
     if (canNest && quoteAt(line) >= 0) {
-      const inner: string[] = [];
-      const t: FenceTrack = { f: null };
-      while (i < n) {
-        const L = lines[i]!;
-        const q = quoteAt(L);
-        if (q >= 0) {
-          const s = L.slice(q);
-          inner.push(s);
-          track(t, s);
-        } else if (!isBlank(L) && inner.length && !t.f && paraOpen(inner[inner.length - 1]!) && !startsBlock(L, true) && !listMarker(L)) inner.push(L);
-        else break;
-        i++;
+      // A rejected collection is reused for the quote that follows: the lines after the rejected
+      // lazy line are collected identically from any `>` line reached with no fence open (a lazy
+      // line never changes the fence state), so re-collecting them would be quadratic.
+      let q: QuoteLines;
+      let from: number;
+      if (hint && i > hint.start && i - hint.start < hint.lines.length && hint.fenceClosed[i - hint.start]) {
+        q = hint;
+        from = i - hint.start;
+        i = hint.end;
+      } else {
+        q = { start: i, end: i, lines: [], lazy: [], fenceClosed: [] };
+        from = 0;
+        const t: FenceTrack = { f: null };
+        while (i < n) {
+          const L = lines[i]!;
+          const at = quoteAt(L);
+          const prev = q.lines[q.lines.length - 1];
+          if (at >= 0) {
+            q.fenceClosed.push(t.f === null);
+            const s = L.slice(at);
+            q.lines.push(s);
+            q.lazy.push(false);
+            track(t, s);
+          } else if (!isBlank(L) && prev !== undefined && !t.f && paraOpen(prev) && !startsBlock(L, true)) {
+            q.fenceClosed.push(true);
+            q.lines.push(L);
+            q.lazy.push(true);
+          } else break;
+          i++;
+        }
+        q.end = i;
       }
-      add({ type: "blockquote", children: parseBlocks(inner, depth + 1, ctx).blocks });
+      const r = parseBlocks(q.lines, from, depth + 1, ctx, q.lazy);
+      hint = null;
+      if (r.reject >= 0) {
+        i = q.start + r.reject; // every collected line maps to one source line
+        hint = q;
+      }
+      add({ type: "blockquote", children: r.blocks });
       continue;
     }
     const m = canNest ? listMarker(line) : null;
@@ -556,14 +664,22 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
       while (i < n) {
         const cur = listMarker(lines[i]!);
         if (!cur || cur.key !== m.key || isHr(lines[i]!)) break;
+        const start = i;
         const itemLines = [lines[i]!.slice(cur.offset)];
+        const itemLazy = [false];
         const task = /^\[([ xX])\](?:[ \t]|$)/.exec(itemLines[0]!);
         if (task) itemLines[0] = itemLines[0]!.slice(3).replace(/^[ \t]/, "");
         const t: FenceTrack = { f: null };
         track(t, itemLines[0]!);
         i++;
         let blanks = 0;
-        if (!(cur.empty && i < n && isBlank(lines[i]!))) {
+        if (cur.empty && i < n && isBlank(lines[i]!)) {
+          // An empty item takes no continuation; the blank run still separates it from the next item.
+          while (i < n && isBlank(lines[i]!)) {
+            blanks++;
+            i++;
+          }
+        } else {
           while (i < n) {
             const L = lines[i]!;
             if (isBlank(L)) {
@@ -571,20 +687,32 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
               i++;
               continue;
             }
+            const lzL = lazy !== null && lazy[i] === true;
             if (indent(L) >= cur.offset) {
-              for (; blanks > 0; blanks--) itemLines.push("");
+              for (; blanks > 0; blanks--) {
+                itemLines.push("");
+                itemLazy.push(false);
+              }
               const s = L.slice(cur.offset);
               itemLines.push(s);
+              itemLazy.push(lzL);
               track(t, s);
-            } else if (blanks === 0 && !t.f && paraOpen(itemLines[itemLines.length - 1]!) && !startsBlock(L, true) && !listMarker(L)) itemLines.push(L);
-            else break;
+            } else if (blanks === 0 && !t.f && paraOpen(itemLines[itemLines.length - 1]!) && !startsBlock(L, true) && listMarker(L)?.key !== cur.key) {
+              // Lazy continuation: a marker that cannot interrupt a paragraph continues it, unless it is a sibling item.
+              itemLines.push(L);
+              itemLazy.push(true);
+            } else break;
             i++;
           }
         }
-        const r = parseBlocks(itemLines, depth + 1, ctx);
+        const r = parseBlocks(itemLines, 0, depth + 1, ctx, itemLazy);
         if (r.gap) loose = true;
         items.push(task ? { type: "item", checked: task[1] !== " ", children: r.blocks } : { type: "item", children: r.blocks });
-        const nxt = i < n ? listMarker(lines[i]!) : null;
+        if (r.reject >= 0) {
+          i = start + r.reject; // every item line maps to one source line
+          break;
+        }
+        const nxt = i < n && !(lazy !== null && lazy[i] === true) ? listMarker(lines[i]!) : null;
         if (nxt && nxt.key === m.key && !isHr(lines[i]!)) {
           if (blanks > 0) loose = true;
         } else {
@@ -601,7 +729,7 @@ function parseBlocks(lines: string[], depth: number, ctx: Ctx): { blocks: Block[
     i++;
   }
   flush();
-  return { blocks, gap };
+  return { blocks, gap, reject };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -634,6 +762,7 @@ interface Bracket {
 
 const WS = /\s/;
 const UPUNCT = /[\p{P}\p{S}]/u;
+const WORD = /[\p{L}\p{N}_]/u;
 
 function toInline(nodes: N[]): Inline[] {
   const out: Inline[] = [];
@@ -814,6 +943,58 @@ function parseInline(s: string, defs: Defs): Inline[] {
     let d = 0;
     for (const x of kids) if (x.k === 1 && x.d > d) d = x.d;
     return d;
+  };
+  const autolink = (href: string, label: string) => nodeOf({ type: "link", href, title: null, children: [{ type: "text", value: label }] }, 1);
+
+  // Autolinks are held back inside an open `[` (a link must not contain one). When the bracket is
+  // dropped as literal text instead, the text nodes from it onward get the autolinks they were denied.
+  const rescan = (from: N) => {
+    for (let x: N | null = from, next: N | null; x; x = next) {
+      next = x.next;
+      if (x.k !== 0) continue;
+      const v = x.v;
+      let parts: N[] | null = null;
+      let run = 0;
+      for (let p = 0; p < v.length; ) {
+        const c = v.charCodeAt(p);
+        let node: N | null = null;
+        let end = p + 1;
+        if (c === 60) {
+          const a = angleAutolink(v, p);
+          if (a) {
+            node = autolink(a.href, a.label);
+            end = a.end;
+          }
+        } else if (c === 104 || c === 72) {
+          const prev = p > 0 ? v[p - 1] : x.prev && x.prev.k === 0 ? x.prev.v[x.prev.v.length - 1] : undefined;
+          const u = prev !== undefined && WORD.test(prev) ? null : bareUrl(v, p);
+          if (u) {
+            node = autolink(u, u);
+            end = p + u.length;
+          }
+        }
+        if (node) {
+          parts ??= [];
+          if (p > run) parts.push(mk(0, v.slice(run, p)));
+          parts.push(node);
+          run = end;
+        }
+        p = end;
+      }
+      if (!parts) continue;
+      if (run < v.length) parts.push(mk(0, v.slice(run)));
+      // Splice the parts in place of x.
+      let at = x.prev;
+      for (const y of parts) {
+        y.prev = at;
+        if (at) at.next = y;
+        else head = y;
+        at = y;
+      }
+      at!.next = next;
+      if (next) next.prev = at;
+      else tail = at;
+    }
   };
 
   function processEmph(bottom: N | null) {
@@ -997,8 +1178,7 @@ function parseInline(s: string, defs: Defs): Inline[] {
       case 93: {
         flush(i);
         const b = brackets[brackets.length - 1];
-        if (!b || (!b.img && b.serial < linkSerial)) {
-          if (b) brackets.pop();
+        if (!b) {
           text("]");
           i = run = i + 1;
           break;
@@ -1006,11 +1186,12 @@ function parseInline(s: string, defs: Defs): Inline[] {
         let href: string | null = null;
         let title: string | null = null;
         let end = i + 1;
-        if (s[i + 1] === "(") {
+        const active = b.img || b.serial >= linkSerial;
+        if (active && s[i + 1] === "(") {
           const t = linkTail(s, i + 2);
           if (t) ({ href, title, end } = t);
         }
-        if (href === null) {
+        if (active && href === null) {
           let def: { href: string; title: string | null } | undefined;
           const own = () => (i - b.src <= MAX_LABEL ? s.slice(b.src, i) : null);
           if (s[i + 1] === "[") {
@@ -1049,6 +1230,7 @@ function parseInline(s: string, defs: Defs): Inline[] {
         }
         brackets.pop();
         text("]");
+        if (!brackets.length) rescan(b.n);
         i = run = i + 1;
         break;
       }
@@ -1059,19 +1241,19 @@ function parseInline(s: string, defs: Defs): Inline[] {
           break;
         }
         flush(i);
-        append(nodeOf({ type: "link", href: a.href, title: null, children: [{ type: "text", value: a.label }] }, 1));
+        append(autolink(a.href, a.label));
         i = run = a.end;
         break;
       }
       case 104:
       case 72: {
-        const u = brackets.length || (i > 0 && /[\p{L}\p{N}_]/u.test(s[i - 1]!)) ? null : bareUrl(s, i);
+        const u = brackets.length || (i > 0 && WORD.test(s[i - 1]!)) ? null : bareUrl(s, i);
         if (!u) {
           i++;
           break;
         }
         flush(i);
-        append(nodeOf({ type: "link", href: u, title: null, children: [{ type: "text", value: u }] }, 1));
+        append(autolink(u, u));
         i = run = i + u.length;
         break;
       }
@@ -1101,6 +1283,7 @@ function parseInline(s: string, defs: Defs): Inline[] {
     }
   }
   flush(len);
+  if (brackets.length) rescan(brackets[0]!.n); // never closed: everything after it is literal text
   processEmph(null);
   return toInline(range(null));
 }
@@ -1119,7 +1302,7 @@ function tooLong(s: string): boolean {
 export function parseMarkdown(src: string): Block[] {
   const lines = src.split(/\r\n|\r|\n/).map(expandTabs);
   const ctx: Ctx = { defs: new Map(), pending: [] };
-  const { blocks } = parseBlocks(lines, 0, ctx);
+  const { blocks } = parseBlocks(lines, 0, 0, ctx, null);
   for (const { set, text } of ctx.pending) {
     set(!text ? [] : tooLong(text) ? [{ type: "text", value: text }] : parseInline(text, ctx.defs));
   }

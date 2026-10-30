@@ -1,5 +1,7 @@
 export const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 export const MOD = IS_MAC ? "⌘" : "Ctrl+";
+/** A shortcut label in the platform's own words (macOS glyphs vs. "Ctrl+Shift+…"). */
+export const key = (mac: string, other: string) => (IS_MAC ? mac : other);
 
 type Child = Node | string | null | undefined | false;
 
@@ -106,6 +108,16 @@ export function debounce<A extends unknown[]>(fn: (...a: A) => void, ms: number)
 
 /** Drag a splitter: calls onMove with the pointer delta from the drag start. */
 export function dragSplitter(handle: HTMLElement, axis: "x" | "y", onStart: () => number, onMove: (start: number, delta: number) => void) {
+  // Keyboard: the splitter is a focusable separator; arrows move it 16px at a time.
+  handle.tabIndex = 0;
+  handle.setAttribute("aria-orientation", axis === "x" ? "vertical" : "horizontal");
+  handle.addEventListener("keydown", (e) => {
+    const neg = axis === "x" ? "ArrowLeft" : "ArrowUp";
+    const pos = axis === "x" ? "ArrowRight" : "ArrowDown";
+    if (e.key !== neg && e.key !== pos) return;
+    e.preventDefault();
+    onMove(onStart(), e.key === pos ? 16 : -16);
+  });
   handle.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     handle.setPointerCapture(e.pointerId);

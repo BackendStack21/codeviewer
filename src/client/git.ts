@@ -12,6 +12,8 @@ export interface GitStatus {
   stash: number;
   files: Record<string, string>;
   head: { hash: string; subject: string; author: string; time: number } | null;
+  /** The viewed folder is itself git-ignored: everything in it is ignored (git lists nothing inside). */
+  rootIgnored?: boolean;
 }
 
 /** Display status, VS Code style: Modified, Added, Untracked, Deleted, Renamed, Conflict, Ignored. */
@@ -55,10 +57,13 @@ export class GitState {
   private prev = { files: this.files, prefixes: this.prefixes };
   private dirs = new Map<string, Letter>();
   private listeners = new Set<() => void>();
+  private rootIgnored = false;
+  private static readonly IGNORED: FileGit = { letter: "I", label: "Ignored", xy: "!!" };
   counts = { changed: 0, staged: 0, untracked: 0, conflicts: 0 };
 
   set(s: GitStatus) {
     this.status = s;
+    this.rootIgnored = !!s.rootIgnored;
     this.prev = { files: this.files, prefixes: this.prefixes };
     this.files = new Map();
     this.prefixes = new Map();
@@ -95,7 +100,7 @@ export class GitState {
 
   file(path: string): FileGit | null {
     path = nfc(path);
-    return this.files.get(path) ?? underPrefix(this.prefixes, path);
+    return this.files.get(path) ?? underPrefix(this.prefixes, path) ?? (this.rootIgnored ? GitState.IGNORED : null);
   }
 
   /** True if the last status update took `path` from changed to clean or ignored. */
@@ -108,7 +113,7 @@ export class GitState {
   /** Status of a directory: its own (untracked/ignored) or the strongest inside it. */
   dir(path: string): Letter | null {
     path = nfc(path);
-    return (this.prefixes.get(path) ?? underPrefix(this.prefixes, path))?.letter ?? this.dirs.get(path) ?? null;
+    return (this.prefixes.get(path) ?? underPrefix(this.prefixes, path))?.letter ?? this.dirs.get(path) ?? (this.rootIgnored ? "I" : null);
   }
 
   /** Changed (non-ignored) files, most important first. */

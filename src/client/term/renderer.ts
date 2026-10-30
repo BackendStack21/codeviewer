@@ -69,6 +69,8 @@ export class Renderer {
   constructor(private term: Terminal) {
     this.canvas = document.createElement("canvas");
     this.canvas.className = "term-canvas";
+    // Output reaches assistive technology through the view's live log, not the pixels.
+    this.canvas.setAttribute("aria-hidden", "true");
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
   }
 

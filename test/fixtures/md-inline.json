@@ -671,5 +671,591 @@
     ]
    }
   ]
+ },
+ {
+  "name": "definition with the title on the next line",
+  "src": "[foo]: /url\n\"title\"\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": "title",
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definition with the destination on the next line",
+  "src": "[foo]:\n/url\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definition title spans lines",
+  "src": "[foo]: /url '\ntitle\nline1\nline2\n'\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": "\ntitle\nline1\nline2\n",
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definition title with a blank line is not a definition",
+  "src": "[foo]: /url 'title\n\nwith blank line'\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]: /url 'title"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "with blank line'"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definition without a destination is a paragraph",
+  "src": "[foo]:\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]:"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "text after a same-line title voids the definition",
+  "src": "[foo]: /url \"title\" ok\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]: /url \"title\" ok"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "text after a next-line title keeps the definition and drops the title",
+  "src": "[foo]: /url\n\"title\" ok\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "\"title\" ok"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "no space between destination and title is not a definition",
+  "src": "[foo]: <bar>(baz)\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]: <bar>(baz)"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[foo]"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definition followed by paragraph text",
+  "src": "[foo]: /url\nbar\n\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "bar"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "two definitions in one paragraph",
+  "src": "[a]: /a\n[b]: /b\n\n[a] [b]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/a",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " "
+     },
+     {
+      "type": "link",
+      "href": "/b",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "b"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a setext underline after only definitions is plain text",
+  "src": "[foo]: /url\n===\n[foo]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "===\n"
+     },
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "definitions before a setext heading are taken out of it",
+  "src": "[foo]: /url\nbar\n===\n\n[foo]",
+  "ast": [
+   {
+    "type": "heading",
+    "level": 1,
+    "children": [
+     {
+      "type": "text",
+      "value": "bar"
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "a definition on a lazy line completes with its title",
+  "src": "> [foo]: /url\n\"title\"\n\n[foo]",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": []
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/url",
+      "title": "title",
+      "children": [
+       {
+        "type": "text",
+        "value": "foo"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "autolinks after an unclosed bracket",
+  "src": "[ see https://example.com and <https://b.c>",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[ see "
+     },
+     {
+      "type": "link",
+      "href": "https://example.com",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://example.com"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " and "
+     },
+     {
+      "type": "link",
+      "href": "https://b.c",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://b.c"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "autolinks inside and after a literal bracket pair",
+  "src": "[see https://a.b] and https://c.d",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[see "
+     },
+     {
+      "type": "link",
+      "href": "https://a.b",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://a.b"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": "] and "
+     },
+     {
+      "type": "link",
+      "href": "https://c.d",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://c.d"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "no autolink inside link text",
+  "src": "[https://a.b](/x) https://c.d",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/x",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://a.b"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " "
+     },
+     {
+      "type": "link",
+      "href": "https://c.d",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://c.d"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "no autolink inside a literal bracket nested in link text",
+  "src": "[a [b https://x.y] c](/u) https://z.w",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "link",
+      "href": "/u",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "a [b https://x.y] c"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " "
+     },
+     {
+      "type": "link",
+      "href": "https://z.w",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://z.w"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "autolink after a bracket deactivated by an inner link",
+  "src": "[ x [a](/u) https://c.d",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[ x "
+     },
+     {
+      "type": "link",
+      "href": "/u",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "a"
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " "
+     },
+     {
+      "type": "link",
+      "href": "https://c.d",
+      "title": null,
+      "children": [
+       {
+        "type": "text",
+        "value": "https://c.d"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "autolink inside emphasis in a literal bracket",
+  "src": "[ *https://a.b* ]",
+  "ast": [
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "[ "
+     },
+     {
+      "type": "em",
+      "children": [
+       {
+        "type": "link",
+        "href": "https://a.b",
+        "title": null,
+        "children": [
+         {
+          "type": "text",
+          "value": "https://a.b"
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "type": "text",
+      "value": " ]"
+     }
+    ]
+   }
+  ]
  }
 ]

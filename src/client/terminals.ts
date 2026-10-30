@@ -88,6 +88,11 @@ export class TerminalPanel {
     return this.sessions.length;
   }
 
+  /** A live session whose title a program changed (agents and TUIs set it): closing would interrupt work. */
+  get busy(): boolean {
+    return this.sessions.some((s) => !s.exited && s.title !== this.shellName);
+  }
+
   create(id = newId(), activate = true): Session {
     const s: Session = {
       id,
@@ -164,7 +169,11 @@ export class TerminalPanel {
     ws.onclose = (ev) => {
       if (s.ws !== ws) return;
       s.ws = null;
-      if (!s.exited && ev.code !== 4000) {
+      if (s.exited) return;
+      if (ev.code === 4000) {
+        // Another window attached to this session; the next keystroke here takes it back.
+        s.view.write(`\r\n\x1b[2m[session attached in another window: press a key to reattach]\x1b[0m\r\n`);
+      } else {
         s.view.write(`\r\n\x1b[2m[connection to codeviewer lost]\x1b[0m\r\n`);
         s.exited = true;
         this.renderTabs();
@@ -185,7 +194,22 @@ export class TerminalPanel {
     }
     const bytes = enc.encode(data);
     if (s.ws?.readyState === WebSocket.OPEN) s.ws.send(bytes);
-    else s.pending.push(bytes);
+    else {
+      s.pending.push(bytes);
+      if (!s.ws) this.connect(s); // detached (replaced by another window): reattach on input
+    }
+  }
+
+  /** True when the active session's shell has exited (closing it kills nothing). */
+  get activeExited(): boolean {
+    return !this.active || this.active.exited;
+  }
+
+  /** Activates the next/previous terminal tab. */
+  cycle(dir: 1 | -1) {
+    if (!this.active || this.sessions.length < 2) return;
+    const i = this.sessions.indexOf(this.active);
+    this.activate(this.sessions[(i + dir + this.sessions.length) % this.sessions.length]!);
   }
 
   private restart(s: Session) {

@@ -9,7 +9,8 @@ import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
-import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, MOD, store } from "./util.ts";
+import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, store } from "./util.ts";
+import { Help } from "./help.ts";
 import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
@@ -85,6 +86,11 @@ class App {
   private status!: HTMLElement;
   private statusRight!: HTMLElement;
   private themeBtn!: HTMLButtonElement;
+  private live!: HTMLElement;
+  private killArmed = 0;
+  private help = new Help();
+  private sideSplit!: HTMLElement;
+  private panelSplit!: HTMLElement;
   private toast!: HTMLElement;
   private recent: string[] = [];
   private git = new GitState();
@@ -207,7 +213,7 @@ class App {
       this.changes.el,
     );
     this.setSideView(this.L.sideView, false);
-    const sideSplit = h("div", { class: "splitter vertical", role: "separator" });
+    const sideSplit = (this.sideSplit = h("div", { class: "splitter vertical", role: "separator", "aria-label": "Sidebar width" }));
 
     // Editor
     const kb = (k: string, label: string) => h("div", { class: "kb-row" }, h("span", null, label), h("kbd", null, k));
@@ -221,14 +227,15 @@ class App {
         "div",
         { class: "kb" },
         kb(`${MOD}P`, "Go to file"),
-        kb(`${MOD}⇧P`.replace("Ctrl+⇧", "Ctrl+Shift+"), "Commands"),
-        kb(IS_MAC ? "⌃`" : "Ctrl+`", "Toggle terminal"),
+        kb(key("⌘⇧P", "Ctrl+Shift+P"), "Commands"),
+        kb(key("⌃`", "Ctrl+`"), "Toggle terminal"),
         kb(`${MOD}F`, "Find in file"),
-        kb(IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F", "Search in files"),
+        kb(key("⌘⇧F", "Ctrl+Shift+F"), "Search in files"),
         kb("F4", "Next search result"),
-        kb(IS_MAC ? "⌃G" : "Ctrl+G", "Go to line"),
-        kb(`${MOD}⇧G`, "Review changes"),
+        kb(key("⌃G", "Ctrl+G"), "Go to line"),
+        kb(key("⌘⇧G", "Ctrl+Shift+G"), "Changes"),
         kb(`${MOD}B`, "Toggle sidebar"),
+        kb(key("⌘/", "Ctrl+/"), "All shortcuts and tips"),
       ),
       h("p", { class: "welcome-hint" }, "Tip: run ", h("code", null, "codeviewer open <file>:<line>"), " in the terminal, or ", h("kbd", null, IS_MAC ? "⌘" : "Ctrl"), "-click a path."),
     );
@@ -273,7 +280,7 @@ class App {
       (p, line) => void this.openFromTerminal(p, line),
       (url) => void api.external(url),
     );
-    const panelSplit = h("div", { class: "splitter panel-split", role: "separator" });
+    const panelSplit = (this.panelSplit = h("div", { class: "splitter panel-split", role: "separator", "aria-label": "Terminal panel size", tabindex: "0" }));
 
     this.main = h("div", { class: "main" }, this.editor.el, panelSplit, this.terms.el);
     this.workbench = h("div", { class: "workbench" }, this.sidebar, sideSplit, this.main);
@@ -284,6 +291,7 @@ class App {
     const statusbar = h("footer", { class: "statusbar" }, this.status, this.statusRight);
 
     this.toast = h("div", { class: "toast", hidden: true });
+    this.live = h("div", { class: "sr-only", role: "status", "aria-live": "polite" });
     window.addEventListener("cv-toast", (e) => this.notify((e as CustomEvent<string>).detail));
     // Updates: launch check result, the Mac app's menu item, and its native restart.
     this.updates.onInfo = () => this.renderStatus(this.lastStatus);
@@ -296,7 +304,13 @@ class App {
         this.notify(`Codeviewer ${u.latest} is available: click "Update" in the status bar`);
       }
     });
-    document.body.replaceChildren(titlebar, this.workbench, statusbar, this.palette.el, this.updates.el, this.toast);
+    document.body.replaceChildren(titlebar, this.workbench, statusbar, this.palette.el, this.updates.el, this.help.el, this.toast, this.live);
+    // Closing the window takes every terminal down: ask first while a program is running in one.
+    window.addEventListener("beforeunload", (e) => {
+      if (!this.terms.busy) return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
 
     // Splitters
     dragSplitter(sideSplit, "x", () => L.sidebarWidth, (s, d) => {
@@ -326,6 +340,17 @@ class App {
       panelSplit.addEventListener("pointermove", move);
       panelSplit.addEventListener("pointerup", up);
     });
+    panelSplit.addEventListener("keydown", (e) => {
+      // Towards the editor shrinks the panel, away from it grows it, 16px per press.
+      const grow = L.panelPos === "bottom" ? "ArrowUp" : "ArrowLeft";
+      const shrink = L.panelPos === "bottom" ? "ArrowDown" : "ArrowRight";
+      if (e.key !== grow && e.key !== shrink) return;
+      e.preventDefault();
+      const mainRect = this.main.getBoundingClientRect();
+      const max = (L.panelPos === "bottom" ? mainRect.height : mainRect.width) - 120;
+      L.panelSize[L.panelPos] = Math.max(120, Math.min(max, L.panelSize[L.panelPos] + (e.key === grow ? 16 : -16)));
+      this.applyLayout();
+    });
 
     this.palette.recent = this.recent;
     this.palette.onOpenFile = (p, line) => void this.openFile(p, { pin: true, line });
@@ -341,9 +366,11 @@ class App {
   private commands(): Command[] {
     const c = (id: string, label: string, run: () => void, keys?: string): Command => ({ id, label, run, keys });
     return [
-      c("term.toggle", "Toggle Terminal", () => this.togglePanel(), IS_MAC ? "⌃`" : "Ctrl+`"),
+      c("term.toggle", "Toggle Terminal", () => this.togglePanel(), key("⌃` · ⌘J", "Ctrl+` · Ctrl+J")),
       c("term.new", "New Terminal", () => this.newTerminal(), IS_MAC ? "⌃⇧`" : "Ctrl+Shift+`"),
       c("term.kill", "Kill Active Terminal", () => this.terms.close()),
+      c("term.next", "Next Terminal", () => this.terms.cycle(1), key("⌘⇧] in terminal", "Ctrl+Shift+] in terminal")),
+      c("term.prev", "Previous Terminal", () => this.terms.cycle(-1), key("⌘⇧[ in terminal", "Ctrl+Shift+[ in terminal")),
       c("term.pos", "Move Terminal Panel (Bottom/Right)", () => this.setPanelPos(this.L.panelPos === "bottom" ? "right" : "bottom")),
       c("term.max", "Maximize/Restore Terminal Panel", () => this.toggleMaximize()),
       c("term.clear", "Clear Terminal", () => this.terms.active?.view.clear()),
@@ -354,7 +381,7 @@ class App {
       c("view.zoomReset", "Reset Font Size", () => this.zoom(0), `${MOD}0`),
       c("search.files", "Search in Files", () => this.showSearch(), IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F"),
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
-      c("search.prev", "Previous Search Result", () => this.search.step(-1), "⇧F4"),
+      c("search.prev", "Previous Search Result", () => this.search.step(-1), key("⇧F4", "Shift+F4")),
       c("view.explorer", "Show Explorer", () => this.setSideView("explorer")),
       markdownToggleCommand({ isMarkdownTab: () => this.editor.isMarkdownTab(), toggleMarkdown: () => this.editor.toggleMarkdown() }),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
@@ -363,11 +390,19 @@ class App {
       c("file.copyPath", "Copy Path of Active File", () => this.copyPath(false)),
       c("file.copyAbs", "Copy Absolute Path of Active File", () => this.copyPath(true)),
       c("file.close", "Close Tab", () => this.editor.close(), IS_MAC ? "⌘W" : "Ctrl+W"),
+      c("file.next", "Next Tab", () => this.editor.cycle(1), key("⌘⇧] · ⌃Tab", "Ctrl+Shift+] · Ctrl+Tab")),
+      c("file.prev", "Previous Tab", () => this.editor.cycle(-1), key("⌘⇧[ · ⌃⇧Tab", "Ctrl+Shift+[ · Ctrl+Shift+Tab")),
       c("file.closeAll", "Close All Tabs", () => this.editor.closeAll()),
       c("tree.collapse", "Collapse All Folders", () => this.tree.collapseAll()),
       c("tree.clear", "Clear Change Markers", () => this.tree.clearChanges()),
-      c("tree.focus", "Focus Explorer", () => this.tree.focus(), `${MOD}⇧E`),
-      c("git.changes", "Git: Review Changes", () => this.showChanges(), `${MOD}⇧G`),
+      c("tree.focus", "Focus Explorer", () => this.tree.focus(), key("⌘⇧E", "Ctrl+Shift+E")),
+      c("git.changes", "Git: Show Changes", () => this.showChanges(), key("⌘⇧G", "Ctrl+Shift+G")),
+      c("git.peek", "Git: Peek HEAD on Current Line", () => {
+        const code = this.editor.active?.code;
+        if (!code) this.notify("Open a file first");
+        else if (!code.peekCurrent()) this.notify("No change on this line");
+      }),
+      c("app.help", "Help: Keyboard Shortcuts & Tips", () => this.help.open(), key("⌘/", "Ctrl+/")),
       c("git.scope", "Git: Compare With Base Branch / HEAD", () => this.changes.toggleScope()),
       c("app.update", "Check for Updates…", () => void this.updates.checkNow()),
       c("app.autoUpdate", "Toggle Automatic Update Checks", () => {
@@ -375,8 +410,8 @@ class App {
         store.set("updates", { auto });
         this.notify(`Automatic update checks ${auto ? "on" : "off"} (from the next launch)`);
       }),
-      c("git.next", "Git: Next Change", () => this.editor.nextChange(1), "⌥F5"),
-      c("git.prev", "Git: Previous Change", () => this.editor.nextChange(-1), "⌥⇧F5"),
+      c("git.next", "Git: Next Change", () => this.editor.nextChange(1), key("⌥F5", "Alt+F5")),
+      c("git.prev", "Git: Previous Change", () => this.editor.nextChange(-1), key("⌥⇧F5", "Alt+Shift+F5")),
     ];
   }
 
@@ -501,7 +536,13 @@ class App {
     }
     this.editor.setFontSize(L.codeSize);
     this.terms.setFont(cssVar("--font-mono"), L.termSize, TERM_LINE_HEIGHT);
+    this.applyUiScale();
     this.saveLayout();
+  }
+
+  /** The chrome (sidebar, tabs, status bar, palette) follows the code size, so zooming scales everything. */
+  private applyUiScale() {
+    document.documentElement.style.setProperty("--ui-scale", (this.L.codeSize / BASE_SIZE).toFixed(3));
   }
 
   private cycleTheme() {
@@ -529,6 +570,10 @@ class App {
     const L = this.L;
     const wb = this.workbench;
     wb.style.setProperty("--sidebar-w", `${L.sidebarWidth}px`);
+    this.sideSplit.setAttribute("aria-valuenow", String(L.sidebarWidth));
+    this.panelSplit.setAttribute("aria-valuenow", String(L.panelSize[L.panelPos]));
+    this.panelSplit.setAttribute("aria-orientation", L.panelPos === "bottom" ? "horizontal" : "vertical");
+    this.applyUiScale();
     wb.style.setProperty("--panel-h", `${L.panelSize.bottom}px`);
     wb.style.setProperty("--panel-w", `${L.panelSize.right}px`);
     wb.classList.toggle("no-sidebar", !L.sidebar);
@@ -542,6 +587,7 @@ class App {
   private saveLayout = debounce(() => store.set("layout", { ...this.L, v: LAYOUT_VERSION }), 200);
 
   private notify(msg: string) {
+    this.live.textContent = msg; // announced by screen readers
     this.toast.textContent = msg;
     this.toast.hidden = false;
     this.toast.classList.remove("show");
@@ -553,7 +599,8 @@ class App {
 
   private renderStatus(s: StatusInfo | null) {
     this.lastStatus = s;
-    const item = (text: string, title = "") => h("span", { class: "st-item", title }, text);
+    // The text sits in its own span so a long path gets an ellipsis (flex items don't ellipsize bare text).
+    const item = (text: string, title = "") => h("span", { class: "st-item", title }, h("span", { class: "st-text" }, text));
     const left: HTMLElement[] = [h("span", { class: "st-item st-root", title: this.info.root }, h("span", { class: "st-dot live" }), this.info.name)];
     const g = this.git.status;
     if (g.repo) {
@@ -577,7 +624,7 @@ class App {
         if (c.conflicts) parts.push(`<span class="git-C">${c.conflicts} conflict${c.conflicts === 1 ? "" : "s"}</span>`);
         if (c.changed) parts.push(`<span class="git-M">${c.changed} changed</span>`);
         if (c.untracked) parts.push(`<span class="git-U">${c.untracked} untracked</span>`);
-        const changes = h("button", { class: "st-item", title: `${c.staged} staged · click to list changed files (${MOD}⇧G)`, onclick: () => this.showChanges() });
+        const changes = h("button", { class: "st-item", title: `${c.staged} staged · click to show Changes (${key("⌘⇧G", "Ctrl+Shift+G")})`, onclick: () => this.showChanges() });
         changes.innerHTML = parts.join('<span class="st-sep">·</span>');
         left.push(changes);
       }
@@ -627,6 +674,10 @@ class App {
         const mod = IS_MAC ? e.metaKey : e.ctrlKey;
         const k = e.key.toLowerCase();
         const inTerm = (e.target as HTMLElement).classList?.contains("term-input");
+        const inPalette = (e.target as HTMLElement).classList?.contains("palette-input");
+        // On Linux the modifier is Ctrl, which terminal programs use heavily (^P history, ^W
+        // delete word, ^_ undo…): plain Ctrl shortcuts stay out of a focused terminal there.
+        const appKey = IS_MAC || !inTerm;
         let handled = true;
         const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
         if (sk === "search") this.showSearch();
@@ -638,7 +689,7 @@ class App {
         } else if (mod && e.shiftKey && k === "g") this.showChanges();
         else if (e.altKey && e.key === "F5" && !inTerm) this.editor.nextChange(e.shiftKey ? -1 : 1);
         else if (mod && e.shiftKey && k === "p") this.palette.open(">");
-        else if (mod && !e.shiftKey && k === "p") this.palette.open();
+        else if (mod && !e.shiftKey && k === "p" && appKey && (IS_MAC || !inPalette)) this.palette.open(); // Linux: Ctrl+P is the palette's own "up"
         else if (mod && e.shiftKey && k === "e") {
           if (!this.L.sidebar) this.toggleSidebar(true);
           this.tree.focus();
@@ -646,13 +697,30 @@ class App {
         else if (mod && !e.shiftKey && k === "f" && !inTerm) this.editor.openFind();
         else if (e.ctrlKey && k === "g" && !inTerm) this.palette.open(":");
         else if (mod && k === "w" && !inTerm) this.editor.close();
-        else if (mod && k === "w" && inTerm && IS_MAC) this.terms.close();
-        else if (mod && e.shiftKey && (e.code === "BracketRight" || e.code === "BracketLeft")) this.editor.cycle(e.code === "BracketRight" ? 1 : -1);
+        else if (mod && k === "w" && inTerm) {
+          // Closing an exited terminal kills nothing. A live one (an agent may be running) needs
+          // a second press; on Linux Ctrl+W belongs to the shell and the exited case is the only one.
+          if (this.terms.activeExited) this.terms.close();
+          else if (!IS_MAC) handled = false;
+          else if (performance.now() - this.killArmed < 3000) {
+            this.killArmed = 0;
+            this.terms.close();
+          } else {
+            this.killArmed = performance.now();
+            this.notify(`Press ${MOD}W again to kill this terminal`);
+          }
+        } else if (mod && e.shiftKey && (e.code === "BracketRight" || e.code === "BracketLeft")) {
+          const dir = e.code === "BracketRight" ? 1 : -1;
+          if (inTerm) this.terms.cycle(dir);
+          else this.editor.cycle(dir);
+        }
         else if (e.ctrlKey && e.key === "Tab" && !inTerm) this.editor.cycle(e.shiftKey ? -1 : 1);
-        else if (mod && (k === "=" || k === "+")) this.zoom(1);
-        else if (mod && k === "-") this.zoom(-1);
-        else if (mod && k === "0") this.zoom(0);
+        else if (mod && (k === "=" || k === "+") && appKey) this.zoom(1);
+        else if (mod && k === "-" && appKey) this.zoom(-1);
+        else if (mod && k === "0" && appKey) this.zoom(0);
         else if (mod && k === "j" && !inTerm) this.togglePanel();
+        else if (mod && k === "/" && appKey) this.help.open();
+        else if (e.key === "Escape" && this.help.isOpen) this.help.close();
         else if (e.key === "Escape" && this.palette.isOpen) this.palette.close();
         else handled = false;
         if (handled) {
@@ -670,6 +738,7 @@ class App {
       const ws = new WebSocket(wsUrl("/ws/events"));
       ws.onopen = () => {
         retry = 500;
+        if (document.body.classList.contains("offline")) this.notify("Reconnected to codeviewer");
         document.body.classList.remove("offline");
       };
       ws.onmessage = (ev) => {
@@ -697,6 +766,7 @@ class App {
         }
       };
       ws.onclose = () => {
+        if (!document.body.classList.contains("offline")) this.notify("Connection to codeviewer lost: reconnecting…");
         document.body.classList.add("offline");
         setTimeout(connect, (retry = Math.min(retry * 2, 8000)));
       };

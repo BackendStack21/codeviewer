@@ -128,7 +128,9 @@ hijacking). Required:
   defeats DNS rebinding. Writes must be `application/json`, which no cross-site form can send.
 - Never put the token in a process's arguments (`ps` and `/proc` are readable by every user).
   Browsers are launched through a 0600 bootstrap page in a 0700 directory; macOS opens the
-  default browser via `osascript` reading from stdin.
+  default browser via `osascript` reading from stdin. Terminals get a separate token
+  (`CODEVIEWER_TOKEN`) that only `/api/open` honours, so no process in a shell holds the
+  session token.
 - Check the **Origin** on WebSocket upgrades: it must match the (validated) server origin.
 - Contain file access to the root. Resolve every path with `realpath` and check that it
   stays under the root's realpath, so symlinks can't escape. Reject `..`, NUL bytes and
@@ -722,7 +724,8 @@ parsed as NUL-separated records, never lines) plus `git ls-files --others --excl
 untracked files, whose lines are counted by the server for the first 200 files under 1 MiB, opened
 with `O_NOFOLLOW` so an untracked symlink to `~/.ssh` is never read. The list is capped at 1,000
 entries. The old side of a diff reuses `/api/git/base` with a `rev` parameter that must be a full
-hex object id the server itself issued (never a ref name, never `-`-prefixed); with a `rev` the path
+hex object id (any object reachable in the repository is accepted, since a token holder has a shell
+anyway; never a ref name, never `-`-prefixed); with a `rev` the path
 need not exist on disk (deleted and renamed files) but is checked syntactically. Everything runs
 through the hardened runner of §10. Client: paths and subjects are escaped and control characters
 made visible (Trojan Source), rows are addressed by index, never by path in an attribute.
@@ -764,3 +767,31 @@ Measured and left alone: a 100k-line file with every other line changed builds 2
 2.3 ms and renders a window in 0.6 ms; one change at line 99,990 costs 9.5 ms including lexing
 both sides; a diff tab of an 8 MB file holds 11.6 MB.
 
+## 16. Round 7: holistic panel (security, server, client, UX/accessibility)
+
+Four reviewers worked independently from the code and backed each finding with a probe or a
+test; the two highest UX findings were raised by two reviewers each. Every finding below was
+fixed and, where a harness exists, locked in with a test.
+
+| Area | Finding | Fix |
+| --- | --- | --- |
+| Security (critical) | `git -c key=value` splits at the *first* `=`, so a hostile repo naming a driver `a=b` kept its filter/textconv armed despite the round-3 blanking | Overrides travel as `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` (key and value separate); regression test with an `a=b` driver bound from `.git/info/attributes` |
+| Security (low) | Updater fetched any asset URL the API named, with no size limits; a multibyte token header crashed the comparison; PTY upgrade sizes were unbounded | Assets only over https from GitHub's hosts, 1 MB cap on sums/signature and 1 GB on the download; byte-length token compare; upgrade sizes clamped like resizes; CSP from the request origin |
+| Security (low) | Markdown external links navigated the locked-down app window itself | Handed to the default browser through `/api/external`, like terminal links |
+| Server | Linked worktrees showed the main checkout's merge/rebase; nested repos listed as untracked files; deleted/submodule candidates counted as "binary/large files skipped"; `*.ts` matched only the root; `codeviewer open` failed from a symlinked cwd; a lagging client lost the final output before exit | Per-worktree op markers; editor-style globs; honest skip counts; realpath of the parent; replay before the exit notice |
+| Client | DCH/ICH on the second half of a wide character orphaned the WIDE flag (a column vanished); a ZWJ joined the glyph printed after a cursor move; DECSTR kept DEC graphics; C0 bytes landed in OSC titles; closed tabs still built views for loads in flight; terminal views leaked window listeners; a change during an in-flight listing was dropped; tab-indented widths; an empty file at an empty HEAD showed "+1"; an empty list item ended a Markdown list | Fixed, with emulator, tree, code-view and parser tests |
+| UX (high) | Linux: Ctrl+Shift+C with no selection sent ^C to the agent; Ctrl+P, Ctrl+=/−/0 never reached the terminal; ⌘W killed a live terminal with no guard; with "Reduce motion" every toast (incl. the OSC 52 notice) and the changed-lines flash were invisible; a lost connection was a 7 px dot | Copy chord is a no-op without a selection; Ctrl shortcuts stay out of a focused terminal on Linux; ⌘W closes exited terminals and asks for a second press otherwise; reduced-motion styles show instead of fade; "disconnected, reconnecting…" in the status bar plus a toast |
+| Accessibility | No live region, invisible focus stops (tab close buttons, search results), dialog did not take focus, focus lost after closing a tab, faint text at 2.1–2.9:1 | `aria-live` region fed by every toast; focus-visible styles; dialog focus in/out; next tab focused; secondary text ≥ 3.4:1 and comments ≥ 4.2:1 in both themes; light "bright white" darker than normal text |
+| Keyboard | Terminal tabs, the explorer context menu and reattaching a session taken by another window were mouse-only | ⌘⇧[ / ⌘⇧] switch terminals when the terminal is focused; Shift+F10 / Menu key in the explorer; a keystroke reattaches |
+
+A second pass took every remaining item, including the ones first judged not worth the change:
+
+| Area | Finding | Fix |
+| --- | --- | --- |
+| Security (info) | Every terminal process held the full session token; updater prerelease ordering compared as strings | Terminals get a second token that only `/api/open` honours; semver prerelease identifiers compared per the spec |
+| Server | A search superseded by a newer one ended its stream with no summary; `/api/raw` could send a short body after a shrink and could not seek; `detectBase` picked a stale local `master` over `origin/main`; an ignored subfolder viewed as root looked clean; symlinked folders were indexed as files and forced full rebuilds; a shell that exited while no page was attached lost its exit notice | Flagged final `done` line; `Range` support with 206/416 and a failed body on a short read; upstream before local fallbacks on a base branch; `rootIgnored` in the status (the client dims everything); symlinked folders inside the root walked once, outside ones dropped; exited sessions kept for a reattach or 60 s |
+| Markdown | Lazy continuation accepted ordered markers and setext underlines inside containers; link reference definitions were single-line only; any open `[` disabled every later autolink | CommonMark rules for all three, with tests |
+| Terminal | No screen-reader output; OSC 8 links hid their target | A hidden `role="log"` live region receives each completed line (not in the alternate screen, never during replay); hovering a link shows its target, prefixed with "Link target:" when the label looks like a different host |
+| Client | Edits inside a hunk reset opened gaps and the current hunk on live reload; a line requested for a tab still loading was dropped; YAML values such as `url: http://…` were coloured as keys; DCH/ICH probes | Same-shape reloads keep the reader's place; the line is applied when the load lands; a YAML key's colon must be followed by space or end of line |
+| UX | Chrome could not be scaled; splitters, terminal tabs, diff gaps and the HEAD peek were mouse-only; same-named tabs were indistinguishable; unreadable folders looked empty; long paths clipped without an ellipsis; shortcut labels mixed macOS glyphs into Linux; ⌘-click and `codeviewer open` were taught once; closing the window could kill a running agent silently | ⌘= / ⌘- also scale the chrome (`zoom` on the chrome containers); focusable splitters with arrow keys and `aria-valuenow`; ⌘⇧[ ] switch terminals from the terminal; gaps open with Enter; "Git: Peek HEAD on Current Line"; a muted folder hint on duplicate names; "Can't read folder: …" and "Loading…" rows; ellipsized status items; platform key labels everywhere; a ⌘/ help sheet with every shortcut and both tips; `beforeunload` asks while a program (title changed) runs in a terminal |
+| Accessibility | Lists lacked `aria-activedescendant`; the palette was not a combobox; the find count was silent | Stable row ids and active-descendant wiring on the explorer, Changes list, search results and palette; combobox semantics; the find count is a live region |

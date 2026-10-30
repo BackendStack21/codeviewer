@@ -391,7 +391,8 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
           }
           // JSON/YAML-style keys: "name": value
           let tok: Tok = "s";
-          if (L.colonProps && /^\s*:/.test(text.slice(e, e + 8))) tok = "p";
+          // YAML: a key's colon is followed by space or the end of line; "http://" is a value.
+          if (L.colonProps && (L.special === "yaml" ? /^\s*:(?=\s|$)/ : /^\s*:/).test(text.slice(e, e + 8))) tok = "p";
           out.push([i, e, tok]);
           i = e;
           continue outer;
@@ -490,7 +491,8 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
         while (j < n && text.charCodeAt(j) === 32) j++;
         const next = text[j];
         if (next === "(" || (next === "!" && langId === "rs" && text[j + 1] === "(")) tok = "f";
-        else if (L.colonProps && next === ":" && text[j + 1] !== ":") tok = "p";
+        // YAML keys end in ": " or ":" at the end of the line; "http://" inside a value is not a key.
+        else if (L.colonProps && next === ":" && text[j + 1] !== ":" && (L.special !== "yaml" || j + 1 >= n || /\s/.test(text[j + 1]!))) tok = "p";
         else if (/^[A-Z][a-z0-9]/.test(w) && langId !== "sql") tok = "t";
         else if (/^[A-Z][A-Z0-9_]+$/.test(w) && w.length > 1) tok = "o";
         else if (prevCh === "." && langId !== "sql") tok = null;

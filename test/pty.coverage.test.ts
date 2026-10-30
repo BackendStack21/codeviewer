@@ -194,3 +194,28 @@ test("a lagging client stops receiving live data and is resynced once its socket
   m.drain(asWs(a)); // not lagging anymore: no-op
   expect(a.texts.filter((t) => t.includes("replay")).length).toBe(1);
 });
+
+test("an exit with nobody attached is kept: the next attach gets replay + exit notice, then the id is free", async () => {
+  const m = await manager();
+  const a = fakeWs("s8");
+  m.open(asWs(a));
+  m.message(asWs(a), Buffer.from("echo READY\n"));
+  await until(() => a.output().includes("READY"));
+  m.message(asWs(a), Buffer.from("echo LAST; exit 5\n"));
+  m.close(asWs(a)); // detached before the shell can exit
+  expect(a.closed).toBeNull();
+  await Bun.sleep(400);
+  const b = fakeWs("s8");
+  m.open(asWs(b));
+  expect(b.texts[0]).toBe(JSON.stringify({ t: "replay" }));
+  expect(b.texts).toContain(JSON.stringify({ t: "exit", code: 5 }));
+  expect(b.closed).toEqual([1000, "exited"]);
+  expect(b.output()).toContain("LAST");
+  // the socket that left never hears about it
+  expect(a.texts.some((t) => t.includes('"exit"'))).toBe(false);
+  const c = fakeWs("s8");
+  m.open(asWs(c));
+  m.message(asWs(c), Buffer.from("echo FRESH\n"));
+  await until(() => c.output().includes("FRESH"));
+  expect(c.texts.some((t) => t.includes('"exit"'))).toBe(false);
+});

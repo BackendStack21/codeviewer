@@ -29,7 +29,8 @@ beforeAll(async () => {
   sh(["config", "user.email", "a@b"]);
   sh(["config", "user.name", "a"]);
   await writeFile(path.join(repo, "a.txt"), "one\ntwo\n");
-  sh(["add", "a.txt"]);
+  await writeFile(path.join(repo, "b.md"), "# b\n");
+  sh(["add", "a.txt", "b.md"]);
   sh(["commit", "-qm", "init"]);
   // Make HEAD a commit carrying a (fake) signature so signature verification would call gpg.
   const tree = sh(["rev-parse", "HEAD^{tree}"]).trim();
@@ -40,14 +41,17 @@ beforeAll(async () => {
   // Attack surface: attributes in tree and in $GIT_DIR/info, drivers + gpg + fsmonitor in config.
   await writeFile(path.join(repo, ".gitattributes"), "*.txt filter=pwn diff=pwn merge=pwn\n");
   await mkdir(path.join(repo, ".git", "info"), { recursive: true });
-  await writeFile(path.join(repo, ".git", "info", "attributes"), "* filter=pwn2 diff=pwn2\n");
+  await writeFile(path.join(repo, ".git", "info", "attributes"), "* filter=pwn2 diff=pwn2\n*.md filter=a=b diff=a=b merge=a=b\n");
   for (const [k, v] of [
     ["filter.pwn.clean", evil], ["filter.pwn.smudge", evil], ["filter.pwn.process", evil], ["filter.pwn.required", "true"],
     ["filter.pwn2.clean", evil], ["diff.pwn.textconv", evil], ["diff.pwn2.textconv", evil], ["diff.pwn.command", evil],
     ["merge.pwn.driver", evil], ["log.showSignature", "true"], ["gpg.program", evil], ["core.fsmonitor", evil],
+    // A driver whose name contains "=": a `-c filter.a=b.clean=` override would set filter.a instead.
+    ["filter.a=b.clean", evil], ["filter.a=b.required", "true"], ["diff.a=b.textconv", evil], ["merge.a=b.driver", evil],
   ]) sh(["config", k!, v!]);
   // Dirty the file so status must compare content (which would run the clean filter).
   await writeFile(path.join(repo, "a.txt"), "one\nTWO\n");
+  await writeFile(path.join(repo, "b.md"), "# B\n");
 });
 
 afterAll(async () => {
@@ -59,8 +63,13 @@ test("a malicious repository cannot make codeviewer's git calls run programs", a
   expect(g).not.toBeNull();
   const s = await g.status();
   expect(s.files["a.txt"]).toBe(".M");
+  expect(s.files["b.md"]).toBe(".M");
   expect(s.head?.subject).toBe("signed");
   await g.base("a.txt", 1 << 20);
+  await g.base("b.md", 1 << 20);
   await g.blame("a.txt", 2);
+  await g.blame("b.md", 1);
+  const c = await g.changes("head");
+  expect(c.files.map((f) => f.path)).toContain("b.md");
   expect(existsSync(marker) ? await readFile(marker, "utf8") : "").toBe("");
 });

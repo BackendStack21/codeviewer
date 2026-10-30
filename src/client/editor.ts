@@ -8,7 +8,7 @@ import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
 import { decidePreview, tooLargeNote } from "./mdgate.ts";
 import { planView, toggleLabel, toggleMode, viewMode } from "./viewstate.ts";
-import { basename, debounce, esc, formatBytes, h, MOD } from "./util.ts";
+import { basename, debounce, dirname, esc, formatBytes, h, MOD } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
 
 type Kind = "text" | "image" | "binary" | "error" | "dir";
@@ -35,6 +35,8 @@ export interface Tab {
   truncated: boolean;
   eol: "LF" | "CRLF";
   encoding: string;
+  /** A line (and range) to show once the first load lands. */
+  goto?: { line: number; col?: number; len?: number };
   /** Bumped per load/diff request; stale async results are dropped. */
   gen: number;
   /** HEAD oid + git status the gutter was computed for (skip identical refreshes). */
@@ -137,7 +139,7 @@ export class Editor {
     if (opts.line && tab.code) {
       if (opts.col !== undefined && opts.len) tab.code.showRange(opts.line - 1, opts.col, opts.col + opts.len);
       else tab.code.revealLine(opts.line - 1);
-    }
+    } else if (opts.line && !tab.md && !tab.image) tab.goto = { line: opts.line, col: opts.col, len: opts.len }; // still loading
     if (opts.focus !== false) tab.code?.focus();
     this.render();
   }
@@ -321,6 +323,12 @@ export class Editor {
             }
           }
         }
+        if (tab.goto && tab.code) {
+          const g = tab.goto;
+          tab.goto = undefined;
+          if (g.col !== undefined && g.len) tab.code.showRange(g.line - 1, g.col, g.col + g.len);
+          else tab.code.revealLine(g.line - 1);
+        }
         await this.refreshGit(tab, !reload);
       } else if (f.kind === "image") {
         if (tab.image && reload) tab.image.reload(tab.mtime);
@@ -418,8 +426,10 @@ export class Editor {
     if (this.active === tab) {
       this.active = null;
       const next = this.tabs[Math.min(i, this.tabs.length - 1)];
-      if (next) this.activate(next);
-      else {
+      if (next) {
+        this.activate(next);
+        if (document.activeElement === document.body) (next.code ?? next.diff)?.focus();
+      } else {
         this.body.replaceChildren(this.empty);
         this.onActive(null);
         this.status();
@@ -446,6 +456,7 @@ export class Editor {
   }
 
   private disposeTab(tab: Tab) {
+    tab.gen++; // a load still in flight must not build a view for a closed tab
     tab.code?.dispose();
     tab.diff?.dispose();
     tab.md?.dispose();
@@ -572,6 +583,17 @@ export class Editor {
   }
 
   render() {
+    // Same-named files from different folders: show the nearest folder that differs.
+    const byName = new Map<string, Set<string>>();
+    for (const t of this.tabs) (byName.get(basename(t.path)) ?? byName.set(basename(t.path), new Set()).get(basename(t.path))!).add(t.path);
+    const hint = (p: string) => {
+      const paths = byName.get(basename(p))!;
+      if (paths.size < 2) return "";
+      const dir = dirname(p);
+      const parent = dir.slice(dir.lastIndexOf("/") + 1);
+      const parents = new Set([...paths].map((x) => dirname(x)).map((d) => d.slice(d.lastIndexOf("/") + 1)));
+      return parents.size === paths.size ? parent : dir || "/";
+    };
     for (const t of this.tabs) {
       const cls = ["tab"];
       if (t === this.active) cls.push("active");
@@ -583,7 +605,7 @@ export class Editor {
       t.tabEl.className = cls.join(" ");
       t.tabEl.title = g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path;
       t.tabEl.setAttribute("aria-selected", String(t === this.active));
-      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
+      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(hint(t.path))}</span>` : ""}${t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
       t.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(t);

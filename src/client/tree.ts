@@ -13,6 +13,12 @@ interface TNode {
   expanded: boolean;
   children: TNode[] | null;
   loading?: Promise<void>;
+  /** A change arrived while a listing was in flight: list again when it lands. */
+  dirty?: boolean;
+  /** Why the last listing failed (shown as a row under the folder). */
+  error?: string;
+  /** A synthetic row: "Loading…" or an error message, never a real entry. */
+  note?: "loading" | "error";
 }
 
 const ROW = 24;
@@ -38,9 +44,10 @@ export class FileTree {
   constructor(rootName: string) {
     this.root = { name: rootName, path: "", type: "dir", depth: -1, expanded: true, children: null };
     this.byPath.set("", this.root);
-    this.rows = h("div", { class: "tree-rows", role: "tree" });
+    this.rows = h("div", { class: "tree-rows", role: "presentation" });
     this.sizer = h("div", { class: "tree-sizer" }, this.rows);
-    this.scroller = h("div", { class: "tree-scroll", tabindex: "0" }, this.sizer);
+    // The focused scroller is the tree: aria-activedescendant names the selected row.
+    this.scroller = h("div", { class: "tree-scroll", tabindex: "0", role: "tree", "aria-label": "Explorer" }, this.sizer);
     this.el = this.scroller;
     this.scroller.addEventListener("scroll", () => this.onScroll(), { passive: true });
     new ResizeObserver(() => this.schedule()).observe(this.scroller);
@@ -56,27 +63,38 @@ export class FileTree {
   }
 
   private async load(node: TNode) {
-    if (node.loading) return node.loading;
+    if (node.loading) {
+      node.dirty = true;
+      return node.loading;
+    }
     node.loading = (async () => {
-      try {
-        const entries = await api.list(node.path);
-        const old = new Map((node.children ?? []).map((c) => [c.name, c]));
-        node.children = entries.map((e) => {
-          const prev = old.get(e.name);
-          if (prev && prev.type === e.type) return prev;
-          const path = node.path ? `${node.path}/${e.name}` : e.name;
-          const child: TNode = { name: e.name, path, type: e.type, depth: node.depth + 1, link: e.link, expanded: false, children: null };
-          this.byPath.set(path, child);
-          return child;
-        });
-        for (const [name, c] of old) if (!node.children.some((n) => n.name === name)) this.forget(c);
-      } catch {
-        node.children = node.children ?? [];
-      } finally {
-        node.loading = undefined;
-      }
+      do {
+        node.dirty = false;
+        await this.list(node);
+      } while (node.dirty);
+      node.loading = undefined;
     })();
     return node.loading;
+  }
+
+  private async list(node: TNode) {
+    try {
+      const entries = await api.list(node.path);
+      const old = new Map((node.children ?? []).map((c) => [c.name, c]));
+      node.children = entries.map((e) => {
+        const prev = old.get(e.name);
+        if (prev && prev.type === e.type) return prev;
+        const path = node.path ? `${node.path}/${e.name}` : e.name;
+        const child: TNode = { name: e.name, path, type: e.type, depth: node.depth + 1, link: e.link, expanded: false, children: null };
+        this.byPath.set(path, child);
+        return child;
+      });
+      for (const [name, c] of old) if (!node.children.some((n) => n.name === name)) this.forget(c);
+      node.error = undefined;
+    } catch (e) {
+      node.children = node.children ?? [];
+      node.error = (e as Error).message || "Can't read folder";
+    }
   }
 
   private forget(n: TNode) {
@@ -86,10 +104,14 @@ export class FileTree {
 
   private reflow() {
     const out: TNode[] = [];
+    const note = (c: TNode, kind: "loading" | "error", text: string): TNode => ({ name: text, path: `${c.path}\0${kind}`, type: "file", depth: c.depth + 1, expanded: false, children: null, note: kind });
     const walk = (n: TNode) => {
       for (const c of n.children ?? []) {
         out.push(c);
-        if (c.expanded && c.children) walk(c);
+        if (c.expanded && c.children) {
+          walk(c);
+          if (c.error) out.push(note(c, "error", `Can't read folder: ${c.error}`));
+        } else if (c.expanded && c.loading) out.push(note(c, "loading", "Loading…"));
       }
     };
     walk(this.root);
@@ -130,11 +152,11 @@ export class FileTree {
       const n = this.flat[i]!;
       const isDir = n.type === "dir";
       const cls = ["row", isDir ? "dir" : "file"];
+      if (n.note) cls.push("note", n.note);
       if (n.path === this.selected) cls.push("selected");
       if (n.path === this.active) cls.push("active");
       if (n.type === "link-broken") cls.push("broken");
       if (n.name.startsWith(".")) cls.push("hidden");
-      const changed = isDir ? this.changedDirs.has(n.path) : this.changed.has(n.path);
       let gitBadge = "";
       let gitTitle = "";
       if (this.git?.repo) {
@@ -142,7 +164,7 @@ export class FileTree {
           const l = this.git.dir(n.path);
           if (l) {
             cls.push(`git-${l}`);
-            if (l !== "I") gitBadge = `<span class="gdot"></span>`;
+            if (l !== "I") gitBadge = `<span class="gdot" title="Contains changes"></span>`;
           }
         } else {
           const g = this.git.file(n.path);
@@ -153,12 +175,14 @@ export class FileTree {
           }
         }
       }
+      // A folder git already flags gets one marker, not a second look-alike dot for disk activity.
+      const changed = isDir ? this.changedDirs.has(n.path) && !gitBadge : this.changed.has(n.path);
       const indent = n.depth * 12 + 8;
       html +=
-        `<div class="${cls.join(" ")}" role="treeitem" data-i="${i}"${gitTitle} style="transform:translateY(${i * ROW}px);padding-left:${indent}px;--d:${n.depth}"` +
+        `<div class="${cls.join(" ")}" role="treeitem" id="tr-${i}" data-i="${i}" aria-level="${n.depth + 1}" aria-selected="${n.path === this.selected}"${gitTitle} style="transform:translateY(${i * ROW}px);padding-left:${indent}px;--d:${n.depth}"` +
         (isDir ? ` aria-expanded="${n.expanded}"` : "") +
         `>` +
-        (isDir ? `<span class="twisty${n.expanded ? " open" : ""}">${chevron}</span>${folderIcon(n.expanded)}` : `<span class="twisty"></span>${fileIcon(n.name)}`) +
+        (n.note ? `<span class="twisty"></span>` : isDir ? `<span class="twisty${n.expanded ? " open" : ""}">${chevron}</span>${folderIcon(n.expanded)}` : `<span class="twisty"></span>${fileIcon(n.name)}`) +
         `<span class="name">${esc(n.name)}</span>` +
         (n.link ? `<span class="badge" title="symlink">↗</span>` : "") +
         (changed ? `<span class="dot" title="Changed on disk"></span>` : "") +
@@ -166,6 +190,9 @@ export class FileTree {
         `</div>`;
     }
     this.rows.innerHTML = html;
+    const si = this.selected ? this.flat.findIndex((n) => n.path === this.selected) : -1;
+    if (si >= first && si < last) this.scroller.setAttribute("aria-activedescendant", `tr-${si}`);
+    else this.scroller.removeAttribute("aria-activedescendant");
   }
 
   private onClick(e: MouseEvent, dbl: boolean) {
@@ -173,6 +200,7 @@ export class FileTree {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".row");
     if (!row) return;
     const n = this.flat[Number(row.dataset.i)];
+    if (n?.note) return;
     if (!n) return;
     this.selected = n.path;
     if (n.type === "dir") {
@@ -189,7 +217,7 @@ export class FileTree {
     const row = (e.target as HTMLElement).closest<HTMLElement>(".row");
     const n = row && this.flat[Number(row.dataset.i)];
     const collapse = { label: "Collapse All", run: () => this.collapseAll() };
-    if (!n) return showContextMenu(e, [collapse]);
+    if (!n || n.note) return showContextMenu(e, [collapse]);
     this.selected = n.path;
     this.schedule();
     if (n.type === "dir") {
@@ -251,9 +279,19 @@ export class FileTree {
         break;
       case "Enter":
       case " ":
+        if (n?.note) break;
         if (n?.type === "dir") void this.toggle(n);
         else if (n) this.onOpen(n.path, e.key === "Enter");
         break;
+      case "ContextMenu":
+      case "F10": {
+        if (e.key === "F10" && !e.shiftKey) return;
+        // The row's own context menu, anchored under the selected row.
+        const row = idx >= 0 ? this.scroller.querySelector<HTMLElement>(`.row[data-i="${idx}"]`) : null;
+        const r = (row ?? this.scroller).getBoundingClientRect();
+        (row ?? this.scroller).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 24, clientY: row ? r.bottom : r.top + 8 }));
+        break;
+      }
       default:
         return;
     }

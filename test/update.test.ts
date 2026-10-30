@@ -109,7 +109,7 @@ describe("CLI binary updates", () => {
     const install: Install = { kind: "cli", target, asset: (v) => `codeviewer-${v}-linux-x64` };
     const version = release.version ?? "1.1.0";
     const fetchFn = await fakeGitHub({ version, files: { [`codeviewer-${version}-linux-x64`]: new TextEncoder().encode("new binary") }, ...release });
-    return { dir, target, updater: new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: keyPem, install }) };
+    return { dir, target, updater: new Updater({ version: "1.0.0", fetch: fetchFn, assetHosts: ["example.test"], publicKey: keyPem, install }) };
   }
 
   test("installs a verified update, reporting every phase", async () => {
@@ -122,6 +122,18 @@ describe("CLI binary updates", () => {
     expect((await stat(target)).mode & 0o111).toBeTruthy();
     expect([...new Set(phases)]).toEqual(["signature", "download", "checksum", "install", "done"]);
     expect((await readdir(dir)).filter((n) => n.startsWith(".codeviewer-update"))).toEqual([]);
+  });
+
+  test("downloads only from the release hosts, over https", async () => {
+    const dir = await tmp();
+    const target = path.join(dir, "codeviewer");
+    await writeFile(target, "old binary");
+    const install: Install = { kind: "cli", target, asset: (v) => `codeviewer-${v}-linux-x64` };
+    const fetchFn = await fakeGitHub({ version: "1.1.0", files: { "codeviewer-1.1.0-linux-x64": new TextEncoder().encode("new binary") } });
+    // The API answer names assets on example.test; by default only GitHub's hosts are trusted.
+    const u = new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: keyPem, install });
+    await expect(u.apply()).rejects.toThrow(/refusing to download from example.test/);
+    expect(await readFile(target, "utf8")).toBe("old binary");
   });
 
   test("rejects a checksum list signed by another key", async () => {
@@ -157,13 +169,13 @@ describe("CLI binary updates", () => {
     const { target } = await setup();
     const install: Install = { kind: "cli", target, asset: (v) => `codeviewer-${v}-linux-x64` };
     const fetchFn = await fakeGitHub({ version: "1.1.0", files: { "codeviewer-1.1.0-linux-x64": new Uint8Array([1]) } });
-    const u = new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: "# placeholder", install });
+    const u = new Updater({ version: "1.0.0", fetch: fetchFn, assetHosts: ["example.test"], publicKey: "# placeholder", install });
     expect((await u.check(true)).reason).toMatch(/no update signing key/);
   });
 
   test("running from source is never auto-updated", async () => {
     const fetchFn = await fakeGitHub({ version: "1.1.0", files: {} });
-    const u = new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: keyPem, install: { kind: "source", target: "", asset: () => "" } });
+    const u = new Updater({ version: "1.0.0", fetch: fetchFn, assetHosts: ["example.test"], publicKey: keyPem, install: { kind: "source", target: "", asset: () => "" } });
     expect((await u.check(true)).reason).toMatch(/git pull/);
   });
 });
@@ -185,7 +197,7 @@ describe("Linux package updates", () => {
 
     const install: Install = { kind: "linux-app", target, asset: (v) => `codeviewer-${v}-linux-x64.tar.gz` };
     const fetchFn = await fakeGitHub({ version: "1.1.0", files: { "codeviewer-1.1.0-linux-x64.tar.gz": new Uint8Array(await Bun.file(tgz).arrayBuffer()) } });
-    await new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: keyPem, install }).apply();
+    await new Updater({ version: "1.0.0", fetch: fetchFn, assetHosts: ["example.test"], publicKey: keyPem, install }).apply();
     expect(await readFile(path.join(target, "codeviewer"), "utf8")).toBe("new");
     expect(await readFile(path.join(target, "chromium", "chrome"), "utf8")).toBe("new chrome");
   });
@@ -219,7 +231,7 @@ describe.if(process.platform === "darwin")("macOS app updates", () => {
     const target = await installed("old");
     const install: Install = { kind: "macos-app", target, asset: (v) => `Codeviewer-${v}-macos-arm64.dmg` };
     const fetchFn = await fakeGitHub({ version: "1.1.0", files: { "Codeviewer-1.1.0-macos-arm64.dmg": await makeDmg("new") } });
-    await new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: keyPem, install }).apply();
+    await new Updater({ version: "1.0.0", fetch: fetchFn, assetHosts: ["example.test"], publicKey: keyPem, install }).apply();
     expect(await readFile(path.join(target, "Contents", "MacOS", "Codeviewer"), "utf8")).toContain("echo new");
   }, 60_000);
 
@@ -227,7 +239,7 @@ describe.if(process.platform === "darwin")("macOS app updates", () => {
     const target = await installed("old");
     const install: Install = { kind: "macos-app", target, asset: (v) => `Codeviewer-${v}-macos-arm64.dmg` };
     const fetchFn = await fakeGitHub({ version: "1.1.0", files: { "Codeviewer-1.1.0-macos-arm64.dmg": await makeDmg("new", true) } });
-    await expect(new Updater({ version: "1.0.0", fetch: fetchFn, publicKey: keyPem, install }).apply()).rejects.toThrow(/codesign/);
+    await expect(new Updater({ version: "1.0.0", fetch: fetchFn, assetHosts: ["example.test"], publicKey: keyPem, install }).apply()).rejects.toThrow(/codesign/);
     expect(await readFile(path.join(target, "Contents", "MacOS", "Codeviewer"), "utf8")).toBe("old");
   }, 60_000);
 });

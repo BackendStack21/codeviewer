@@ -62,7 +62,7 @@
   --fg: #d6dbe5;
   --fg-strong: #f1f4fa;
   --fg-muted: #8b94a5;
-  --fg-faint: #535c6c;
+  --fg-faint: #626b7c;
   --accent: #7aa2ff;
   --accent-2: #b38cff;
   --accent-fg: #0c0f15;
@@ -89,7 +89,7 @@
   /* syntax */
   --sx-k: #c792ea;
   --sx-s: #a5d68a;
-  --sx-c: #5d6879;
+  --sx-c: #6f7a8c;
   --sx-n: #f5a96b;
   --sx-f: #82b8ff;
   --sx-t: #6fd6c6;
@@ -138,7 +138,7 @@
   --fg: #262c38;
   --fg-strong: #0f1420;
   --fg-muted: #667085;
-  --fg-faint: #a3abb9;
+  --fg-faint: #7c8595;
   --accent: #3b6cf6;
   --accent-2: #8b5cf6;
   --accent-fg: #ffffff;
@@ -163,7 +163,7 @@
 
   --sx-k: #8432d6;
   --sx-s: #187a3a;
-  --sx-c: #98a1b0;
+  --sx-c: #6b7684;
   --sx-n: #b35300;
   --sx-f: #1060d0;
   --sx-t: #08808c;
@@ -195,7 +195,7 @@
   --ansi-12: #218bff;
   --ansi-13: #a475f9;
   --ansi-14: #3192aa;
-  --ansi-15: #8c959f;
+  --ansi-15: #57606a;
 }
 
 /* ───────────────────────── base ───────────────────────── */
@@ -441,9 +441,11 @@ svg {
   cursor: col-resize;
 }
 .splitter:hover,
-.splitter.active {
+.splitter.active,
+.splitter:focus-visible {
   background: var(--accent);
   transition: background 0.15s 0.15s;
+  outline: none;
 }
 
 .main {
@@ -773,7 +775,8 @@ svg {
   height: 12px;
 }
 .tab:hover .tab-close,
-.tab.active .tab-close {
+.tab.active .tab-close,
+.tab-close:focus-visible {
   opacity: 1;
 }
 .tab-close:hover {
@@ -1751,8 +1754,13 @@ mark.cur {
   gap: 6px;
   padding: 2px 7px;
   border-radius: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.st-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .st-root {
   color: var(--fg);
@@ -1806,6 +1814,12 @@ button.st-item:hover {
 .offline .st-dot {
   background: var(--danger);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 20%, transparent);
+}
+.offline .st-root::after {
+  content: "disconnected \00b7 reconnecting\2026";
+  color: var(--danger);
+  margin-left: 6px;
+  white-space: nowrap;
 }
 
 .toast {
@@ -2019,6 +2033,35 @@ li[data-state="done"] .upd-mark {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+  /* Shown statically for their usual time instead of faded (their script hides them). */
+  .toast.show {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  .ln.flash,
+  .dr.flash {
+    animation: none;
+    background: var(--flash);
+  }
+  .sv-progress {
+    animation: none;
+    background: var(--accent);
+    background-size: 100% 100%;
+  }
+}
+
+/* Screen-reader-only live region (toasts, status changes). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ───────────────────────── context menu ───────────────────────── */
@@ -2080,6 +2123,8 @@ li[data-state="done"] .upd-mark {
 .sv-count { margin-left: auto; background: var(--bg-active); border-radius: 8px; padding: 0 6px; color: var(--fg-muted); font-size: 11px; }
 .sv-row { display: flex; gap: 8px; padding: 1px 10px 1px 22px; cursor: pointer; font-family: var(--font-mono); white-space: nowrap; }
 .sv-row:hover, .sv-row.sel { background: var(--bg-hover); }
+.sv-results:focus-visible { outline: none; }
+.sv-results:focus-visible .sv-row.sel { box-shadow: inset 2px 0 0 var(--accent); }
 .sv-ln { color: var(--fg-faint); min-width: 3ch; text-align: right; }
 .sv-pv { overflow: hidden; text-overflow: ellipsis; }
 .sv-pv mark { background: var(--mark); color: inherit; border-radius: 2px; }
@@ -2191,3 +2236,51 @@ li[data-state="done"] .upd-mark {
 .dr-gap:hover .dt { color: var(--accent); }
 .dr.cur { box-shadow: inset 3px 0 0 var(--accent); }
 .dr.flash { animation: flash 1.5s var(--ease) both; }
+
+/* Keyboard focus on the code and diff scrollers (their outline is otherwise suppressed). */
+.code-scroll:focus-visible,
+.diff-scroll:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ───────────────────────── UI scale, tab hints, explorer notes, help ───────────────────────── */
+/* ⌘= / ⌘- scale the chrome with the code; positioned popups (menus, toast, peek) stay in viewport px. */
+.side-head, .tree-scroll, .search-view, .changes-view, .tabbar, .crumbs, .statusbar, .panel-head, .palette, .upd {
+  zoom: var(--ui-scale, 1);
+}
+.tab-dir {
+  margin-left: 4px;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.row.note {
+  color: var(--fg-faint);
+  font-style: italic;
+  cursor: default;
+}
+.row.note.error {
+  color: var(--danger);
+}
+.help {
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.help h3 {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.help .kb {
+  gap: 5px;
+  min-width: 0;
+}
+.help .kb-row {
+  gap: 16px;
+  font-size: 12.5px;
+}
+.help .welcome-hint {
+  margin-top: 16px;
+}

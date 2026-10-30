@@ -803,5 +803,67 @@
     ]
    }
   ]
+ },
+ {
+  "name": "a delimiter row is not a lazy continuation of a quoted paragraph",
+  "src": "> a | b\n--- | ---",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "paragraph",
+      "children": [
+       {
+        "type": "text",
+        "value": "a | b\n--- | ---"
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "table rows do not continue lazily outside the quote",
+  "src": "> a|b\n> -|-\nc",
+  "ast": [
+   {
+    "type": "blockquote",
+    "children": [
+     {
+      "type": "table",
+      "align": [
+       null,
+       null
+      ],
+      "head": [
+       [
+        {
+         "type": "text",
+         "value": "a"
+        }
+       ],
+       [
+        {
+         "type": "text",
+         "value": "b"
+        }
+       ]
+      ],
+      "rows": []
+     }
+    ]
+   },
+   {
+    "type": "paragraph",
+    "children": [
+     {
+      "type": "text",
+      "value": "c"
+     }
+    ]
+   }
+  ]
  }
 ]

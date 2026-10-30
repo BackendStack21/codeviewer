@@ -78,3 +78,24 @@ test("FIFOs and other special files are refused instead of hanging the server", 
   expect(performance.now() - t0).toBeLessThan(2000);
   expect(await (await fetch(`${base}/api/file?path=a.txt`, { headers: auth })).text()).toBe("hello");
 });
+
+test("the terminal token only opens files: /api/open accepts it, everything else rejects it", async () => {
+  const open = (t: string) =>
+    fetch(`${base}/api/open`, { method: "POST", headers: { "x-cv-token": t, "content-type": "application/json" }, body: JSON.stringify({ path: "a.txt" }) });
+  expect(app.openToken).not.toBe(token);
+  expect(app.openToken.length).toBeGreaterThanOrEqual(40);
+  expect((await open(app.openToken)).status).toBe(200);
+  expect((await open(token)).status).toBe(200);
+  expect((await open("nope")).status).toBe(401);
+  expect((await fetch(`${base}/api/info`, { headers: { "x-cv-token": app.openToken } })).status).toBe(401);
+  expect((await fetch(`${base}/api/file?path=a.txt`, { headers: { "x-cv-token": app.openToken } })).status).toBe(401);
+  const refused = await new Promise<string>((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/events?t=${app.openToken}`, { headers: { origin: base } } as never);
+    ws.onopen = () => {
+      ws.close();
+      resolve("open");
+    };
+    ws.onerror = () => resolve("refused");
+  });
+  expect(refused).toBe("refused");
+});

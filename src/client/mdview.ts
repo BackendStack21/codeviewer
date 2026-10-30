@@ -54,6 +54,11 @@ export class MarkdownView {
       e.preventDefault();
       this.clearNotice();
       this.scrollToFragment(href.slice(1));
+    } else if (/^https?:/i.test(href)) {
+      // Like terminal links: the server hands http(s) URLs to the default browser, so the
+      // locked-down app window never navigates or opens a second window itself.
+      e.preventDefault();
+      void api.external(href);
     }
   }
 

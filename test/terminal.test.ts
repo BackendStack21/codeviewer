@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Terminal, BOLD, INVERSE, WIDE, RGB_FLAG, DEFAULT } from "../src/client/term/terminal.ts";
+import { linkTitle } from "../src/client/term/view.ts";
 
 function mk(cols = 20, rows = 5) {
   const replies: string[] = [];
@@ -278,5 +279,152 @@ describe("terminal emulator", () => {
     t.silent = false;
     t.write(`\x1b]52;c;${btoa("new")}\x07`);
     expect(copies).toEqual(["new"]);
+  });
+});
+
+describe("wide characters under ICH/DCH, ZWJ joins, DECSTR and OSC strings", () => {
+  const cells = (t: Terminal, y: number) => t.lines[y]!.text.map((c, i) => (t.lines[y]!.fl[i]! & WIDE ? c + "W" : c));
+
+  test("DCH from the second half of a wide character blanks the character (xterm)", () => {
+    const { t } = mk(10, 2);
+    t.write("ab漢cd\x1b[1;4H\x1b[P");
+    expect(cells(t, 0).slice(0, 6)).toEqual(["a", "b", " ", "c", "d", " "]);
+  });
+
+  test("ICH from the second half of a wide character blanks it; a wide character pushed onto the last column is dropped", () => {
+    const { t } = mk(10, 2);
+    t.write("ab漢cd\x1b[1;4H\x1b[@");
+    expect(cells(t, 0).slice(0, 7)).toEqual(["a", "b", " ", " ", " ", "c", "d"]);
+    const { t: u } = mk(5, 2);
+    u.write("abc漢\x1b[1;1H\x1b[@");
+    expect(cells(u, 0)).toEqual([" ", "a", "b", "c", " "]);
+    expect(u.lines[0]!.fl[4]! & WIDE).toBe(0);
+    // Shifting by two lands the lead half on the last column, the trailing half past the edge.
+    const { t: v } = mk(5, 2);
+    v.write("ab漢e\x1b[1;1H\x1b[2@");
+    expect(cells(v, 0)).toEqual([" ", " ", "a", "b", " "]);
+  });
+
+  test("DCH of several cells from the second half of a wide character blanks it once and shifts the rest", () => {
+    const { t } = mk(10, 2);
+    t.write("ab漢cd\x1b[1;4H\x1b[2P");
+    expect(cells(t, 0).slice(0, 5)).toEqual(["a", "b", " ", "d", " "]);
+    expect(t.lines[0]!.toString()).toBe("ab d");
+  });
+
+  test("resize keeps explicit tab stops and seeds default stops only in the new columns", () => {
+    const { t } = mk(20, 3);
+    t.write("\x1b[3g\x1b[1;5H\x1bH\x1b[H"); // clear all stops, set one at column 4, home
+    t.resize(30, 3);
+    t.write("\t");
+    expect(t.cur.x).toBe(4);
+    t.write("A\t");
+    expect(t.cur.x).toBe(24); // 8 and 16 stay cleared; 24 is new ground and gets a default stop
+    t.write("\t");
+    expect(t.cur.x).toBe(29);
+  });
+
+  test("a glyph after a ZWJ joins the cluster only while the cursor is still there", () => {
+    const { t, row } = mk(20, 5);
+    t.write("👩\u200d\x1b[2;10HX");
+    expect(row(1)).toBe("         X");
+    expect([t.cur.x, t.cur.y]).toEqual([10, 1]);
+    const { t: u } = mk(20, 2);
+    u.write("👩\u200d👧");
+    expect(u.lines[0]!.text[0]).toBe("👩\u200d👧");
+    expect(u.cur.x).toBe(2);
+  });
+
+  test("DECSTR resets the charsets and the saved cursor", () => {
+    const { t, row } = mk(10, 2);
+    t.write("123\x1b7\x1b(0q\x1b[!pq");
+    expect(row(0)).toBe("123\u2500q"); // the q after the soft reset is ASCII again
+    t.write("\x1b8X"); // the saved cursor is gone: DECRC homes instead of returning to column 3
+    expect(row(0)).toBe("X23\u2500q");
+  });
+
+  test("C0 controls inside an OSC string are ignored", () => {
+    let title = "";
+    const t = new Terminal(20, 2, { reply: () => {}, title: (s) => (title = s) });
+    t.write("\x1b]0;ab\ncd\x07");
+    expect(title).toBe("abcd");
+    expect(t.lines[1]!.toString()).toBe("");
+  });
+});
+
+describe("completed lines for assistive technology (onLine)", () => {
+  const mkLog = (cols = 10, rows = 3) => {
+    const lines: string[] = [];
+    const t = new Terminal(cols, rows, { reply: () => {}, onLine: (s) => lines.push(s) });
+    return { t, lines };
+  };
+
+  test("reports each line once, in order, when a line feed leaves it or it scrolls into history", () => {
+    const { t, lines } = mkLog();
+    t.write("one\r\ntwo\r\n");
+    expect(lines).toEqual(["one", "two"]);
+    t.write("three\r\nfour\r\nfive"); // "one" and "two" scroll off: not repeated
+    expect(lines).toEqual(["one", "two", "three", "four"]);
+    t.write("\x1b[S"); // "three" scrolls into history without a line feed past it: already reported
+    expect(lines).toEqual(["one", "two", "three", "four"]);
+    t.write("\x1b[2S"); // "five" was never passed by a line feed: reported as it leaves the screen
+    expect(lines).toEqual(["one", "two", "three", "four", "five"]);
+  });
+
+  test("blank lines are skipped and a rewritten line is reported again", () => {
+    const { t, lines } = mkLog();
+    t.write("\r\n\r\nx\r\n");
+    expect(lines).toEqual(["x"]);
+    t.write("\x1b[A\rxy\r\n"); // back up, overwrite, line feed again
+    expect(lines).toEqual(["x", "xy"]);
+  });
+
+  test("soft-wrapped output reports each screen line", () => {
+    const { t, lines } = mkLog(5, 3);
+    t.write("abcdefgh\r\n");
+    expect(lines).toEqual(["abcde", "fgh"]);
+  });
+
+  test("nothing is reported during a silent replay, nor later for lines the replay completed", () => {
+    const { t, lines } = mkLog();
+    t.silent = true;
+    t.write("old1\r\nold2\r\n$ ");
+    t.silent = false;
+    expect(lines).toEqual([]);
+    // The prompt line was still open when the replay ended: finishing it live is new output.
+    t.write("ls\r\nnew\r\n\r\n\r\n"); // scrolls the replayed lines into history
+    expect(lines).toEqual(["$ ls", "new"]);
+  });
+
+  test("the alternate screen is not reported", () => {
+    const { t, lines } = mkLog();
+    t.write("\x1b[?1049happ\r\nmenu\r\n\x1b[?1049l");
+    expect(lines).toEqual([]);
+    t.write("shell\r\n");
+    expect(lines).toEqual(["shell"]);
+  });
+
+  test("the hook costs nothing when the host does not subscribe", () => {
+    const t = new Terminal(10, 2, { reply: () => {} });
+    t.write("a\r\nb\r\nc\r\n");
+    expect(t.scrollback.length).toBe(2);
+  });
+});
+
+describe("hyperlink tooltip (OSC 8 label vs target)", () => {
+  test("plain labels show the target", () => {
+    expect(linkTitle("README.md", "https://evil.example/x")).toBe("https://evil.example/x");
+    expect(linkTitle("docs", "file:///tmp/a.txt")).toBe("file:///tmp/a.txt");
+  });
+
+  test("a label that looks like a URL of another host is flagged", () => {
+    expect(linkTitle("https://github.com/a/b", "https://evil.example/x")).toBe("Link target: https://evil.example/x");
+    expect(linkTitle("www.github.com", "https://evil.example/")).toBe("Link target: https://evil.example/");
+    expect(linkTitle("https://[bad", "https://evil.example/")).toBe("Link target: https://evil.example/");
+  });
+
+  test("a label that names the same host is not flagged", () => {
+    expect(linkTitle("https://github.com/a/b", "https://github.com/a/b/tree/main")).toBe("https://github.com/a/b/tree/main");
+    expect(linkTitle("www.GitHub.com/x", "https://www.github.com/x")).toBe("https://www.github.com/x");
   });
 });

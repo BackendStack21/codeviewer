@@ -219,12 +219,29 @@ export function globsOk(s: string): boolean {
   return s.length <= MAX_GLOB_CHARS && parseGlobs(s).length <= MAX_GLOBS;
 }
 
+/**
+ * Editor-style glob semantics on root-relative paths: a pattern without "/" matches in every
+ * folder (`*.ts` finds src/deep/b.ts, and a bare name such as `src` also matches everything under
+ * it), a trailing "/" means the folder's contents (`src/` is `src` + `/**`), and a pattern with "/"
+ * is matched as written.
+ */
+export function compileGlob(pattern: string): (path: string) => boolean {
+  if (pattern.endsWith("/")) pattern += "**";
+  if (pattern.includes("/")) {
+    const g = new Bun.Glob(pattern);
+    return (p) => g.match(p);
+  }
+  const anywhere = new Bun.Glob(`**/${pattern}`);
+  const below = new Bun.Glob(`**/${pattern}/**`);
+  return (p) => anywhere.match(p) || below.match(p);
+}
+
 /** Keeps paths matching any include glob (all when none) and no exclude glob (Bun.Glob, root-relative paths). */
 export function filterByGlobs(files: string[], include: string[], exclude: string[]): string[] {
   if (!include.length && !exclude.length) return files;
-  const inc = include.map((g) => new Bun.Glob(g));
-  const exc = exclude.map((g) => new Bun.Glob(g));
-  return files.filter((f) => (!inc.length || inc.some((g) => g.match(f))) && !exc.some((g) => g.match(f)));
+  const inc = include.map(compileGlob);
+  const exc = exclude.map(compileGlob);
+  return files.filter((f) => (!inc.length || inc.some((g) => g(f))) && !exc.some((g) => g(f)));
 }
 
 /** Drops every path whose realpath is not inside rootReal (symlinked parents, missing files). */

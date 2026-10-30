@@ -11,8 +11,10 @@ import { looksBinary, openRegular } from "./files.ts";
  * programs (filters, textconv, diff drivers, gpg, fsmonitor). Hardening, layered:
  * - GIT_ATTR_SOURCE = the empty tree: in-tree .gitattributes are ignored, so no path is
  *   bound to a filter/diff driver.
- * - Every filter.* / diff.* driver defined in any config is blanked with -c overrides
- *   (covers $GIT_DIR/info/attributes and global attributes too).
+ * - Every filter.* / diff.* / merge.* driver defined in any config is blanked through
+ *   GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n (covers $GIT_DIR/info/attributes and global
+ *   attributes too). Not `-c key=value`: git splits that at the first "=", so a driver
+ *   named "a=b" would survive as `filter.a = "b.clean="` with the real driver still armed.
  * - fsmonitor off, signature verification off, no textconv, submodules ignored (their
  *   configs are untrusted too), no external diff, no pager, no prompts.
  * - GIT_OPTIONAL_LOCKS=0: never writes the index or takes locks.
@@ -32,6 +34,8 @@ export interface GitStatus {
   stash: number;
   /** root-relative path → porcelain XY (e.g. ".M", "A.", "??", "!!", "UU"). Dirs end with "/". */
   files: Record<string, string>;
+  /** The viewed folder is itself git-ignored (git lists only the folder, so `files` has no "!!" entries). */
+  rootIgnored: boolean;
   head: { hash: string; subject: string; author: string; time: number } | null;
 }
 
@@ -157,31 +161,39 @@ export class Git {
     return new Git(bin, root, prefix, [...new Set([gitDir, commonDir])], env, emptyTree);
   }
 
-  private overrides: Promise<string[]> | null = null;
+  private overrides: Promise<Record<string, string | undefined>> | null = null;
 
-  /** -c overrides that blank every filter/diff driver any config defines (cached until config changes). */
-  private neutralize(): Promise<string[]> {
+  /** The run environment, with every filter/diff/merge driver any config defines blanked (cached until config changes). */
+  private neutralize(): Promise<Record<string, string | undefined>> {
     return (this.overrides ??= this.computeOverrides());
   }
 
-  private async computeOverrides(): Promise<string[]> {
+  private async computeOverrides(): Promise<Record<string, string | undefined>> {
     const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\."], 1 << 20, this.env);
-    const out: string[] = [];
+    const pairs: [string, string][] = [];
     const drivers = new Set<string>();
     for (const key of new TextDecoder().decode(r.out).split("\n")) {
       const m = /^(filter|diff|merge)\.(.+)\.[^.]+$/.exec(key.trim());
       if (m) drivers.add(`${m[1]}.${m[2]}`);
     }
     for (const d of drivers) {
-      if (d.startsWith("filter.")) out.push("-c", `${d}.clean=`, "-c", `${d}.smudge=`, "-c", `${d}.process=`, "-c", `${d}.required=false`);
-      else if (d.startsWith("diff.")) out.push("-c", `${d}.textconv=`, "-c", `${d}.command=`);
-      else out.push("-c", `${d}.driver=`);
+      if (d.startsWith("filter.")) pairs.push([`${d}.clean`, ""], [`${d}.smudge`, ""], [`${d}.process`, ""], [`${d}.required`, "false"]);
+      else if (d.startsWith("diff.")) pairs.push([`${d}.textconv`, ""], [`${d}.command`, ""]);
+      else pairs.push([`${d}.driver`, ""]);
     }
-    return out;
+    // Command-line-level config (same precedence as -c), but key and value travel separately.
+    // Appended after any entries the user's own environment carries.
+    const from = Math.max(0, Number(this.env.GIT_CONFIG_COUNT) || 0);
+    const env: Record<string, string | undefined> = { ...this.env, GIT_CONFIG_COUNT: String(from + pairs.length) };
+    pairs.forEach(([k, v], i) => {
+      env[`GIT_CONFIG_KEY_${from + i}`] = k;
+      env[`GIT_CONFIG_VALUE_${from + i}`] = v;
+    });
+    return env;
   }
 
   private async git(args: string[], maxBytes = MAX_OUT) {
-    return run(this.bin, this.root, [...HARDEN, ...(await this.neutralize()), ...args], maxBytes, this.env);
+    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, await this.neutralize());
   }
 
   /**
@@ -214,7 +226,7 @@ export class Git {
     ]);
     const s: GitStatus = {
       repo: true, branch: null, detached: false, oid: null, upstream: null, ahead: 0, behind: 0,
-      state: this.opState(), stash: 0, files: {}, head: null,
+      state: this.opState(), stash: 0, files: {}, rootIgnored: false, head: null,
     };
     if (stash.code === 0) s.stash = Number(new TextDecoder().decode(stash.out).trim()) || 0;
     if (head.code === 0) {
@@ -225,6 +237,11 @@ export class Git {
 
     const recs = new TextDecoder().decode(st.out).split("\0");
     const add = (p: string, xy: string) => {
+      // The viewed subfolder itself: status collapses an ignored folder into one "!! sub/" record.
+      if (this.prefix && (p === this.prefix || p + "/" === this.prefix)) {
+        if (xy === "!!") s.rootIgnored = true;
+        return;
+      }
       if (!p.startsWith(this.prefix)) return;
       const rel = p.slice(this.prefix.length);
       if (rel) s.files[rel] = xy;
@@ -262,7 +279,9 @@ export class Git {
   }
 
   private opState(): string | null {
-    const has = (f: string) => this.gitDirs.some((d) => existsSync(path.join(d, f)));
+    // Operation markers are per worktree: only this worktree's git dir, never the common dir
+    // (a merge in the main checkout must not show as "merging" in a linked worktree).
+    const has = (f: string) => existsSync(path.join(this.gitDirs[0]!, f));
     if (has("rebase-merge") || has("rebase-apply")) return "rebasing";
     if (has("MERGE_HEAD")) return "merging";
     if (has("CHERRY_PICK_HEAD")) return "cherry-picking";
@@ -292,7 +311,9 @@ export class Git {
   /**
    * The branch this one is reviewed against: the remote's default branch (origin/HEAD), else
    * the first of main/master/develop/trunk that exists and is not the current branch, else the
-   * upstream. `same` means the merge-base is HEAD itself (nothing committed on top of the base).
+   * upstream. On one of those branches itself the upstream comes first: a stale local `master`
+   * must not win over `origin/main`. `same` means the merge-base is HEAD itself (nothing
+   * committed on top of the base).
    */
   async detectBase(headOid: string): Promise<Changes["base"]> {
     const dec = (r: { code: number; out: Uint8Array }) => (r.code === 0 ? new TextDecoder().decode(r.out).trim() : "");
@@ -303,8 +324,10 @@ export class Git {
     ]);
     const refs: string[] = [];
     if (originHead.startsWith("refs/remotes/")) refs.push(originHead);
+    const up = upstream.startsWith("refs/remotes/") ? upstream : "";
+    if (up && BASE_NAMES.includes(branch)) refs.push(up);
     for (const n of BASE_NAMES) if (n !== branch) refs.push(`refs/heads/${n}`);
-    if (upstream.startsWith("refs/remotes/") && !refs.includes(upstream)) refs.push(upstream);
+    if (up && !refs.includes(up)) refs.push(up);
     for (const ref of refs) {
       const oid = await this.rev(`${ref}^{commit}`);
       if (!oid) continue;
@@ -437,10 +460,11 @@ export class Git {
   private async untracked(): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
     const r = await this.git(["ls-files", "-z", "--others", "--exclude-standard", "--", "."]);
     if (r.code !== 0) return { files: [], truncated: false };
+    // A nested repository is listed as "dir/": not a file, nothing to count or diff.
     const all = new TextDecoder()
       .decode(r.out)
       .split("\0")
-      .filter((f) => f && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
+      .filter((f) => f && !f.endsWith("/") && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
     const paths = all.slice(0, MAX_CHANGES);
     const files: ChangeEntry[] = paths.map((p) => ({ path: p, status: "?", added: null, removed: null, binary: false }));
     // A few files at a time through one 64 KiB buffer each: never 200 MiB of buffers per request.
