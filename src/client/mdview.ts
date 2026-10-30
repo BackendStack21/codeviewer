@@ -1,6 +1,7 @@
 import { api } from "./api.ts";
 import { parseMarkdown, slugify } from "./markdown.ts";
 import { renderMarkdown } from "./mdrender.ts";
+import { isEditable } from "./util.ts";
 
 export interface MarkdownViewOptions {
   /** Repo-relative path of the document; relative links resolve against its folder. */
@@ -22,12 +23,26 @@ export class MarkdownView {
   /** Bumped on every rebuild and dispose; late image loads from an older epoch are dropped. */
   private epoch = 0;
   private blobs: string[] = [];
+  /** True while this preview is the editor's visible tab; select-all is only claimed then. */
+  private active = false;
+  private off: (() => void)[] = [];
 
   constructor(text: string, fontSize = 13, private opts: MarkdownViewOptions = {}) {
     this.el = document.createElement("div");
     this.el.className = "md-view";
     this.setFontSize(fontSize);
     this.el.addEventListener("click", (e) => this.onClick(e));
+    // ⌘A / Ctrl+A selects the document, never the whole page (sidebar, tabs, status bar). Listens on the
+    // document because focus rarely sits inside a read-only preview; the terminal and inputs claim
+    // the key first (defaultPrevented / editable target).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !this.active || isEditable(e.target)) return;
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "a") return;
+      e.preventDefault();
+      this.selectAll();
+    };
+    document.addEventListener("keydown", onKey);
+    this.off.push(() => document.removeEventListener("keydown", onKey));
     this.build(text);
     if (opts.hash) this.scrollToFragment(opts.hash);
   }
@@ -141,7 +156,24 @@ export class MarkdownView {
     this.el.style.fontSize = `${px}px`;
   }
 
+  /** Called by the editor when this preview becomes (or stops being) the visible tab. */
+  setActive(on: boolean) {
+    this.active = on;
+  }
+
+  /** Selects the rendered document only (not the notice, nor anything outside the preview). */
+  selectAll() {
+    const sel = window.getSelection?.();
+    if (!sel || !this.root || typeof document.createRange !== "function") return;
+    const r = document.createRange();
+    r.selectNodeContents(this.root);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
   dispose() {
+    for (const f of this.off.splice(0)) f();
+    this.active = false;
     this.revokeAll();
     this.text = "";
     this.root = null;

@@ -28,7 +28,7 @@ export class Updates {
 
   constructor() {
     this.box = h("div", { class: "upd", role: "dialog", "aria-modal": "true", "aria-label": "Software update", tabindex: "-1" });
-    this.el = h("div", { class: "overlay upd-overlay", hidden: true }, this.box);
+    this.el = h("div", { class: "overlay upd-overlay", hidden: true }, h("div", { class: "upd-shell" }, this.box));
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.el && !this.installing) this.close();
     });

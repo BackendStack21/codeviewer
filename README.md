@@ -45,10 +45,18 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
   launch-time check with "Toggle Automatic Update Checks" or `CODEVIEWER_NO_UPDATE_CHECK=1`.
 - **Live:** files that change on disk reload in place, the changed lines flash, the gutter marks
   them, and the explorer shows dots on changed files.
+- **Private:** no telemetry, crash reporting, account or cloud. The only outbound connection is the
+  launch-time update check against GitHub's releases API, and it can be switched off (see
+  [Privacy](#privacy)).
+- **Keyboard and screen-reader friendly:** ⌘/ lists every shortcut in your platform's key names.
+  Explorer, search results, Changes and the palette expose their selection to assistive tech, the
+  terminal mirrors each finished line into a live region, splitters and diff gaps work from the keyboard,
+  and the UI chrome scales with the font size.
 - **Fast:** a virtualized code view and tree, an incremental highlighter, and dirty-row
   terminal rendering. A 100k-line file opens instantly.
 
-See [DESIGN.md](DESIGN.md) for the expert-panel design review and the architecture.
+See [DESIGN.md](DESIGN.md) for the expert-panel design review and the architecture, and
+[AGENTS.md](AGENTS.md) if you (or your agent) want to work on the code.
 
 ## Install
 
@@ -98,7 +106,7 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 
 ## Selection and copy
 
-Select code in the viewer as you would in any editor, dragging in either direction. Copy (Cmd/Ctrl+C or the context menu) puts the exact text on the clipboard, including parts scrolled out of view, and never includes line numbers, the blame label or the truncation label on very long lines. Cmd/Ctrl+A selects the whole file while focus is in the code view. The blame label stays out of the way while you drag or have text selected.
+Select code in the viewer as you would in any editor, dragging in either direction. Copy (Cmd/Ctrl+C or the context menu) puts the exact text on the clipboard, including parts scrolled out of view, and never includes line numbers, the blame label or the truncation label on very long lines. Cmd/Ctrl+A selects the whole file while focus is in the code view, and in a Markdown preview it selects the rendered document (never the sidebar, tabs or status bar). The blame label stays out of the way while you drag or have text selected.
 
 ## Markdown
 
@@ -138,7 +146,22 @@ The server binds to localhost and serves a shell. It was hardened through an adv
   - Terminal clipboard writes always show a notice.
 - **Markdown:** repository files are untrusted. The preview never uses `innerHTML`, shows no raw HTML,
   filters link schemes and loads no remote images (the CSP is unchanged).
+- **Terminals:** the shell gets a narrow token that only lets `codeviewer open` ask the viewer to show
+  a file; the session token never enters a process environment.
+- **Updates:** downloads are accepted from GitHub over https only, `SHA256SUMS` must carry a valid
+  Ed25519 signature from the release key, sizes are capped, and every file's SHA-256 is checked
+  before an atomic swap.
 - **Builds:** the Linux browser is pinned by SHA-256 in `packaging/browser-pins.json`.
+
+## Privacy
+
+Codeviewer is a local server on `127.0.0.1` plus a window that can only talk to it. Nothing you view,
+type or run is sent anywhere: there is no telemetry, crash reporting, account or cloud component, and
+the app window keeps no browser history, cookies or cache. The single outbound request is the
+launch-time check of GitHub's releases API for a newer version; turn it off with
+"Toggle Automatic Update Checks" in the command palette or `CODEVIEWER_NO_UPDATE_CHECK=1`, after which
+the app never opens a socket to the internet. Settings are one JSON file in your profile
+(`~/.config/codeviewer/settings.json`; on macOS `~/Library/Application Support/codeviewer`).
 
 ## Verify a download
 
@@ -154,7 +177,7 @@ gh attestation verify <file> --repo BackendStack21/codeviewer
 
 ```sh
 bun run dev           # build the client and serve the current directory
-bun test              # emulator, highlighter, path-safety and fuzzy tests
+bun run test          # builds the client, then the whole suite (run one suite at a time; see AGENTS.md)
 bun run build         # slim binaries (dist/bin) + .dmg / .tar.gz for every target (dist/release)
 bun run build:local   # this machine only: dist/bin/codeviewer + its app (on a Mac: the .dmg)
 bun scripts/build.ts --slim             # binaries only, no browser download

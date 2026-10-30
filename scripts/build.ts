@@ -249,7 +249,7 @@ const INFO_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
   <key>LSMinimumSystemVersion</key><string>13.3</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSHumanReadableCopyright</key><string>Fonts: JetBrains Mono, Inter (SIL OFL 1.1)</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 21no.de · MIT License · Fonts: JetBrains Mono, Inter (SIL OFL 1.1)</string>
   <!-- The web view only ever talks to the loopback server. -->
   <key>NSAppTransportSecurity</key>
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>

@@ -293,6 +293,7 @@ export class Editor {
           if (plan.reuse) tab.md!.setText(f.text);
           else {
             tab.md = new MarkdownView(f.text, this.fontSize, { path: tab.path, onOpen: (p, hash) => this.onOpenLink(p, hash) });
+            tab.md.setActive(tab === this.active);
             tab.el.replaceChildren(tab.md.el);
             tab.el.prepend(this.viewToggle(tab, toggleLabel("preview"), icons.code));
           }
@@ -405,9 +406,11 @@ export class Editor {
   activate(tab: Tab) {
     if (this.active === tab) return;
     this.active?.code?.setVisible(false);
+    this.active?.md?.setActive(false);
     this.active = tab;
     this.body.replaceChildren(tab.el);
     tab.code?.setVisible(true);
+    tab.md?.setActive(true);
     tab.code?.schedule();
     tab.diff?.schedule();
     if (tab.gitStale) void this.refreshGit(tab);

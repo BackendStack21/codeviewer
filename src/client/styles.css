@@ -456,12 +456,13 @@ svg {
   background: var(--bg-editor);
 }
 .main > .editor {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 1 0;
+  min-height: 120px;
   min-width: 0;
 }
 .main > .panel {
-  flex: 0 0 var(--panel-h);
+  /* Shrinks (the editor's min size wins) so a size saved on a taller window never squeezes the editor out. */
+  flex: 0 1 var(--panel-h);
   min-height: 0;
   border-top: 1px solid var(--border);
 }
@@ -479,9 +480,13 @@ svg {
   flex-direction: row;
 }
 .panel-right .main > .panel {
-  flex: 0 0 var(--panel-w);
+  flex: 0 1 var(--panel-w);
   border-top: 0;
   border-left: 1px solid var(--border);
+}
+.panel-right .main > .editor {
+  min-height: 0;
+  min-width: 160px;
 }
 .panel-right .panel-split {
   height: auto;
@@ -685,6 +690,9 @@ svg {
   display: flex;
   flex-direction: column;
   background: var(--bg-editor);
+  /* Clips the welcome screen and tab bar when the terminal panel leaves little room: in-flow text would
+     otherwise paint over the panel's background (CSS paint order), reading as a transparent panel. */
+  overflow: hidden;
 }
 .tabbar {
   flex: none;
@@ -1426,6 +1434,10 @@ mark.cur {
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-height: 0;
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
   padding: 40px 24px;
   text-align: center;
   animation: fade 0.4s var(--ease);
@@ -1870,17 +1882,27 @@ button.st-item:hover {
   background: var(--accent);
 }
 .upd-overlay {
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
 }
-.upd {
-  width: min(520px, calc(100vw - 32px));
-  padding: 22px;
+/* The shell is never zoomed, so its size resolves against the real viewport in every engine (inside a
+   zoomed box WebKit scales vh/vw and percentages alike); only the content (.upd) follows --ui-scale. */
+.upd-shell {
+  width: min(calc(520px * var(--ui-scale, 1)), 100%);
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: auto;
   border-radius: 14px;
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow);
   animation: drop 0.16s var(--ease);
+}
+.upd {
+  padding: 22px;
 }
 .upd-head {
   display: grid;
@@ -2261,10 +2283,7 @@ li[data-state="done"] .upd-mark {
 .row.note.error {
   color: var(--danger);
 }
-.help {
-  max-height: calc(100vh - 32px);
-  overflow: auto;
-}
+
 .help h3 {
   margin: 16px 0 6px;
   font-size: 11px;
