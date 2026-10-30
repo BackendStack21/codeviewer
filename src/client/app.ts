@@ -9,7 +9,7 @@ import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
-import { debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, store } from "./util.ts";
+import { basename, debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, store } from "./util.ts";
 import { Help } from "./help.ts";
 import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
@@ -185,6 +185,7 @@ class App {
     this.tree.onOpen = (p, pin) => void this.openFile(p, { pin, focus: pin });
     this.search = new SearchView();
     this.tree.onSearchIn = (dir, ignored) => this.search.searchIn(dir, ignored);
+    this.tree.onViewChanges = (p) => void this.viewChanges(p);
     this.search.onReveal = () => this.showSearch();
     this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
     this.changes = new ChangesView();
@@ -452,11 +453,26 @@ class App {
     this.changes.focus();
   }
 
-  private async openDiff(f: ChangeFile, pin: boolean) {
+  private async openDiff(f: ChangeFile, pin: boolean, focus = false) {
     const d = this.changes.data;
-    await this.editor.openDiff(f, { rev: d?.rev ?? null, vs: this.changes.vs }, { pin, focus: false });
+    await this.editor.openDiff(f, { rev: d?.rev ?? null, vs: this.changes.vs }, { pin, focus });
     this.changes.setCurrent(f.path);
     this.editor.setDiffPositions((p) => this.changes.position(p));
+  }
+
+  /**
+   * "View Changes" on an explorer file: the Changes view with the file's diff open and focused (a
+   * preview tab, like a click in the list). The list is brought up to date first: the view may have
+   * been hidden and stale, and its own refresh may still be in flight.
+   */
+  private async viewChanges(path: string) {
+    if (!this.git.repo) return this.notify("Not a git repository");
+    if (!this.L.sidebar) this.toggleSidebar(true);
+    this.setSideView("changes");
+    await this.changes.ready();
+    const f = this.changes.files.find((x) => x.path === path);
+    if (!f) return this.notify(`No changes in ${basename(path)} ${this.changes.vs}`);
+    await this.openDiff(f, false, true);
   }
 
   private trackRecent(p: string) {

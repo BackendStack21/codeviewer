@@ -38,6 +38,7 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
     (vs its base branch, working tree included) or only the uncommitted ones (vs `HEAD`), with
     `+/−` per file and a one-line summary. Each file opens as a read-only unified diff; ⌥F5 walks
     the changes and moves on to the next file. Reviewed files dim until they change again.
+    Right-click a file in the Explorer and pick "View Changes" to jump to its diff.
   - Everything updates live as files, the index or refs change.
 - **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
   update pill in the status bar when a new version is out. Installing verifies the release's
@@ -97,7 +98,7 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘B · ⌘⇧E | Toggle sidebar · focus explorer |
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs (in the terminal: switch terminals) |
 | ⌘W in the terminal | Close an exited terminal; a running one asks for a second press (Linux: Ctrl+W stays the shell's) |
-| Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…") |
+| Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…", "View Changes") |
 | ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
 | ⌘/ | Every shortcut and the terminal tips, in your platform's key names |

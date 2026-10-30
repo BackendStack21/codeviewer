@@ -278,3 +278,76 @@ describe("ChangesView", () => {
     expect(t.v.files).toEqual([]);
   });
 });
+
+describe("ChangesView.ready", () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+  /** Each fetch waits until the test answers it, like a slow server. */
+  function slow() {
+    const pending: ((d: ChangesData) => void)[] = [];
+    const m = mockFetch(() => new Promise<Response>((r) => pending.push((d) => r(Response.json(d)))));
+    restore = m.restore;
+    const v = new C.ChangesView({ debounce: 0 });
+    const settled = (p: Promise<void>) => {
+      let done = false;
+      void p.then(() => (done = true));
+      return async () => {
+        await tick();
+        return done;
+      };
+    };
+    return { v, pending, settled };
+  }
+
+  test("resolves at once outside a repository and when the list is current", async () => {
+    const t = slow();
+    expect(await t.settled(t.v.ready())()).toBe(true);
+    t.v.setRepo(true);
+    t.v.onShown(); // starts a refresh
+    t.pending.shift()!(data([f("a.ts", "M")]));
+    await tick();
+    expect(t.v.files.map((x) => x.path)).toEqual(["a.ts"]);
+    expect(await t.settled(t.v.ready())()).toBe(true);
+    expect(t.pending.length).toBe(0); // current: nothing fetched again
+  });
+
+  test("a stale hidden list is refreshed first", async () => {
+    const t = slow();
+    t.v.setRepo(true); // hidden: stale, nothing in flight
+    const done = t.settled(t.v.ready());
+    expect(t.pending.length).toBe(1);
+    expect(await done()).toBe(false);
+    t.pending.shift()!(data([f("b.ts", "A")]));
+    expect(await done()).toBe(true);
+    expect(t.v.files.map((x) => x.path)).toEqual(["b.ts"]);
+  });
+
+  test("waits for the refresh queued behind the one in flight (the `again` race)", async () => {
+    const t = slow();
+    t.v.setRepo(true);
+    t.v.onShown(); // refresh 1 in flight
+    void t.v.refresh(); // queued: `again`
+    const done = t.settled(t.v.ready());
+    t.pending.shift()!(data([f("old.ts", "M")]));
+    await tick();
+    expect(await done()).toBe(false); // refresh 1 landed but refresh 2 is now in flight
+    expect(t.pending.length).toBe(1);
+    t.pending.shift()!(data([f("new.ts", "M")]));
+    expect(await done()).toBe(true);
+    expect(t.v.files.map((x) => x.path)).toEqual(["new.ts"]);
+  });
+
+  test("the repository going away releases waiters", async () => {
+    const t = slow();
+    t.v.setRepo(true);
+    t.v.onShown();
+    const done = t.settled(t.v.ready());
+    expect(await done()).toBe(false);
+    t.v.setRepo(false);
+    expect(await done()).toBe(true);
+    expect(t.v.files).toEqual([]);
+  });
+});

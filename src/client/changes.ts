@@ -70,6 +70,8 @@ export class ChangesView {
   /** Diff tabs are open: keep refreshing while the view is hidden so they follow the base. */
   watching = false;
   private seen = new Map<string, string>();
+  /** ready() callers waiting for the next completed refresh. */
+  private waiters: (() => void)[] = [];
   private scopeEl: HTMLElement;
   private summary: HTMLElement;
   private list: HTMLElement;
@@ -125,6 +127,7 @@ export class ChangesView {
       this.files = [];
       this.loading = false;
       this.onData(null);
+      this.settle();
     } else this.stale = true;
     this.render();
     if (repo && this.visible) void this.refresh();
@@ -193,9 +196,27 @@ export class ChangesView {
         if (this.again) {
           this.again = false;
           void this.refresh();
-        }
+        } else this.settle();
       }
     }
+  }
+
+  /**
+   * Resolves once the list reflects the repository as it is now: at once when it is current, else
+   * after the refresh in flight (and the one queued behind it) lands. Resolves on errors too.
+   */
+  ready(): Promise<void> {
+    if (!this.repo || (!this.stale && !this.loading)) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+      if (!this.loading) void this.refresh();
+    });
+  }
+
+  private settle() {
+    const w = this.waiters;
+    this.waiters = [];
+    for (const r of w) r();
   }
 
   /** The file whose diff is open (highlighted and marked as reviewed). */
