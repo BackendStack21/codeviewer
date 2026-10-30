@@ -15,7 +15,7 @@ import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
-import { normSideView, searchKey, type SideView } from "./keys.ts";
+import { helpKey, normSideView, searchKey, type SideView } from "./keys.ts";
 
 type ThemeName = "dark" | "light" | "system";
 
@@ -735,7 +735,7 @@ class App {
         else if (mod && k === "-" && appKey) this.zoom(-1);
         else if (mod && k === "0" && appKey) this.zoom(0);
         else if (mod && k === "j" && !inTerm) this.togglePanel();
-        else if (mod && k === "/" && appKey) this.help.open();
+        else if (helpKey(e, { isMac: IS_MAC }) && appKey) this.help.open();
         else if (e.key === "Escape" && this.help.isOpen) this.help.close();
         else if (e.key === "Escape" && this.palette.isOpen) this.palette.close();
         else handled = false;
