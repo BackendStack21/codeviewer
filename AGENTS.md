@@ -88,10 +88,10 @@ bun run build:local               # binaries + the app for this machine (needs X
   `class="…" data-i=`.
 - Accessibility: keep `aria-activedescendant` on the scroller, stable row ids, `role="status"` for
   counts and `aria-live` regions for notifications. Respect `prefers-reduced-motion`.
-- The fake DOM does not materialise `innerHTML` children, has no `clientHeight`,
-  `getBoundingClientRect`, `insertAdjacentHTML` or selection API, and does not model native
-  `Event` dispatch; stub what a test needs on the prototype and assert through the component's
-  state.
+- The fake DOM does not materialise `innerHTML` children, has no `clientHeight`, canvas,
+  `insertAdjacentHTML` or selection API (`getBoundingClientRect` returns a settable `rect`), and
+  does not model native `Event` dispatch; stub what a test needs on the prototype, restore the
+  original afterwards (test files share one process), and assert through the component's state.
 - Visual checks on macOS: a `WKWebView` snapshot tool works headlessly if `requestAnimationFrame`
   is stubbed in a `WKUserScript` at document start and entrance animations are set to `none`.
   Snapshots write to the real settings file (tabs, zoom, panel): restore them afterwards.

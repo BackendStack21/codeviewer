@@ -9,6 +9,7 @@ let raf: (() => void)[] = [];
 let observers: (() => void)[] = [];
 const G = ["requestAnimationFrame", "cancelAnimationFrame", "ResizeObserver"] as const;
 const saved: Record<string, PropertyDescriptor | undefined> = {};
+let savedGetContext: PropertyDescriptor | undefined;
 
 beforeAll(async () => {
   const dom = installDom({ platform: "MacIntel" });
@@ -31,11 +32,13 @@ beforeAll(async () => {
     get: (o, k) => (k in o ? o[k] : k === "measureText" ? () => ({ width: 8 }) : () => {}),
     set: (o, k, v) => ((o[k] = v), true),
   });
+  savedGetContext = Object.getOwnPropertyDescriptor(FakeElement.prototype, "getContext");
   (FakeElement.prototype as unknown as { getContext: () => unknown }).getContext = () => ctx;
   ({ TerminalView: View } = await import("../src/client/term/view.ts?termview"));
 });
 afterAll(() => {
-  delete (FakeElement.prototype as unknown as { getContext?: unknown }).getContext;
+  if (savedGetContext) Object.defineProperty(FakeElement.prototype, "getContext", savedGetContext);
+  else delete (FakeElement.prototype as unknown as { getContext?: unknown }).getContext;
   for (const k of G) {
     const d = saved[k];
     if (d) Object.defineProperty(globalThis, k, d);
@@ -141,5 +144,59 @@ describe("terminal visibility and the screen-reader log", () => {
     expect(kids.length).toBe(200);
     expect(kids[0]!.textContent).toBe("out 4800");
     expect(kids[199]!.textContent).toBe("out 4999");
+  });
+});
+
+describe("terminal panel drives which terminal paints", () => {
+  test("only the active terminal of an open panel is visible to its renderer", async () => {
+    const savedWs = Object.getOwnPropertyDescriptor(globalThis, "WebSocket");
+    Object.defineProperty(globalThis, "WebSocket", {
+      value: class {
+        static OPEN = 1;
+        readyState = 0;
+        binaryType = "";
+        constructor(public url: string) {}
+        send() {}
+        close() {}
+      },
+      configurable: true,
+      writable: true,
+    });
+    const proto = FakeElement.prototype as unknown as { querySelector: (s: string) => unknown };
+    // Tab markup is set with innerHTML, which the fake DOM does not parse: give it a close button.
+    const qs = proto.querySelector;
+    proto.querySelector = function (this: unknown, sel: string) {
+      return qs.call(this, sel) ?? (sel === ".tab-close" ? { addEventListener() {} } : null);
+    };
+    try {
+      const { TerminalPanel } = await import("../src/client/terminals.ts?termview");
+      const theme = { fg: "#ccc", bg: "#111", cursor: "#fff", cursorText: "#000", selection: "#333", link: "#58f", ansi: Array(16).fill("#888") };
+      const panel = new TerminalPanel(
+        () => theme,
+        { family: "monospace", size: 13, lineHeight: 1.2 },
+        "zsh",
+        { togglePosition() {}, toggleMaximize() {}, hide() {} },
+        () => {},
+        () => {},
+      );
+      const visible = (s: { view: { renderer: unknown } }) => (s.view.renderer as { visible: boolean }).visible;
+      panel.setShown(false); // the app starts with the panel closed
+      const a = panel.create();
+      expect(visible(a)).toBe(false);
+      panel.setShown(true);
+      expect(visible(a)).toBe(true);
+      const b = panel.create();
+      expect([visible(a), visible(b)]).toEqual([false, true]);
+      panel.activate(a);
+      expect([visible(a), visible(b)]).toEqual([true, false]);
+      panel.setShown(false);
+      expect([visible(a), visible(b)]).toEqual([false, false]);
+      expect(panel.el.hidden).toBe(true);
+    } finally {
+      raf = [];
+      proto.querySelector = qs;
+      if (savedWs) Object.defineProperty(globalThis, "WebSocket", savedWs);
+      else delete (globalThis as Record<string, unknown>).WebSocket;
+    }
   });
 });
