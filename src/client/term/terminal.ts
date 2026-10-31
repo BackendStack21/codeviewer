@@ -17,6 +17,13 @@ const STYLE_MASK = 0x1ff;
 export const DEFAULT = -1;
 export const RGB_FLAG = 0x1000000;
 
+/** A completed line waiting to be reported through `onLine` at the end of the current write. */
+interface Announcement {
+  line: Line;
+  /** Set when the line had to be reused before the write ended (its text is captured then). */
+  text?: string;
+}
+
 export class Line {
   text: string[];
   fg: Int32Array;
@@ -28,6 +35,8 @@ export class Line {
   hw = 0;
   /** True once the line was reported through `onLine` (cleared by any later print). */
   spoken = false;
+  /** Pending report for this line in the current write, if any. */
+  ann?: Announcement | null;
 
   constructor(cols: number, bg = DEFAULT) {
     this.text = new Array(cols).fill(" ");
@@ -119,9 +128,10 @@ export class Line {
   }
 
   toString(trimRight = true): string {
-    let s = "";
-    for (let i = 0; i < this.text.length; i++) s += this.text[i];
-    return trimRight ? s.replace(/\s+$/, "") : s;
+    // Cells at or beyond the high-water mark are blank: a trimmed string never needs them.
+    const n = trimRight ? Math.min(this.hw, this.text.length) : this.text.length;
+    const s = (n === this.text.length ? this.text : this.text.slice(0, n)).join("");
+    return trimRight ? s.trimEnd() : s;
   }
 }
 
@@ -219,6 +229,14 @@ export class Terminal {
   scrolledOff = 0;
   /** Bumped when scrollback is trimmed, so absolute selections can be invalidated. */
   trimmed = 0;
+  /**
+   * At most this many completed lines are reported per write (the newest). A host that only
+   * keeps the last N lines sets it, so a burst of output is not stringified only to be dropped.
+   */
+  announceLimit = Infinity;
+  private announced: Announcement[] = [];
+  /** Printable ASCII is copied into the line in runs (false: one print() per character; tests compare both). */
+  asciiRuns = true;
   lastChar = "";
   /** Where lastChar was printed; a ZWJ join only applies when the cursor is still there. */
   private lastX = -1;
@@ -286,7 +304,18 @@ export class Terminal {
     for (let i = 0; i < n; i++) {
       let c = s.charCodeAt(i);
       if (this.state === S.Ground && c >= 0x20 && c !== 0x7f && (c < 0x80 || c >= 0xa0)) {
-        // Hot path: printable text.
+        // Hot path: printable text. Runs of ASCII are copied into the line in one step.
+        if (c < 0x7f && this.asciiRuns) {
+          let j = i + 1;
+          while (j < n) {
+            const d = s.charCodeAt(j);
+            if (d < 0x20 || d >= 0x7f) break;
+            j++;
+          }
+          this.printAscii(s, i, j);
+          i = j - 1;
+          continue;
+        }
         if (c >= 0xd800 && c <= 0xdbff && i + 1 < n) {
           const lo = s.charCodeAt(i + 1);
           if (lo >= 0xdc00 && lo <= 0xdfff) {
@@ -300,6 +329,63 @@ export class Terminal {
         continue;
       }
       this.feed(c, s, i);
+    }
+    if (this.announced.length) this.flushAnnounced();
+  }
+
+  /** Reports the lines completed during this write, newest `announceLimit` only, as final text. */
+  private flushAnnounced() {
+    const q = this.announced;
+    this.announced = [];
+    const from = q.length - Math.min(q.length, this.announceLimit);
+    for (let i = 0; i < q.length; i++) {
+      const a = q[i]!;
+      if (a.line.ann === a) a.line.ann = null;
+      if (i < from) continue;
+      const text = a.text ?? a.line.toString();
+      if (text) this.host.onLine!(text);
+    }
+  }
+
+  /** print() for s[i, end), all printable ASCII: whole runs per line instead of per character. */
+  private printAscii(s: string, i: number, end: number) {
+    const cur = this.cur;
+    const cols = this.cols;
+    while (i < end) {
+      // Anything with per-character rules (wrap, insert mode, DEC graphics, ZWJ joins) goes through print().
+      if (cur.wrapPending || this.modes.insert || cur.charsets[cur.gl] || this.lastChar.endsWith("\u200d")) {
+        const c = s.charCodeAt(i++);
+        this.print(c, ASCII[c]!);
+        continue;
+      }
+      const line = this.lines[cur.y]!;
+      const x = cur.x;
+      const k = Math.min(end - i, cols - x);
+      this.fixWideOverlap(line, x, k);
+      // One loop, not three fill() calls: runs between colour changes are typically short.
+      const { text, fg, bg, fl } = line;
+      const cf = cur.fg;
+      const cb = cur.bg;
+      const cl = cur.fl;
+      for (let m = 0; m < k; m++) {
+        const at = x + m;
+        text[at] = ASCII[s.charCodeAt(i + m)]!;
+        fg[at] = cf;
+        bg[at] = cb;
+        fl[at] = cl;
+      }
+      if (x + k > line.hw) line.hw = x + k;
+      this.dirty[cur.y] = 1;
+      line.spoken = false;
+      this.lastChar = text[x + k - 1]!;
+      cur.x = x + k;
+      if (cur.x >= cols) {
+        cur.x = cols - 1;
+        cur.wrapPending = this.modes.autowrap;
+      }
+      this.lastX = cur.x;
+      this.lastY = cur.y;
+      i += k;
     }
   }
 
@@ -642,8 +728,19 @@ export class Terminal {
       const used = old.usedWidth();
       if (toScrollback) {
         if (this.host.onLine) this.announce(old);
-        this.scrollback.push(old.compactCopy(used));
+        const copy = old.compactCopy(used);
+        // A pending report follows the line into history (the screen line is about to be blanked).
+        const pending = old.ann;
+        if (pending) {
+          pending.line = copy;
+          copy.ann = pending;
+          old.ann = null;
+        }
+        this.scrollback.push(copy);
         this.scrolledOff++;
+      } else if (old.ann) {
+        old.ann.text = old.toString();
+        old.ann = null;
       }
       old.recycle(used, this.cur.bg);
       this.lines.splice(bottom, 0, old);
@@ -659,9 +756,15 @@ export class Terminal {
   private announce(line: Line) {
     if (line.spoken || this.alt || line.hw === 0) return;
     line.spoken = true; // replayed history is consumed silently, and never reported later
-    if (this.silent) return;
-    const text = line.toString();
-    if (text) this.host.onLine!(text);
+    // Queued, not stringified: a burst of output keeps only the newest announceLimit lines, and a
+    // line redrawn within the same write is reported once, as it finally reads.
+    if (this.silent || line.ann || this.announceLimit === 0) return;
+    const a: Announcement = { line };
+    line.ann = a;
+    this.announced.push(a);
+    if (this.announced.length >= 2 * this.announceLimit) {
+      for (const d of this.announced.splice(0, this.announced.length - this.announceLimit)) if (d.line.ann === d) d.line.ann = null;
+    }
   }
 
   scrollDown(n: number) {

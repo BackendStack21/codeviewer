@@ -886,3 +886,33 @@ were refuted or accepted as trade-offs.
 | The WebSocket Origin check compared `Origin` against the request's own `Host` header, so under a non-loopback `--host` (where the DNS-rebinding `hostOk` allowlist is skipped) a page could connect with a self-consistent attacker Host+Origin pair and get `101 Switching Protocols`. RED: `test/http.wsorigin.security.test.ts`. | Origin is now checked against the server's own origins — loopback names plus every local interface address (`os.networkInterfaces()`), never anything client-controlled. Deliberate consequence: the origin host must be a literal loopback or interface address; reaching the server via a DNS/mDNS name is rejected, because resolving a client-supplied hostname back to a local address would reopen the rebinding hole. |
 | (Review) `alias.*`/`pager.*` in a hostile repo config were claimed to run commands. | Refuted by test: git does not expand an alias that shadows a builtin subcommand (`test/git.alias.security.test.ts` pins this, marker file stays empty). Kept as a regression net. |
 | (Review) `HARDEN` overrides travel as `-c key=value` despite the GIT_CONFIG_KEY_n rule; token in the WS query string; missing-Origin bypass; regex CPU burn in the search worker; pty replay resync edge cases. | Not exploitable as written (values self-authored; query token is the documented WS mechanism; local DoS only). No change; recorded here for the next pass. |
+
+## 20. Round 11: terminal CPU in long agent sessions
+
+Report: CPU stays high while a terminal runs a long Claude Code session. Measured first, headless
+on JavaScriptCore (the engine of the Mac app's WebView), with real Claude Code 2.1.316 output
+captured under codeviewer's PTY environment and synthetic TUI streams.
+
+- Claude Code itself sends little: its fullscreen renderer (the default here) writes cell diffs
+  (about 40 bytes a keystroke, nothing when idle); the classic renderer prints the transcript once
+  on resume (185 KB) and then small diffs, with no full reprints on typing or resize. The server
+  side (replay ring, mode tracking, flush) costs 0.2 ms even for 1.2 MB.
+- The client did more work than the output needed. A redraw of unchanged rows (TUIs erase and
+  reprint their region every tick) repainted every touched row: 12 rows for a 12-line status
+  region, all 60 for a full-screen repaint, where one row had changed. Background tabs and a
+  closed panel painted every frame too. The scrollbar read `clientHeight` right after writing
+  styles, forcing a layout per frame. Parsing spent 30% in per-character `print()` and 21% in
+  `Line.toString()` for the screen-reader log, which stringified every finished line although it
+  keeps 200.
+
+| Finding | Fix |
+| --- | --- |
+| Dirty rows meant "touched", not "changed": constant TUI redraws repainted identical rows. | The renderer keeps what each viewport row last showed (cells plus a key for cursor, selection, link hover and reverse video) and skips rows that match. Spinner tick: 12 → 1 rows; full-screen repaint: 60 → 1.6. `invalidate()` (theme, font, resize) still repaints everything. |
+| Hidden terminals (other tabs, closed panel) painted every frame. | `Renderer.setVisible`: no frames while hidden, one full repaint when shown. `TerminalPanel.activate`/`setShown` drive it; output is still parsed, so the screen is current when shown. Hidden terminals also skip the screen-reader log (a hidden live region is not announced). |
+| Per-character `print()` dominated parsing. | `printAscii` copies runs of printable ASCII straight into the line; wrap, insert mode, DEC graphics and ZWJ joins still go through `print()`. A seeded fuzz test compares it with per-character printing (screen, history, cursor, dirty rows). |
+| Every finished line was stringified for the screen-reader log, then all but 200 dropped. | Completed lines are queued and stringified at the end of the write, the newest `announceLimit` (200) only; a line redrawn within one write is reported once, as it finally reads. A queued line that scrolls into history follows its compact copy; one reused inside a margin region is captured first. `toString` joins only up to the high-water mark. |
+| `updateScrollbar` forced a synchronous layout every frame. | The track height is read after a resize or show/hide only, and styles are written only when they change. |
+
+Result on the same benchmarks: parse of an 8,000-line reprint 41 → 21 ms, a real classic-renderer
+resume 4.5 → 2.6 ms, plain text about 24 MB/s; idle and spinner frames repaint only what changed.
+Not changed: the scrollback copy per scrolled line (about 4%), and the server, which was not a cost.

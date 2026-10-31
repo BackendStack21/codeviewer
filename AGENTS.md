@@ -70,6 +70,11 @@ bun run build:local               # binaries + the app for this machine (needs X
   the Mac window's content rules allow `blob:http://127.0.0.1:<port>/` (`contentRules` in
   `main.swift`, pinned by `test/images.test.ts`). The server's `IMAGE_MIME` and the client's
   `IMAGE_EXT` (`mdimage.ts`) list the same extensions.
+- **Terminal hot paths.** `Terminal.write` copies ASCII runs (`printAscii`) and must match
+  per-character `print()` exactly (`asciiRuns = false` turns it off; `test/terminal.perf.test.ts`
+  compares both). The renderer skips rows whose cells and overlay key are unchanged: anything new
+  that changes a row's pixels goes into `rowKey()` or calls `invalidate()`. Hidden terminals do
+  not paint (`TerminalView.setVisible`, driven by `TerminalPanel.activate`/`setShown`).
 - **Terminal input is the user's.** On macOS ⌘-shortcuts belong to the app; on Linux Ctrl+key
   combinations stay with the shell unless the README lists them.
 

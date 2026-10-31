@@ -12,6 +12,17 @@ export interface Theme {
   ansi: string[];
 }
 
+/** What a viewport row showed when it was last painted. */
+interface RowSnapshot {
+  text: string[];
+  fg: Int32Array;
+  bg: Int32Array;
+  fl: Uint32Array;
+  /** Everything else that changes the row's pixels: cursor, selection, link hover, reverse video. */
+  key: string;
+  blank: boolean;
+}
+
 export interface Point {
   row: number; // absolute line index
   col: number;
@@ -35,8 +46,9 @@ function hex(n: number): string {
 }
 
 /**
- * Canvas 2D renderer. Repaints only dirty rows, at most once per animation frame.
- * Cells are integer device-pixel sized so backgrounds and box-drawing tile seamlessly.
+ * Canvas 2D renderer. Repaints only rows whose content changed, at most once per animation
+ * frame, and nothing while hidden. Cells are integer device-pixel sized so backgrounds and
+ * box-drawing tile seamlessly.
  */
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
@@ -57,6 +69,11 @@ export class Renderer {
   private syncSince = 0;
   private prevView: (Line | undefined)[] = [];
   private prevCursorRow = -1;
+  /** Per viewport row: what was painted last. TUIs redraw unchanged rows constantly; those are skipped. */
+  private painted: (RowSnapshot | undefined)[] = [];
+  private visible = true;
+  /** Rows actually repainted (tests and diagnostics). */
+  rowsPainted = 0;
 
   /** Scroll offset into history (0 = following output). */
   viewOffset = 0;
@@ -164,12 +181,27 @@ export class Renderer {
 
   invalidate() {
     this.prevView = [];
+    this.painted = [];
     this.term.allDirty = true;
     this.schedule();
   }
 
   schedule() {
-    if (!this.frame) this.frame = requestAnimationFrame(() => this.paint());
+    if (this.visible && !this.frame) this.frame = requestAnimationFrame(() => this.paint());
+  }
+
+  /**
+   * A hidden terminal (background tab, closed panel) keeps parsing its output but paints
+   * nothing; it is repainted in full when shown again.
+   */
+  setVisible(on: boolean) {
+    if (on === this.visible) return;
+    this.visible = on;
+    if (on) this.invalidate();
+    else if (this.frame) {
+      cancelAnimationFrame(this.frame);
+      this.frame = 0;
+    }
   }
 
   color(c: number, isFg: boolean): string {
@@ -188,6 +220,7 @@ export class Renderer {
 
   private paint() {
     this.frame = 0;
+    if (!this.visible) return;
     const term = this.term;
     // Synchronized output (mode 2026): hold the frame until the app finishes its update.
     if (term.modes.synchronized) {
@@ -218,12 +251,61 @@ export class Renderer {
         this.rowTouchesOverlay(y);
       if (!dirty) continue;
       this.prevView[y] = line;
+      const key = this.rowKey(y, line, cursorRow);
+      if (this.unchanged(y, line, key)) continue;
       this.paintRow(ctx, y, line);
+      this.remember(y, line, key);
     }
     this.prevCursorRow = cursorRow;
     term.dirty.fill(0);
     term.allDirty = false;
     this.onFrame?.();
+  }
+
+  /** Row state outside the cells that affects its pixels. */
+  private rowKey(y: number, line: Line | undefined, cursorRow: number): string {
+    if (!line) return "-";
+    const term = this.term;
+    const absRow = term.scrollback.length - this.viewOffset + y;
+    const [s, e] = this.selectionSpan(absRow, term.cols);
+    const h = this.hoverLink?.row === absRow ? `${this.hoverLink.start}-${this.hoverLink.end}` : "";
+    const m = term.modes;
+    const c =
+      y === cursorRow && m.cursorVisible && this.viewOffset === 0
+        ? `${term.cur.x}${m.cursorShape}${this.focused ? 1 : 0}${this.cursorOn ? 1 : 0}`
+        : "";
+    return `${m.reverseVideo ? 1 : 0}|${s},${e}|${h}|${c}`;
+  }
+
+  private unchanged(y: number, line: Line | undefined, key: string): boolean {
+    const p = this.painted[y];
+    if (!p || p.key !== key) return false;
+    if (!line) return p.blank;
+    const n = this.term.cols;
+    if (p.blank || line.cols !== n || p.text.length !== n) return false;
+    const { text, fg, bg, fl } = line;
+    for (let x = 0; x < n; x++) {
+      if (text[x] !== p.text[x] || fg[x] !== p.fg[x] || bg[x] !== p.bg[x] || fl[x] !== p.fl[x]) return false;
+    }
+    return true;
+  }
+
+  private remember(y: number, line: Line | undefined, key: string) {
+    this.rowsPainted++;
+    const n = this.term.cols;
+    let p = this.painted[y];
+    if (!p || p.fg.length !== n) {
+      p = { text: new Array(n), fg: new Int32Array(n), bg: new Int32Array(n), fl: new Uint32Array(n), key, blank: true };
+      this.painted[y] = p;
+    }
+    p.key = key;
+    p.blank = !line || line.cols !== n;
+    if (p.blank) return;
+    const l = line!;
+    for (let x = 0; x < n; x++) p.text[x] = l.text[x]!;
+    p.fg.set(l.fg.subarray(0, n));
+    p.bg.set(l.bg.subarray(0, n));
+    p.fl.set(l.fl.subarray(0, n));
   }
 
   private overlayRows = new Set<number>();

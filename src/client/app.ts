@@ -139,7 +139,7 @@ class App {
     this.bindKeys();
     this.connectEvents();
     this.terms.restore();
-    if (!this.L.panel) this.terms.el.hidden = true;
+    if (!this.L.panel) this.terms.setShown(false);
     // Restore pinned tabs from last session.
     const tabs = store.get<{ tabs: string[]; active: string | null }>(`tabs:${this.info.root}`, { tabs: [], active: null });
     for (const p of tabs.tabs) await this.editor.open(p, { pin: true, focus: false });
@@ -588,7 +588,7 @@ class App {
   private togglePanel(on = !this.L.panel) {
     this.L.panel = on;
     if (on && this.terms.count === 0) this.terms.create();
-    this.terms.el.hidden = !on;
+    this.terms.setShown(on);
     if (!on && this.L.maximized) this.L.maximized = false;
     this.applyLayout();
     if (on) requestAnimationFrame(() => this.terms.focus());

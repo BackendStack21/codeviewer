@@ -36,6 +36,8 @@ export class TerminalPanel {
   private body: HTMLElement;
   private sessions: Session[] = [];
   active: Session | null = null;
+  /** False while the panel is closed: then no terminal paints. */
+  private shown = true;
   private posBtn: HTMLButtonElement;
   private maxBtn: HTMLButtonElement;
 
@@ -135,6 +137,7 @@ export class TerminalPanel {
     this.persist();
     // Mount hidden so the view can measure itself; the first fit() triggers connect().
     s.view.el.hidden = true;
+    s.view.setVisible(false);
     this.body.append(s.view.el);
     if (activate || !this.active) this.activate(s);
     this.renderTabs();
@@ -224,7 +227,10 @@ export class TerminalPanel {
 
   activate(s: Session) {
     this.active = s;
-    for (const o of this.sessions) o.view.el.hidden = o !== s;
+    for (const o of this.sessions) {
+      o.view.el.hidden = o !== s;
+      o.view.setVisible(o === s && this.shown);
+    }
     requestAnimationFrame(() => {
       s.view.fit();
       s.view.focus();
@@ -271,6 +277,13 @@ export class TerminalPanel {
 
   focus() {
     this.active?.view.focus();
+  }
+
+  /** Opens or closes the panel; a closed panel's terminals keep running but do not paint. */
+  setShown(on: boolean) {
+    this.shown = on;
+    this.el.hidden = !on;
+    for (const s of this.sessions) s.view.setVisible(on && s === this.active);
   }
 
   fit() {
