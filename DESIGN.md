@@ -874,3 +874,15 @@ The Linux app was not affected by the image bug: its Chromium is confined with
 `--host-resolver-rules` and an unreachable `--proxy-server`, neither of which applies to `blob:`
 URLs, which never reach the network stack. There, TIFF and HEIC (which Chromium cannot decode) now
 open as the hex dump under a notice.
+
+## Security review, October 2026
+
+An adversarial review (three parallel reviewers plus RED-test validation of the top
+findings) re-walked the server surface. One finding was validated and fixed; several
+were refuted or accepted as trade-offs.
+
+| Finding | Fix |
+| --- | --- |
+| The WebSocket Origin check compared `Origin` against the request's own `Host` header, so under a non-loopback `--host` (where the DNS-rebinding `hostOk` allowlist is skipped) a page could connect with a self-consistent attacker Host+Origin pair and get `101 Switching Protocols`. RED: `test/http.wsorigin.security.test.ts`. | Origin is now checked against the server's own origins — loopback names plus every local interface address (`os.networkInterfaces()`), never anything client-controlled. Deliberate consequence: the origin host must be a literal loopback or interface address; reaching the server via a DNS/mDNS name is rejected, because resolving a client-supplied hostname back to a local address would reopen the rebinding hole. |
+| (Review) `alias.*`/`pager.*` in a hostile repo config were claimed to run commands. | Refuted by test: git does not expand an alias that shadows a builtin subcommand (`test/git.alias.security.test.ts` pins this, marker file stays empty). Kept as a regression net. |
+| (Review) `HARDEN` overrides travel as `-c key=value` despite the GIT_CONFIG_KEY_n rule; token in the WS query string; missing-Origin bypass; regex CPU burn in the search worker; pty replay resync edge cases. | Not exploitable as written (values self-authored; query token is the documented WS mechanism; local DoS only). No change; recorded here for the next pass. |
