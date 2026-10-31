@@ -889,44 +889,17 @@ were refuted or accepted as trade-offs.
 
 ## 20. Round 11: terminal CPU in long agent sessions
 
-Report: CPU stays high while a terminal runs a long Claude Code session. Measured first, headless
-on JavaScriptCore (the engine of the Mac app's WebView), with real Claude Code 2.1.316 output
-captured under codeviewer's PTY environment and synthetic TUI streams.
+Agent TUIs redraw constantly, but Claude Code sends little (its fullscreen renderer writes cell
+diffs; the classic one prints the transcript once, then diffs). The cost was in the client doing
+more work than the output needed. The terminal now follows these rules:
 
-- Claude Code itself sends little: its fullscreen renderer (the default here) writes cell diffs
-  (about 40 bytes a keystroke, nothing when idle); the classic renderer prints the transcript once
-  on resume (185 KB) and then small diffs, with no full reprints on typing or resize. The server
-  side (replay ring, mode tracking, flush) costs 0.2 ms even for 1.2 MB.
-- The client did more work than the output needed. A redraw of unchanged rows (TUIs erase and
-  reprint their region every tick) repainted every touched row: 12 rows for a 12-line status
-  region, all 60 for a full-screen repaint, where one row had changed. Background tabs and a
-  closed panel painted every frame too. The scrollbar read `clientHeight` right after writing
-  styles, forcing a layout per frame. Parsing spent 30% in per-character `print()` and 21% in
-  `Line.toString()` for the screen-reader log, which stringified every finished line although it
-  keeps 200.
-
-| Finding | Fix |
+| Rule | Where |
 | --- | --- |
-| Dirty rows meant "touched", not "changed": constant TUI redraws repainted identical rows. | The renderer keeps what each viewport row last showed (cells plus a key for cursor, selection, link hover and reverse video) and skips rows that match. Spinner tick: 12 → 1 rows; full-screen repaint: 60 → 1.6. `invalidate()` (theme, font, resize) still repaints everything. |
-| Hidden terminals (other tabs, closed panel) painted every frame. | `Renderer.setVisible`: no frames while hidden, one full repaint when shown. `TerminalPanel.activate`/`setShown` drive it; output is still parsed, so the screen is current when shown. Hidden terminals also skip the screen-reader log (a hidden live region is not announced). |
-| Per-character `print()` dominated parsing. | `printAscii` copies runs of printable ASCII straight into the line; wrap, insert mode, DEC graphics and ZWJ joins still go through `print()`. A seeded fuzz test compares it with per-character printing (screen, history, cursor, dirty rows). |
-| Every finished line was stringified for the screen-reader log, then all but 200 dropped. | Completed lines are queued and stringified at the end of the write, the newest `announceLimit` (200) only; a line redrawn within one write is reported once, as it finally reads. A queued line that scrolls into history follows its compact copy; one reused inside a margin region is captured first. `toString` joins only up to the high-water mark. |
-| (Review) With unchanged rows never repainted, a terminal face that loads after the 2 s startup wait would leave idle rows in the fallback font (the next redraw used to heal them). | When the wait times out, the terminals re-measure and repaint once the faces arrive. Only then: listening to every font load would also resize running programs when a UI face loads. |
-| (Review) Panel and tab visibility had no test. | `client.termview.test.ts` covers create while closed, open, switching tabs and closing the panel. |
-| `updateScrollbar` forced a synchronous layout every frame. | The track height is read after a resize or show/hide only, and styles are written only when they change. |
+| Paint only rows whose pixels change: each viewport row keeps a snapshot of its cells plus a key (cursor, selection, link hover, reverse video). New pixel state belongs in the key, or calls `invalidate()`; theme, font, resize and a restored canvas context invalidate. | `Renderer.rowKey`, `unchanged`, `remember` |
+| Hidden terminals (other tabs, closed panel) parse but neither paint nor feed the screen-reader log; showing one repaints it in full. | `Renderer.setVisible`, `TerminalPanel.activate`/`setShown` |
+| Printable ASCII is copied into the line in runs; anything with per-character rules goes through `print()`. A seeded fuzz test keeps both paths identical. | `Terminal.printAscii` |
+| Completed lines are stringified at the end of a write, the newest 200 only; a line redrawn within one write is reported once, as it finally reads. | `Terminal.announce`, `flushAnnounced` |
+| No layout reads per frame: the scrollbar measures its track after a resize only and writes styles only on change. | `TerminalView.updateScrollbar` |
 
-PR review (eight findings):
-
-| Finding | Outcome |
-| --- | --- |
-| A canvas whose backing store is discarded (GPU reset) would stay blank: identical cells are skipped. | Fixed: `contextrestored` resets the context state and invalidates. Test added. |
-| History lines from `compactCopy` lacked `spoken`/`ann`, so scrollback mixed object shapes. | Fixed: same fields in constructor order. |
-| Snapshots cost time when every row changes (streaming). | Measured: 0.239 vs 0.219 ms per frame with a no-op canvas, against ~180 real `fillText` calls a frame. Kept. |
-| A late-font re-measure resizes the PTY even at the same grid size, sending SIGWINCH. | Refuted: the kernel signals only on a real size change (checked with a `trap WINCH` shell). |
-| A glyph overflowing its row is no longer healed by full redraws. | Kept: partial repaints already clipped such overflow before this change; at line height 1.2 the baseline leaves room for JetBrains Mono's descenders and accents. |
-| A line erased within the same write is no longer reported. | Intended: the screen reader gets what the screen shows; a line overwritten before any frame was never visible either. |
-| `printAscii` duplicates `print()` bookkeeping; `asciiRuns` is a test switch on a hot path. | Kept: the seeded fuzz test pins equivalence (mutation-checked); the switch is read once per run, not per character. |
-
-Result on the same benchmarks: parse of an 8,000-line reprint 41 → 21 ms, a real classic-renderer
-resume 4.5 → 2.6 ms, plain text about 24 MB/s; idle and spinner frames repaint only what changed.
-Not changed: the scrollback copy per scrolled line (about 4%), and the server, which was not a cost.
+Measured on JavaScriptCore: parsing an 8,000-line reprint went from 41 to 21 ms, a spinner tick
+repaints one row instead of the whole status region, and plain text parses at about 24 MB/s.
