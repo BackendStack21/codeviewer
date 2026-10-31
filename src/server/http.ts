@@ -1,6 +1,7 @@
 import type { Server, ServerWebSocket } from "bun";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
+import os from "node:os";
 import { realpath, stat } from "node:fs/promises";
 import { listDir, readForView, resolveSafe, imageMime, toRel, looksBinary, openRegular, MAX_TEXT_BYTES } from "./files.ts";
 import { FileIndex } from "./index.ts";
@@ -65,6 +66,23 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
   let origin = "";
   let port = 0;
   const loopback = ["127.0.0.1", "localhost", "::1"].includes(opts.host);
+
+  /**
+   * Every origin a legitimate browser page can have when talking to this server:
+   * loopback names plus every local interface address (a non-loopback --host can be
+   * reached under any of them). Never derived from the request's Host header, which
+   * the client controls — matching Origin against it made the cross-site WebSocket
+   * guard a no-op under DNS rebinding.
+   */
+  const selfOrigins = (): Set<string> => {
+    const set = new Set<string>([`http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`]);
+    if (!loopback) {
+      for (const addrs of Object.values(os.networkInterfaces())) {
+        for (const a of addrs ?? []) set.add(`http://${a.address.includes(":") ? `[${a.address}]` : a.address}:${port}`);
+      }
+    }
+    return set;
+  };
 
   const broadcast = (msg: unknown) => {
     const s = JSON.stringify(msg);
@@ -262,8 +280,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
 
       if (p.startsWith("/ws/")) {
         // Cross-site WebSocket hijacking guard: browsers always send Origin; it must be us.
+        // Compared against this server's own origins, never the client-controlled Host.
         const o = req.headers.get("origin");
-        if (o && o !== `http://${req.headers.get("host")}`) return fail(403, "bad origin");
+        if (o && !selfOrigins().has(o)) return fail(403, "bad origin");
         if (p === "/ws/events") {
           return srv.upgrade(req, { data: { kind: "events" } }) ? undefined : fail(400, "upgrade failed");
         }
