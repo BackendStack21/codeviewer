@@ -104,6 +104,9 @@ export class Line {
     l.fl = this.fl.slice(0, n);
     l.wrapped = this.wrapped;
     l.hw = n;
+    // Same fields in the same order as the constructor: history lines keep one object shape.
+    l.spoken = false;
+    l.ann = null;
     return l;
   }
 

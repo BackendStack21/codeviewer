@@ -89,6 +89,12 @@ export class Renderer {
     // Output reaches assistive technology through the view's live log, not the pixels.
     this.canvas.setAttribute("aria-hidden", "true");
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
+    // Unchanged rows are never repainted, so a canvas whose backing store was discarded (GPU
+    // reset, memory pressure) must be repainted in full when the browser restores it.
+    this.canvas.addEventListener?.("contextrestored", () => {
+      this.ctxDefaults();
+      this.invalidate();
+    });
   }
 
   setTheme(t: Theme) {

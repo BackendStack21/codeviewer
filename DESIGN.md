@@ -915,6 +915,18 @@ captured under codeviewer's PTY environment and synthetic TUI streams.
 | (Review) Panel and tab visibility had no test. | `client.termview.test.ts` covers create while closed, open, switching tabs and closing the panel. |
 | `updateScrollbar` forced a synchronous layout every frame. | The track height is read after a resize or show/hide only, and styles are written only when they change. |
 
+PR review (eight findings):
+
+| Finding | Outcome |
+| --- | --- |
+| A canvas whose backing store is discarded (GPU reset) would stay blank: identical cells are skipped. | Fixed: `contextrestored` resets the context state and invalidates. Test added. |
+| History lines from `compactCopy` lacked `spoken`/`ann`, so scrollback mixed object shapes. | Fixed: same fields in constructor order. |
+| Snapshots cost time when every row changes (streaming). | Measured: 0.239 vs 0.219 ms per frame with a no-op canvas, against ~180 real `fillText` calls a frame. Kept. |
+| A late-font re-measure resizes the PTY even at the same grid size, sending SIGWINCH. | Refuted: the kernel signals only on a real size change (checked with a `trap WINCH` shell). |
+| A glyph overflowing its row is no longer healed by full redraws. | Kept: partial repaints already clipped such overflow before this change; at line height 1.2 the baseline leaves room for JetBrains Mono's descenders and accents. |
+| A line erased within the same write is no longer reported. | Intended: the screen reader gets what the screen shows; a line overwritten before any frame was never visible either. |
+| `printAscii` duplicates `print()` bookkeeping; `asciiRuns` is a test switch on a hot path. | Kept: the seeded fuzz test pins equivalence (mutation-checked); the switch is read once per run, not per character. |
+
 Result on the same benchmarks: parse of an 8,000-line reprint 41 → 21 ms, a real classic-renderer
 resume 4.5 → 2.6 ms, plain text about 24 MB/s; idle and spinner frames repaint only what changed.
 Not changed: the scrollback copy per scrolled line (about 4%), and the server, which was not a cost.

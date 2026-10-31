@@ -126,6 +126,7 @@ describe("renderer: repaints only what changed, and nothing while hidden", () =>
   type R = import("../src/client/term/renderer.ts").Renderer;
   let Renderer: typeof import("../src/client/term/renderer.ts").Renderer;
   let raf: (() => void)[] = [];
+  const canvasListeners = new Map<string, () => void>();
   const saved: Record<string, PropertyDescriptor | undefined> = {};
   const G = ["document", "window", "requestAnimationFrame", "cancelAnimationFrame"] as const;
 
@@ -136,7 +137,16 @@ describe("renderer: repaints only what changed, and nothing while hidden", () =>
       set: (o, k, v) => ((o[k] = v), true),
     });
     const set = (k: string, v: unknown) => Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
-    set("document", { createElement: () => ({ getContext: () => ctx, setAttribute() {}, style: {} }) });
+    set("document", {
+      createElement: () => ({
+        getContext: () => ctx,
+        setAttribute() {},
+        style: {},
+        addEventListener(type: string, fn: () => void) {
+          canvasListeners.set(type, fn);
+        },
+      }),
+    });
     set("window", { devicePixelRatio: 1 });
     set("requestAnimationFrame", (f: () => void) => raf.push(f));
     set("cancelAnimationFrame", (id: number) => {
@@ -217,6 +227,14 @@ describe("renderer: repaints only what changed, and nothing while hidden", () =>
     r.schedule();
     expect(raf.length).toBe(0);
     r.setVisible(true);
+    frame();
+    expect(r.rowsPainted).toBe(t.rows);
+  });
+
+  test("a restored canvas context (its pixels were discarded) repaints every row", () => {
+    const { t, r } = mk();
+    write(t, r, "content\r\n".repeat(5));
+    canvasListeners.get("contextrestored")!();
     frame();
     expect(r.rowsPainted).toBe(t.rows);
   });
