@@ -77,7 +77,24 @@ export interface Changes {
 }
 
 /** Most entries a Changes listing carries (tracked diffs and untracked files each). */
+export interface HistoryEntry {
+  oid: string;
+  /** First parent; null for a root commit. */
+  parent: string | null;
+  author: string;
+  /** Author time, ms since the epoch. */
+  time: number;
+  subject: string;
+  /** Root-relative path of the file in this commit. */
+  path: string;
+  /** Its path before this commit, when the commit renamed or copied it. */
+  oldPath?: string;
+  status: "M" | "A" | "D" | "R" | "C" | "T";
+}
+
 export const MAX_CHANGES = 1000;
+/** Commits listed by File History at most. */
+export const MAX_HISTORY = 500;
 /** Untracked files whose lines are counted (the rest show no counts). */
 const COUNT_UNTRACKED = 200;
 const COUNT_MAX_BYTES = 1 << 20;
@@ -111,6 +128,8 @@ const HARDEN = [
   "-c", "mailmap.file=/dev/null",
   "-c", "mailmap.blob=",
   "-c", "log.mailmap=false",
+  // Also read whole; `log --follow` ignores `-O`, so the order file is overridden as config too.
+  "-c", "diff.orderFile=/dev/null",
   // Counts must not silently turn into "binary" because a config set the threshold to 1.
   "-c", "core.bigFileThreshold=512m",
 ];
@@ -525,6 +544,21 @@ export class Git {
   }
 
   /**
+   * The commits that changed one file, newest first, following renames (`git log --follow`).
+   * Merges are compared with their first parent. Paths are root-relative; history from before
+   * the file was renamed into the root from outside it ends at that rename (shown as added).
+   */
+  async history(rel: string): Promise<HistoryEntry[] | null> {
+    const args = ["--literal-pathspecs", "log", "--follow", "-z", "-M", "--no-color", "--no-decorate", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-relative",
+      "--name-status", "--format=%H%x00%P%x00%an%x00%at%x00%s", `-n${MAX_HISTORY}`];
+    // --diff-merges needs git 2.31; older ones list merges without files (they are skipped then).
+    let r = await this.git([...args, "--diff-merges=first-parent", "--", rel], 4 << 20);
+    if (r.code !== 0 && !r.truncated) r = await this.git([...args, "--", rel], 4 << 20);
+    if (r.code !== 0) return null;
+    return parseHistory(new TextDecoder().decode(r.out), this.prefix);
+  }
+
+  /**
    * Calls `onChange` with fresh status whenever it actually changes: after worktree edits
    * (call `poke()`) and after anything in .git that matters (index, HEAD, refs, ops).
    */
@@ -575,6 +609,46 @@ export class Git {
     for (const w of this.watchers) w.close();
     if (this.timer) clearTimeout(this.timer);
   }
+}
+
+/**
+ * Parses `log -z --name-status --format=%H%x00%P%x00%an%x00%at%x00%s`. The output is read as NUL
+ * separated tokens by position: a header of five fields, then status/path records until the next
+ * object id. Subjects and paths come from the repository and are never used as separators.
+ */
+export function parseHistory(out: string, prefix = ""): HistoryEntry[] {
+  const t = out.split("\0");
+  const res: HistoryEntry[] = [];
+  const strip = (p: string) => (p.startsWith(prefix) ? p.slice(prefix.length) : null);
+  let i = 0;
+  while (i < t.length && res.length < MAX_HISTORY) {
+    const oid = t[i]!.replace(/^\n/, "");
+    if (!isOid(oid) || i + 4 >= t.length) {
+      i++;
+      continue;
+    }
+    const [parents, author, at, subject] = [t[i + 1]!, t[i + 2]!, t[i + 3]!, t[i + 4]!];
+    i += 5;
+    let entry: HistoryEntry | null = null;
+    for (let m; i < t.length && (m = /^\n?([MADRCTUX])\d*$/.exec(t[i]!)); ) {
+      const st = m[1]!;
+      const two = st === "R" || st === "C";
+      const oldP = two ? (t[i + 1] ?? "") : "";
+      const newP = t[i + (two ? 2 : 1)] ?? "";
+      i += two ? 3 : 2;
+      const p = strip(newP);
+      if (entry || !p) continue; // --follow lists one file per commit; anything else is ignored
+      const status = (/^[MADRCT]$/.test(st) ? st : "M") as HistoryEntry["status"];
+      entry = { oid, parent: parents.split(" ")[0] || null, author, time: Number(at) * 1000, subject, path: p, status };
+      if (two) {
+        const o = strip(oldP);
+        if (o) entry.oldPath = o;
+        else entry.status = "A"; // renamed in from outside the viewed folder
+      }
+    }
+    if (entry) res.push(entry);
+  }
+  return res;
 }
 
 /** n-th space-separated field to the end of the record (paths may contain spaces). */

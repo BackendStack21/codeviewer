@@ -2,7 +2,7 @@ import { wsUrl } from "./auth.ts"; // first: installs the auth header on fetch
 import { api, type Info } from "./api.ts";
 import { Editor, type StatusInfo } from "./editor.ts";
 import { FileTree } from "./tree.ts";
-import { Palette, type Command } from "./palette.ts";
+import { Palette, type Command, type PickItem } from "./palette.ts";
 import { markdownToggleCommand } from "./mdcommands.ts";
 import { TerminalPanel } from "./terminals.ts";
 import type { Theme } from "./term/renderer.ts";
@@ -15,7 +15,10 @@ import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
-import { helpKey, normSideView, searchKey, type SideView } from "./keys.ts";
+import { helpKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
+import { reference, referenceWithCode, unsafePath } from "./reference.ts";
+import { headingText } from "./symbols.ts";
+import { slugify } from "./markdown.ts";
 
 type ThemeName = "dark" | "light" | "system";
 
@@ -68,6 +71,8 @@ function terminalTheme(): Theme {
     ansi: Array.from({ length: 16 }, (_, i) => cssVar(`--ansi-${i}`)),
   };
 }
+
+const SYM_LETTER: Record<string, string> = { function: "ƒ", class: "C", type: "T", variable: "v", heading: "#", section: "§" };
 
 class App {
   private L: Layout = { ...DEFAULTS };
@@ -141,7 +146,7 @@ class App {
     if (tabs.active) await this.editor.open(tabs.active, { focus: false });
     this.editor.onChange = () => {
       store.set(`tabs:${this.info.root}`, this.editor.serialize());
-      this.changes.watching = this.editor.tabs.some((t) => t.isDiff);
+      this.changes.watching = this.editor.tabs.some((t) => t.isDiff && !t.commit);
     };
   }
 
@@ -186,6 +191,7 @@ class App {
     this.search = new SearchView();
     this.tree.onSearchIn = (dir, ignored) => this.search.searchIn(dir, ignored);
     this.tree.onViewChanges = (p) => void this.viewChanges(p);
+    this.tree.onHistory = (p) => void this.fileHistory(p);
     this.search.onReveal = () => this.showSearch();
     this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
     this.changes = new ChangesView();
@@ -356,6 +362,7 @@ class App {
     this.palette.recent = this.recent;
     this.palette.onOpenFile = (p, line) => void this.openFile(p, { pin: true, line });
     this.palette.onGoToLine = (n) => this.editor.goToLine(n);
+    this.palette.symbols = () => this.symbolItems();
     this.palette.commands = this.commands();
 
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.applyTheme());
@@ -387,6 +394,10 @@ class App {
       markdownToggleCommand({ isMarkdownTab: () => this.editor.isMarkdownTab(), toggleMarkdown: () => this.editor.toggleMarkdown() }),
       c("file.find", "Find in File", () => this.editor.openFind(), `${MOD}F`),
       c("file.line", "Go to Line…", () => this.palette.open(":"), IS_MAC ? "⌃G" : "Ctrl+G"),
+      c("file.symbol", "Go to Symbol in File…", () => this.palette.open("@"), key("⌘⇧O", "Ctrl+Shift+O")),
+      c("file.reference", "Copy Reference (path:line)", () => this.copyReference(false), key("⌥⌘C", "Ctrl+Alt+C")),
+      c("file.referenceCode", "Copy Reference with Code", () => this.copyReference(true)),
+      c("term.reference", "Insert Reference in Terminal", () => this.referenceToTerminal()),
       c("file.reveal", "Reveal Active File in Explorer", () => this.editor.active && void this.tree.reveal(this.editor.active.path)),
       c("file.copyPath", "Copy Path of Active File", () => this.copyPath(false)),
       c("file.copyAbs", "Copy Absolute Path of Active File", () => this.copyPath(true)),
@@ -404,6 +415,11 @@ class App {
         else if (!code.peekCurrent()) this.notify("No change on this line");
       }),
       c("app.help", "Help: Keyboard Shortcuts & Tips", () => this.help.open(), key("⌘/", "Ctrl+/")),
+      c("git.history", "Git: File History", () => {
+        const t = this.editor.active;
+        if (!t) this.notify("Open a file first");
+        else void this.fileHistory(t.path);
+      }),
       c("git.scope", "Git: Compare With Base Branch / HEAD", () => this.changes.toggleScope()),
       c("app.update", "Check for Updates…", () => void this.updates.checkNow()),
       c("app.autoUpdate", "Toggle Automatic Update Checks", () => {
@@ -473,6 +489,60 @@ class App {
     const f = this.changes.files.find((x) => x.path === path);
     if (!f) return this.notify(`No changes in ${basename(path)} ${this.changes.vs}`);
     await this.openDiff(f, false, true);
+  }
+
+  /** "@" in the palette: the active file's outline, indented by nesting. */
+  private symbolItems(): PickItem[] | string {
+    const o = this.editor.outline();
+    if (typeof o === "string") return o;
+    const depths = [...new Set(o.syms.map((s) => s.depth))].sort((a, b) => a - b);
+    const seen = new Map<string, number>();
+    return o.syms.map((s) => {
+      // Headings get the same slugs as the preview's ids, repeats included.
+      const slug = s.kind === "heading" ? slugify(headingText(s.name), seen) : undefined;
+      return {
+        label: s.name,
+        detail: `${s.kind} · line ${s.line + 1}`,
+        icon: `<span class="sym-kind sym-${s.kind}" aria-hidden="true">${SYM_LETTER[s.kind]}</span>`,
+        indent: depths.indexOf(s.depth),
+        run: () => this.editor.revealSymbol(s, slug),
+      };
+    });
+  }
+
+  /** Commits that changed `path`, newest first; picking one opens what it changed. */
+  private async fileHistory(path: string) {
+    if (!this.git.repo) return this.notify("Not a git repository");
+    const list = await api.gitHistory(path);
+    if (!list?.length) return this.notify(`No history for ${basename(path)}`);
+    const items: PickItem[] = list.map((c) => ({
+      label: c.subject || "(no subject)",
+      detail: `${c.oid.slice(0, 7)} · ${c.author} · ${relativeTime(c.time)}${c.oldPath && c.oldPath !== c.path ? ` · from ${c.oldPath}` : ""}`,
+      icon: `<span class="gbadge git-${c.status}">${c.status}</span>`,
+      run: () => void this.editor.openCommitDiff(c, { focus: true }),
+    }));
+    this.palette.pick(items, `History of ${basename(path)}: ${list.length}${list.length >= 500 ? "+" : ""} commit${list.length === 1 ? "" : "s"}, type to filter`);
+  }
+
+  private copyReference(withCode: boolean) {
+    const r = this.editor.referenceTarget();
+    if (typeof r === "string") return this.notify(r);
+    if (unsafePath(r.path)) return this.notify("This file name has control characters: no reference copied");
+    const text = withCode && r.span && r.lines ? referenceWithCode(r.path, r.span, r.lines) : reference(r.path, r.span);
+    void navigator.clipboard.writeText(text);
+    this.notify(`Copied ${reference(r.path, r.span)}${withCode && r.span ? " with code" : ""}`);
+  }
+
+  /** Types the reference at the active terminal's prompt (as a paste, never with Enter). */
+  private referenceToTerminal() {
+    const r = this.editor.referenceTarget();
+    if (typeof r === "string") return this.notify(r);
+    if (unsafePath(r.path)) return this.notify("This file name has control characters: nothing inserted");
+    const term = this.terms.active;
+    if (!term || this.terms.activeExited) return this.notify("No running terminal to insert into");
+    if (!this.L.panel) this.togglePanel(true);
+    term.view.paste(`${reference(r.path, r.span)} `);
+    this.terms.focus();
   }
 
   private trackRecent(p: string) {
@@ -703,6 +773,8 @@ class App {
           else if (this.L.panel && !inTerm) this.terms.focus();
           else this.togglePanel();
         } else if (mod && e.shiftKey && k === "g") this.showChanges();
+        else if (symbolKey(e, { isMac: IS_MAC }) && appKey) this.palette.open("@");
+        else if (referenceKey(e, { isMac: IS_MAC }) && !inTerm) this.copyReference(false);
         else if (e.altKey && e.key === "F5" && !inTerm) this.editor.nextChange(e.shiftKey ? -1 : 1);
         else if (mod && e.shiftKey && k === "p") this.palette.open(">");
         else if (mod && !e.shiftKey && k === "p" && appKey && (IS_MAC || !inPalette)) this.palette.open(); // Linux: Ctrl+P is the palette's own "up"

@@ -26,6 +26,8 @@ export class Help {
       ...group("In a file", [
         row(key("⌘F", "Ctrl+F"), "Find in file"),
         row(key("⌃G", "Ctrl+G"), "Go to line"),
+        row(key("⌘⇧O", "Ctrl+Shift+O"), "Go to symbol (functions, classes, headings); or type @ in Go to file"),
+        row(key("⌥⌘C", "Ctrl+Alt+C"), "Copy a path:line reference to the selected lines (palette: with code, or into the terminal)"),
         row(key("⌘⇧F", "Ctrl+Shift+F"), "Search in files"),
         row(key("F4 · ⇧F4", "F4 · Shift+F4"), "Next / previous search result"),
         row(key("⌘= ⌘- ⌘0", "Ctrl+= Ctrl+- Ctrl+0"), "Font size (code, terminal and chrome)"),
@@ -33,6 +35,7 @@ export class Help {
       ...group("Git", [
         row(key("⌘⇧G", "Ctrl+Shift+G"), "Changes: every file the branch touched, as diffs"),
         row(key("⌥F5 · ⌥⇧F5", "Alt+F5 · Alt+Shift+F5"), "Next / previous change (then the next file)"),
+        row("Git: File History", "Commits that changed the active file; pick one to see its diff (also in the explorer menu)"),
         row("click a gutter mark", "Peek at what HEAD had (or run \u201cGit: Peek HEAD\u201d from the palette)"),
       ]),
       ...group("Terminal", [

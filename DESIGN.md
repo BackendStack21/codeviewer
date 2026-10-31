@@ -808,3 +808,30 @@ A second pass took every remaining item, including the ones first judged not wor
 | The macOS About panel had no owner or links. | Credits name 21no.de, the site and the repository as links; the copyright line in `Info.plist` names the owner and license. |
 | A modified badge in the Explorer led nowhere: seeing a file's diff meant switching to Changes and finding it in the list. | "View Changes" in the file context menu (every file inside a repository: the badge is the working tree vs HEAD while Changes may compare with the base branch) opens the Changes view with the file's diff focused as a preview tab. The list is brought current first through `ChangesView.ready()`: the view's own refresh on being shown would make a plain `await refresh()` return early (`again` flag) with the old list and a false "No changes". A file not in the comparison gets a notice, not an empty diff. |
 | ⌘/ did nothing on a German Mac. There "/" is Shift+7, and WKWebView reports ⌘⇧7 as `key: "7"`, `code: "Digit7"` with Shift held (recorded with a CGEvent probe on the German layout), so the handler's `key === "/"` never matched. Linux reports Ctrl+Shift+7 as `"/"` and was fine. | `helpKey()` in `keys.ts` also accepts ⌘⇧ plus `Digit7` reporting `"7"`. The `Slash` code is not matched: on those layouts that key is "-" and ⌘- zooms out. The help sheet and README mention ⌘⇧7. |
+
+## 18. Round 9: feature panel (read-only features)
+
+Four experts proposed five read-only features each, independently and without seeing each other's
+lists: a developer who watches coding agents all day, a UX/accessibility designer, a code-navigation
+engineer and a git/security engineer. Constraints: nothing writes to the tree or the repository, no
+dependencies, no new network calls. Three ideas were picked by more than one expert; they were built.
+The rest (soft wrap, a high-contrast theme, a turn checkpoint diff, follow-agent mode, a repository
+trust report, a hidden-character scanner, back/forward history, and others) each had one vote.
+
+| Feature | Votes | As built |
+| --- | --- | --- |
+| Go to Symbol / outline | Navigation #1, UX #3 | `symbols.ts`: one start-of-line pattern per declaration form for 17 language families, comment and docstring lines skipped, depth from indentation; Markdown ATX/setext headings outside fences. ⌘⇧O or `@` in ⌘P shows an indented outline that typing turns into a ranked list. In a rendered preview a heading is revealed by its slug (de-duplicated like the renderer), so the preview stays a preview. |
+| File History | Navigation #5, Security #4 | `Git.history()` runs `--literal-pathspecs log --follow -z --name-status` (first-parent diffs for merges, 500 commits, 4 MB). The output is read as NUL-separated tokens by position, so a subject or author can never act as a separator. Paths are made root-relative (a rename from outside the root ends there as "added"). The palette's new `pick()` lists the commits; one opens as a diff tab whose two sides are blobs by object id. |
+| Copy Reference | UX #4, Agent-dev #5 ("review notes to terminal") | ⌥⌘C copies `path:line` or `path:12-40`; a selection ending at column 0 of a line leaves that line out. "Copy Reference with Code" adds the whole lines in a fence longer than any backtick run inside. "Insert Reference in Terminal" pastes the one-line reference at the prompt and never presses Enter. Terminal ⌘-click and `codeviewer open` now accept `path:12-40` (first line). |
+
+Findings while building:
+
+| Finding | Fix |
+| --- | --- |
+| Diff tabs were found by path and every `isDiff` tab followed the Changes view: a history tab would have been re-pointed at the Changes base on every git event, merged with the Changes diff of the same file, given "3/7" positions, kept the Changes view polling, and ⌥F5 past its last hunk would have jumped into the Changes list. | History tabs carry their commit and are keyed by path + object id. `openDiff`, `refreshDiffs`, `setDiffPositions`, `changes.watching` and the step past the last hunk skip them, and file-change reloads never touch them (a commit does not change). Tested in `client.history.test.ts`. |
+| The palette's `fuzzy()` jumped to a later word-boundary or camel-case hit even when the rest of the query could not match after it: `sto` did not match `stop<T>` (the `T` looked like a hump). Symbol names hit this often; paths rarely. | A later boundary hit is taken only when the rest of the query is still a subsequence after it. |
+| Option changes the key on a Mac (⌥C is "ç"), so `key === "c"` never matches ⌥⌘C there. | `referenceKey()` also accepts the physical C key when the key is not a letter; a letter there means another layout (Dvorak), where only "c" itself counts. |
+| A path from the client goes into a git pathspec; a file named `:(top)x` would be read as pathspec magic. | `--literal-pathspecs` on the history call, with a test using such a file name. |
+| `diff.orderFile` is read whole by diffcore; `diffFiles` passed `-O/dev/null`, but `log --follow` sets up its own diff and ignores `-O`, so a repository with `diff.orderFile=/dev/zero` held File History for the 30 s timeout. | `diff.orderFile=/dev/null` joins the fixed hardening config every git call gets; the malicious-repository test now also sets `diff.orderFile` and `diff.external` and runs `history()`. |
+| File names are untrusted. Without bracketed paste (plain `sh`, many REPLs) a newline in a pasted reference ends the line, so "Insert Reference in Terminal" on a file named `x\nrm -rf ~` would have run a command. | References to paths with control or bidi characters are refused, for the terminal and the clipboard alike (`unsafePath`). |
+| `@` re-scanned the file on every keystroke. | The symbol list is computed once per palette opening. |

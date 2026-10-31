@@ -28,6 +28,11 @@ describe("fuzzy", () => {
     expect(P.fuzzy("abc", "abcxx")!.score).toBeGreaterThan(P.fuzzy("abc", "axbxc")!.score);
     expect(P.fuzzy("gs", "getState")!.pos).toEqual([0, 3]);
   });
+  test("a later word-boundary hit is taken only when the rest of the query still matches after it", () => {
+    expect(P.fuzzy("sto", "stop<T>")!.pos).toEqual([0, 1, 2]);
+    expect(P.fuzzy("sto", "start")).toBeNull();
+    expect(P.fuzzy("gs", "getState")!.pos).toEqual([0, 3]);
+  });
   test("case-exact match gets a small bonus", () => {
     expect(P.fuzzy("A", "A")!.score).toBeGreaterThan(P.fuzzy("a", "A")!.score);
   });
@@ -299,6 +304,68 @@ describe("Palette", () => {
     expect(t.list.innerHTML).toContain("Go to line <b>120</b>");
     t.key("Enter");
     expect(lines).toEqual([120]);
+  });
+
+  test("'@' lists the active file's symbols in outline order, indented, and typing filters them", async () => {
+    const t = await make();
+    const ran: string[] = [];
+    t.p.symbols = () => [
+      { label: "App", detail: "class · line 3", run: () => ran.push("App") },
+      { label: "start", detail: "function · line 9", indent: 1, run: () => ran.push("start") },
+      { label: "stop<T>", detail: "function · line 20", indent: 1, run: () => ran.push("stop") },
+    ];
+    t.p.open("@");
+    expect(t.rows().length).toBe(3);
+    expect(t.list.innerHTML).toContain('class="pal-indent" style="width:14px"');
+    expect(t.list.innerHTML).toContain('<span class="pal-detail plain">function · line 9</span>');
+    expect(t.list.innerHTML).toContain("stop&lt;T&gt;");
+    t.type("@sto");
+    expect(t.rows().length).toBe(1);
+    expect(t.list.innerHTML).not.toContain("pal-indent"); // a filtered list is ranked, not an outline
+    t.key("Enter");
+    expect(ran).toEqual(["stop"]);
+    t.p.open("@zzz");
+    expect(t.list.innerHTML).toContain("No matches");
+  });
+
+  test("'@' shows the reason when there are no symbols", async () => {
+    const t = await make();
+    t.p.symbols = () => "No outline for <JSON> files";
+    t.p.open("@");
+    expect(t.rows().length).toBe(0);
+    expect(t.list.innerHTML).toContain("No outline for &lt;JSON&gt; files");
+    expect(t.input.getAttribute("aria-activedescendant")).toBeNull();
+    t.p.symbols = () => [];
+    t.p.open("@");
+    expect(t.list.innerHTML).toContain("No symbols in this file");
+  });
+
+  test("pick shows a list with a placeholder until the palette closes; the input filters it", async () => {
+    const t = await make();
+    const ran: string[] = [];
+    t.p.pick(
+      [
+        { label: "fix: parser", detail: "1a2b3c4 · Ann · 2 days ago", run: () => ran.push("fix") },
+        { label: "feat: history", detail: "5d6e7f8 · Bob · 3 days ago", run: () => ran.push("feat") },
+      ],
+      "History of a.ts",
+    );
+    expect(t.p.isOpen).toBe(true);
+    expect(t.input.getAttribute("placeholder")).toBe("History of a.ts");
+    expect(t.rows().length).toBe(2);
+    t.type("hist");
+    expect(t.rows().length).toBe(1);
+    t.key("Enter");
+    expect(ran).toEqual(["feat"]);
+    // Reopening for files goes back to the file list, without the placeholder.
+    t.p.open();
+    await t.flush();
+    expect(t.input.getAttribute("placeholder")).toBeNull();
+    expect(t.list.innerHTML).toContain("a.ts");
+    t.p.pick([], "History of b.ts", "No commits");
+    expect(t.list.innerHTML).toContain("No commits");
+    t.key("Escape");
+    expect(t.p.isOpen).toBe(false);
   });
 
   test("empty index shows 'No files'", async () => {

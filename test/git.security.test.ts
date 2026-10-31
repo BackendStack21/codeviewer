@@ -45,7 +45,7 @@ beforeAll(async () => {
   for (const [k, v] of [
     ["filter.pwn.clean", evil], ["filter.pwn.smudge", evil], ["filter.pwn.process", evil], ["filter.pwn.required", "true"],
     ["filter.pwn2.clean", evil], ["diff.pwn.textconv", evil], ["diff.pwn2.textconv", evil], ["diff.pwn.command", evil],
-    ["merge.pwn.driver", evil], ["log.showSignature", "true"], ["gpg.program", evil], ["core.fsmonitor", evil],
+    ["merge.pwn.driver", evil], ["log.showSignature", "true"], ["diff.orderFile", "/dev/zero"], ["diff.external", evil], ["gpg.program", evil], ["core.fsmonitor", evil],
     // A driver whose name contains "=": a `-c filter.a=b.clean=` override would set filter.a instead.
     ["filter.a=b.clean", evil], ["filter.a=b.required", "true"], ["diff.a=b.textconv", evil], ["merge.a=b.driver", evil],
   ]) sh(["config", k!, v!]);
@@ -69,6 +69,8 @@ test("a malicious repository cannot make codeviewer's git calls run programs", a
   await g.base("b.md", 1 << 20);
   await g.blame("a.txt", 2);
   await g.blame("b.md", 1);
+  expect((await g.history("a.txt"))!.length).toBeGreaterThan(0);
+  expect((await g.history("b.md"))!.length).toBeGreaterThan(0);
   const c = await g.changes("head");
   expect(c.files.map((f) => f.path)).toContain("b.md");
   expect(existsSync(marker) ? await readFile(marker, "utf8") : "").toBe("");

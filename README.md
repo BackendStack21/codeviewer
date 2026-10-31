@@ -28,6 +28,16 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
   files. Results stream in grouped by file, open at the exact match, and offer a Refresh when files
   change on disk. Right-click a folder in the Explorer and pick "Search in Folder…" to scope the
   search to it.
+- **Go to Symbol:** ⌘⇧O (or `@` in ⌘P) lists the active file's functions, classes, types and
+  Markdown headings as an indented outline; type to filter, Enter to jump. A rendered Markdown
+  preview scrolls to the heading itself. Covers TypeScript/JavaScript, Python, Rust, Go, C/C++,
+  Java/Kotlin/C#, Swift, Ruby, PHP, Lua, shell, CSS, Zig, Haskell, Makefiles, YAML/TOML keys and
+  Dockerfile stages, with patterns, not a parser.
+- **References for your agent:** ⌥⌘C copies `path:line` (or `path:12-40` for a selection) for the
+  cursor or the selected lines. The palette also has **Copy Reference with Code** (the reference
+  plus the lines in a fenced block) and **Insert Reference in Terminal**, which types it at the
+  prompt as a paste, never with Enter. The same form opens back in the viewer with ⌘-click or
+  `codeviewer open`.
 - **Git (read-only):**
   - Explorer status letters and colors (M A U D R C), with folders rolled up and ignored files dimmed.
   - Colored tabs.
@@ -39,6 +49,9 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
     `+/−` per file and a one-line summary. Each file opens as a read-only unified diff; ⌥F5 walks
     the changes and moves on to the next file. Reviewed files dim until they change again.
     Right-click a file in the Explorer and pick "View Changes" to jump to its diff.
+  - **File History:** "Git: File History" in the palette (or "File History" in the Explorer's file
+    menu) lists the commits that changed the file, renames followed, newest first; type to filter by
+    subject, Enter to open what that commit changed as a read-only diff tab labelled with its short id.
   - Everything updates live as files, the index or refs change.
 - **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
   update pill in the status bar when a new version is out. Installing verifies the release's
@@ -80,7 +93,7 @@ See [DESIGN.md](DESIGN.md) for the expert-panel design review and the architectu
 ```sh
 codeviewer [dir]            # opens the app window (macOS: Codeviewer.app; Linux: bundled Chromium)
 codeviewer . --no-open      # headless/SSH: just print the URL
-codeviewer open src/app.ts:42   # from inside a codeviewer terminal: show a file in the viewer
+codeviewer open src/app.ts:42   # from inside a codeviewer terminal: show a file in the viewer (path:12-40 works too)
 ```
 
 Options: `--port N`, `--host ADDR` (default `127.0.0.1`), `--shell PATH`, `--browser` (use your default browser).
@@ -93,12 +106,14 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘⇧P / Ctrl+Shift+P | Command palette |
 | ⌃\` | Toggle / focus terminal · ⌃⇧\` new terminal |
 | ⌘F · ⌃G | Find in file · go to line |
+| ⌘⇧O / Ctrl+Shift+O | Go to symbol in the file (or `@` in ⌘P) |
+| ⌥⌘C / Ctrl+Alt+C | Copy a `path:line` reference to the cursor or selected lines |
 | ⌘⇧F / Ctrl+Shift+F | Search in files |
 | F4 / ⇧F4 | Next / previous search result |
 | ⌘B · ⌘⇧E | Toggle sidebar · focus explorer |
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs (in the terminal: switch terminals) |
 | ⌘W in the terminal | Close an exited terminal; a running one asks for a second press (Linux: Ctrl+W stays the shell's) |
-| Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…", "View Changes") |
+| Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…", "View Changes", "File History") |
 | ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
 | ⌘/ | Every shortcut and the terminal tips, in your platform's key names (⌘⇧7 on layouts where "/" is Shift+7, such as German) |

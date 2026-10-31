@@ -43,3 +43,20 @@ export function helpKey(e: KeyLike, o: { isMac: boolean }): boolean {
   if (e.key === "/") return true;
   return !!e.shiftKey && e.code === "Digit7" && e.key === "7";
 }
+
+/** Cmd/Ctrl+Shift+O: Go to Symbol in the active file. */
+export function symbolKey(e: KeyLike, o: { isMac: boolean }): boolean {
+  const mod = o.isMac ? !!e.metaKey : !!e.ctrlKey;
+  return mod && !!e.shiftKey && !e.altKey && e.key.toLowerCase() === "o";
+}
+
+/**
+ * Cmd+Option+C / Ctrl+Alt+C: copy a `path:line` reference. On a Mac, Option turns the key into
+ * "ç" (or another symbol), so the physical C key also counts when the key is not a letter; a
+ * letter means the layout puts another one there (Dvorak), and only "c" itself matches.
+ */
+export function referenceKey(e: KeyLike, o: { isMac: boolean }): boolean {
+  const mod = o.isMac ? !!e.metaKey : !!e.ctrlKey;
+  if (!mod || !e.altKey || e.shiftKey) return false;
+  return e.key.toLowerCase() === "c" || (e.code === "KeyC" && !/^[a-z]$/i.test(e.key));
+}

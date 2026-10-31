@@ -41,6 +41,8 @@ export class FileTree {
   onSearchIn: (dir: string, ignored: boolean) => void = () => {};
   /** "View Changes" on a file: its diff in the Changes view. Offered only inside a git repository. */
   onViewChanges: (path: string) => void = () => {};
+  /** "File History" on a file: the commits that changed it. Offered only inside a git repository. */
+  onHistory: (path: string) => void = () => {};
   git: GitState | null = null;
 
   constructor(rootName: string) {
@@ -232,7 +234,10 @@ export class FileTree {
       const items = [{ label: "Open in New Tab", run: () => this.onOpen(n.path, true) }];
       // Every file, not only badged ones: the badge is the working tree vs HEAD while the Changes
       // view may compare with the base branch, so a committed file can have changes without one.
-      if (this.git?.repo) items.push({ label: "View Changes", run: () => this.onViewChanges(n.path) });
+      if (this.git?.repo) {
+        items.push({ label: "View Changes", run: () => this.onViewChanges(n.path) });
+        items.push({ label: "File History", run: () => this.onHistory(n.path) });
+      }
       showContextMenu(e, items);
     }
   }

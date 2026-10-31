@@ -352,6 +352,11 @@ export class CodeView {
     return this.lines.length;
   }
 
+  /** The file's lines (read-only view of the model). */
+  get lineTexts(): readonly string[] {
+    return this.lines;
+  }
+
   setFontSize(px: number) {
     this.el.style.setProperty("--code-size", `${px}px`);
     this.lh = Math.round(px * 1.6); // panel decision: generous leading for scanning code

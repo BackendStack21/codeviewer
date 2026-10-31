@@ -823,6 +823,10 @@ svg {
 }
 .pill {
   margin-left: 10px;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 1px 8px;
   border-radius: 99px;
   font-size: 11px;
@@ -1729,6 +1733,13 @@ mark.cur {
   direction: rtl;
   text-align: left;
 }
+.pal-detail.plain {
+  direction: ltr;
+}
+.pal-indent {
+  flex: none;
+  margin-right: -10px;
+}
 .pal-empty {
   padding: 18px;
   color: var(--fg-faint);
@@ -1812,6 +1823,23 @@ button.st-item:hover {
 .pal-item .gbadge {
   margin-left: 8px;
 }
+/* File History rows start with the commit's status letter; Go to Symbol rows with a kind letter. */
+.pal-item > .gbadge:first-child,
+.sym-kind {
+  margin-left: 0;
+  width: 16px;
+  flex: none;
+  text-align: center;
+}
+.sym-kind {
+  font: 600 11px/16px var(--font-mono);
+  border-radius: 4px;
+  color: var(--fg-muted);
+  background: var(--bg-hover);
+}
+.sym-function { color: var(--accent); }
+.sym-class, .sym-type { color: var(--git-mod); }
+.sym-heading, .sym-section { color: var(--git-ren); }
 
 .st-item.muted {
   color: var(--fg-faint);
@@ -2210,6 +2238,7 @@ li[data-state="done"] .upd-mark {
 
 /* diff tab */
 .tab-kind { margin-left: 2px; padding: 0 4px; border-radius: 3px; font: 600 9.5px/14px var(--font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-muted); background: var(--bg-active); }
+.tab-kind.oid { font: 500 10px/14px var(--font-mono); letter-spacing: 0; text-transform: none; }
 .diffview { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .diff-head {
   display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px 0 12px; flex: none;

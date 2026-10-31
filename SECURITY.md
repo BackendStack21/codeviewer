@@ -24,6 +24,17 @@ process environment. Shells started by Codeviewer receive a separate, narrower t
 honours for one purpose: `codeviewer open <file:line>` asking the viewer to show a file. It cannot read
 files, search or attach to terminals.
 
+## Git
+
+Every git call runs with filters, textconv, diff drivers, fsmonitor, signature checks, mailmap and
+submodule recursion off, with driver overrides passed as `GIT_CONFIG_KEY_n`/`VALUE_n`, and never
+writes the index. File History runs `git --literal-pathspecs log --follow` for one file that must
+exist inside the served root, at most 500 commits and 4 MB of output; each side of a commit's diff is
+read with `cat-file` by full object id, never from a revision expression the client chose.
+
+Commands that type into a terminal ("Insert Reference in Terminal") send one line as a paste and
+never press Enter.
+
 ## Updates
 
 The in-app updater downloads only from GitHub over https, caps the sizes it will read, requires a

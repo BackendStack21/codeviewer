@@ -9,6 +9,21 @@ export interface Command {
   run(): void;
 }
 
+/** A row of a list the palette picks from ("@" symbols, file history). */
+export interface PickItem {
+  label: string;
+  /** Plain text after the label (a line number, an author and date). */
+  detail?: string;
+  /** Icon markup (trusted: from icons.ts). */
+  icon?: string;
+  /** Indentation steps (an outline's nesting). */
+  indent?: number;
+  run(): void;
+}
+
+/** Rows rendered at most in a picked list; typing narrows it. */
+const PICK_MAX = 300;
+
 interface Match {
   score: number;
   pos: number[];
@@ -31,7 +46,8 @@ export function fuzzy(q: string, s: string, base = 0, sl = s.toLowerCase(), ql =
     for (let k = found; k >= 0 && k < sl.length && k < found + 24; k = sl.indexOf(c, k + 1)) {
       if (k === 0 || BOUNDARY.test(s[k - 1]!) || (s[k]! !== sl[k] && s[k - 1] === sl[k - 1])) {
         if (k === prev + 1) break;
-        found = k;
+        // Jump only if the rest of the query still fits after it ("sto" in "stop<T>" keeps the "t" of "stop").
+        if (k === found || subsequence(ql, qi + 1, sl, k + 1)) found = k;
         break;
       }
     }
@@ -46,6 +62,17 @@ export function fuzzy(q: string, s: string, base = 0, sl = s.toLowerCase(), ql =
   }
   score -= s.length * 0.02;
   return { score, pos };
+}
+
+/** True when `ql` from `qi` on (spaces skipped) is a subsequence of `sl` from `si` on. */
+function subsequence(ql: string, qi: number, sl: string, si: number): boolean {
+  for (; qi < ql.length; qi++) {
+    if (ql[qi] === " ") continue;
+    si = sl.indexOf(ql[qi]!, si);
+    if (si < 0) return false;
+    si++;
+  }
+  return true;
 }
 
 export function scorePath(q: string, path: string, lower = path.toLowerCase(), ql = q.toLowerCase()): Match | null {
@@ -88,7 +115,7 @@ export function searchPaths(q: string, files: string[], lower: string[], prev: I
   return { best, hits: Int32Array.from(hits) };
 }
 
-/** ⌘P quick open, ">" commands, ":" go to line. */
+/** ⌘P quick open, ">" commands, ":" go to line, "@" symbols of the active file, and picked lists. */
 export class Palette {
   readonly el: HTMLElement;
   private input: HTMLInputElement;
@@ -106,6 +133,12 @@ export class Palette {
   commands: Command[] = [];
   onOpenFile: (path: string, line?: number) => void = () => {};
   onGoToLine: (line: number) => void = () => {};
+  /** "@" mode: the active file's symbols, or a message when it has none. */
+  symbols: () => PickItem[] | string = () => "Open a file to see its symbols";
+  /** A list shown by `pick` until the palette closes. */
+  private picked: { items: PickItem[]; empty: string } | null = null;
+  /** "@" mode's symbols, computed once per opening (a large file is not rescanned per keystroke). */
+  private syms: PickItem[] | string | null = null;
 
   constructor() {
     this.input = h("input", {
@@ -156,7 +189,21 @@ export class Palette {
   }
 
   open(prefix = "") {
-    this.prevFocus = document.activeElement;
+    this.picked = null;
+    this.input.removeAttribute("placeholder");
+    this.show(prefix);
+  }
+
+  /** Shows `items` to filter and pick from; `empty` is the message for an empty list. */
+  pick(items: PickItem[], placeholder: string, empty = "Nothing to show") {
+    this.picked = { items, empty };
+    this.input.setAttribute("placeholder", placeholder);
+    this.show("");
+  }
+
+  private show(prefix: string) {
+    this.syms = null;
+    if (this.el.hidden) this.prevFocus = document.activeElement;
     this.el.hidden = false;
     this.input.setAttribute("aria-expanded", "true");
     this.input.value = prefix;
@@ -166,6 +213,7 @@ export class Palette {
   }
 
   close() {
+    this.picked = null;
     this.el.hidden = true;
     this.input.setAttribute("aria-expanded", "false");
     (this.prevFocus as HTMLElement | null)?.focus?.();
@@ -184,7 +232,23 @@ export class Palette {
   private update() {
     const v = this.input.value;
     this.items = [];
-    if (v.startsWith(">")) {
+    if (this.picked || v.startsWith("@")) {
+      const src = this.picked ? this.picked.items : (this.syms ??= this.symbols());
+      const q = (this.picked ? v : v.slice(1)).trim();
+      if (typeof src === "string" || !src.length) return this.empty(typeof src === "string" ? src : (this.picked?.empty ?? "No symbols in this file"));
+      // Without a query the list keeps its own order (an outline, newest commits first).
+      const scored: { it: PickItem; m: Match }[] = [];
+      for (const it of src) {
+        const m = q ? fuzzy(q, it.label) : { score: 0, pos: [] };
+        if (m) scored.push({ it, m });
+      }
+      if (q) scored.sort((a, b) => b.m.score - a.m.score);
+      if (!scored.length) return this.empty("No matches");
+      for (const { it, m } of scored.slice(0, PICK_MAX)) {
+        const pad = !q && it.indent ? `<span class="pal-indent" style="width:${Math.min(it.indent, 8) * 14}px"></span>` : "";
+        this.items.push({ label: it.label, html: this.row(pad + (it.icon ?? icons.code), highlight(it.label, m.pos), esc(it.detail ?? ""), undefined, "pal-detail plain"), run: it.run });
+      }
+    } else if (v.startsWith(">")) {
       const q = v.slice(1).trim();
       const scored: { c: Command; m: Match }[] = [];
       for (const c of this.commands) {
@@ -229,12 +293,7 @@ export class Palette {
           run: () => this.onOpenFile(p, line),
         });
       }
-      if (!this.items.length) {
-        const msg = this.stale && this.loading ? "Indexing files…" : q ? "No matching files" : "No files";
-        this.list.innerHTML = `<div class="pal-empty">${msg}</div>`;
-        this.syncActive();
-        return;
-      }
+      if (!this.items.length) return this.empty(this.stale && this.loading ? "Indexing files…" : q ? "No matching files" : "No files");
     }
     this.sel = 0;
     this.list.innerHTML = this.items
@@ -243,8 +302,14 @@ export class Palette {
     this.syncActive();
   }
 
-  private row(icon: string, main: string, detail: string, keys?: string): string {
-    return `<div class="pal-item" role="option">${icon}<span class="pal-main">${main}</span><span class="pal-detail">${detail}</span>${keys ? `<kbd>${esc(keys)}</kbd>` : ""}</div>`;
+  private empty(msg: string) {
+    this.items = [];
+    this.list.innerHTML = `<div class="pal-empty">${esc(msg)}</div>`;
+    this.syncActive();
+  }
+
+  private row(icon: string, main: string, detail: string, keys?: string, detailClass = "pal-detail"): string {
+    return `<div class="pal-item" role="option">${icon}<span class="pal-main">${main}</span><span class="${detailClass}">${detail}</span>${keys ? `<kbd>${esc(keys)}</kbd>` : ""}</div>`;
   }
 
   private move(d: number) {
@@ -262,6 +327,7 @@ export class Palette {
     const it = this.items[i];
     if (!it) return;
     this.el.hidden = true;
+    this.picked = null;
     it.run();
   }
 }
