@@ -46,12 +46,14 @@ function openMenu(t: Tree, path: string) {
   return row;
 }
 
-test("a file offers View Changes only in a git repository, and it reports the file's path", async () => {
+test("a file offers View Changes and File History only in a git repository, and they report the file's path", async () => {
   const t = new T.FileTree("root") as Tree;
   await t.init();
   const viewed: string[] = [];
   const opened: [string, boolean][] = [];
+  const history: string[] = [];
   t.onViewChanges = (p) => viewed.push(p);
+  t.onHistory = (p) => history.push(p);
   t.onOpen = (p, pin) => opened.push([p, pin]);
 
   openMenu(t, "a.ts");
@@ -60,11 +62,15 @@ test("a file offers View Changes only in a git repository, and it reports the fi
 
   t.git = { repo: true } as unknown as typeof t.git;
   openMenu(t, "a.ts");
-  expect(labels()).toEqual(["Open in New Tab", "View Changes"]);
+  expect(labels()).toEqual(["Open in New Tab", "View Changes", "File History"]);
   dom.document.body.querySelectorAll<FakeElement>(".ctx-item")[1]!.dispatchEvent(new FakeEvent("click"));
   expect(viewed).toEqual(["a.ts"]);
   expect(opened).toEqual([]);
   expect(m.isContextMenuOpen()).toBe(false);
+  openMenu(t, "a.ts");
+  dom.document.body.querySelectorAll<FakeElement>(".ctx-item")[2]!.dispatchEvent(new FakeEvent("click"));
+  expect(history).toEqual(["a.ts"]);
+  expect(viewed).toEqual(["a.ts"]);
 
   // Folders are unchanged: no diff for a directory.
   openMenu(t, "src");

@@ -32,7 +32,7 @@ async function openCommand(target: string | undefined) {
   const url = process.env.CODEVIEWER_URL;
   const token = process.env.CODEVIEWER_TOKEN;
   if (!url || !token) die("not inside a codeviewer terminal (CODEVIEWER_URL is not set)");
-  const m = /^(.*?)(?::(\d+))?(?::\d+)?$/.exec(target)!;
+  const m = /^(.*?)(?::(\d+)(?:-\d+)?)?(?::\d+)?$/.exec(target)!;
   const file = path.resolve(m[1]!);
   const res = await fetch(`${url}/api/open`, {
     method: "POST",

@@ -1,4 +1,4 @@
-import { api, type ChangeFile } from "./api.ts";
+import { api, type ChangeFile, type HistoryEntry } from "./api.ts";
 import { CodeView } from "./codeview.ts";
 import { DiffView, type DiffInfo } from "./diffview.ts";
 import { labelOf, letterOf } from "./changes.ts";
@@ -10,6 +10,8 @@ import { decidePreview, tooLargeNote } from "./mdgate.ts";
 import { planView, toggleLabel, toggleMode, viewMode } from "./viewstate.ts";
 import { basename, debounce, dirname, esc, formatBytes, h, MOD } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
+import { hasSymbols, symbols, type Sym } from "./symbols.ts";
+import { lineSpan, type Span } from "./reference.ts";
 
 type Kind = "text" | "image" | "binary" | "error" | "dir";
 
@@ -26,6 +28,8 @@ export interface Tab {
   /** Read-only diff of a changed file (a "diff tab"): `file` is the change it shows. */
   diff?: DiffView;
   isDiff?: boolean;
+  /** A diff of one commit from File History: fixed content, never tied to the Changes view. */
+  commit?: HistoryEntry;
   file?: ChangeFile;
   /** The old side of a diff tab, kept across reloads of the live file (keyed by rev and path). */
   oldBlob?: { key: string; text: string | null };
@@ -150,7 +154,7 @@ export class Editor {
    */
   async openDiff(file: ChangeFile, ctx: DiffContext, opts: { pin?: boolean; focus?: boolean } = {}) {
     this.diffContext = ctx;
-    let tab = this.tabs.find((t) => t.isDiff && t.path === file.path);
+    let tab = this.tabs.find((t) => t.isDiff && !t.commit && t.path === file.path);
     if (!tab) {
       const preview = !opts.pin ? this.tabs.find((t) => !t.pinned) : undefined;
       tab = this.createTab(file.path, !!opts.pin, true);
@@ -183,7 +187,7 @@ export class Editor {
   refreshDiffs(ctx: DiffContext, files: readonly ChangeFile[]) {
     this.diffContext = ctx;
     for (const t of this.tabs) {
-      if (!t.isDiff || !t.file) continue;
+      if (!t.isDiff || !t.file || t.commit) continue;
       // A file that left the list now equals the base: diff it as a plain modification (no differences).
       const f = files.find((x) => x.path === t.path) ?? { ...t.file, status: "M" as const, oldPath: undefined, added: null, removed: null };
       const moved = f.status !== t.file.status || f.oldPath !== t.file.oldPath;
@@ -195,7 +199,67 @@ export class Editor {
 
   /** Shows "n/N" in every diff tab's header. */
   setDiffPositions(pos: (path: string) => { i: number; n: number } | null) {
-    for (const t of this.tabs) if (t.isDiff) t.diff?.setPosition(pos(t.path));
+    for (const t of this.tabs) if (t.isDiff && !t.commit) t.diff?.setPosition(pos(t.path));
+  }
+
+  /**
+   * Opens what one commit changed in a file (File History), as a read-only diff of the file at the
+   * commit's first parent against the file at the commit. Both sides come from git, never from the
+   * working tree, so later edits, commits or a new Changes base leave the tab as it is.
+   */
+  async openCommitDiff(c: HistoryEntry, opts: { pin?: boolean; focus?: boolean } = {}) {
+    let tab = this.tabs.find((t) => t.commit?.oid === c.oid && t.path === c.path);
+    if (!tab) {
+      const preview = !opts.pin ? this.tabs.find((t) => !t.pinned) : undefined;
+      tab = this.createTab(c.path, !!opts.pin, true);
+      tab.commit = c;
+      tab.file = { path: c.path, oldPath: c.oldPath, status: c.status, added: null, removed: null, binary: false };
+      if (preview) {
+        const i = this.tabs.indexOf(preview);
+        this.disposeTab(preview);
+        this.tabs.splice(i, 1, tab);
+      } else {
+        const i = this.active ? this.tabs.indexOf(this.active) + 1 : this.tabs.length;
+        this.tabs.splice(i, 0, tab);
+      }
+      this.activate(tab);
+      await this.loadCommit(tab);
+    } else {
+      if (opts.pin) tab.pinned = true;
+      this.activate(tab);
+    }
+    if (opts.focus !== false) tab.diff?.focus();
+    this.render();
+  }
+
+  /** "in 1a2b3c4" for a commit tab, else the Changes comparison ("vs main"). */
+  private vsOf(t: Tab): string {
+    return t.commit ? `in ${t.commit.oid.slice(0, 7)}` : this.diffContext.vs;
+  }
+
+  private async loadCommit(tab: Tab) {
+    const c = tab.commit!;
+    const gen = ++tab.gen;
+    const info: DiffInfo = { ...this.diffInfo(tab.file!), vs: this.vsOf(tab) };
+    if (!tab.diff) {
+      tab.diff = new DiffView(info, tab.lang, this.fontSize);
+      tab.diff.onOpenFile = () => void this.open(tab.path, { pin: true });
+      tab.diff.setPosition(null); // no "n/N" or next-file arrows: it is not in the Changes list
+      tab.el.replaceChildren(tab.diff.el);
+    }
+    const diff = tab.diff;
+    tab.kind = "text";
+    const wantOld = !!c.parent && c.status !== "A";
+    const wantNew = c.status !== "D";
+    const [oldText, newText] = await Promise.all([
+      wantOld ? api.gitBase(c.oldPath ?? c.path, c.parent!) : Promise.resolve(""),
+      wantNew ? api.gitBase(c.path, c.oid) : Promise.resolve(""),
+    ]);
+    if (gen !== tab.gen || tab.diff !== diff) return;
+    if (oldText === null || newText === null) diff.setTexts(null, null, "This version can't be shown (binary or too large).");
+    else diff.setTexts(oldText, newText);
+    if (tab === this.active) this.status();
+    this.render();
   }
 
   private diffInfo(f: ChangeFile): DiffInfo {
@@ -267,6 +331,7 @@ export class Editor {
   }
 
   private async load(tab: Tab, reload = false) {
+    if (tab.commit) return reload ? undefined : this.loadCommit(tab); // a commit never changes
     if (tab.isDiff) return this.loadDiff(tab);
     const gen = ++tab.gen;
     try {
@@ -540,10 +605,46 @@ export class Editor {
   nextChange(dir: 1 | -1) {
     const t = this.active;
     if (t?.diff) {
-      if (!t.diff.nextChange(dir)) this.onDiffStep(dir);
+      // Past the last change a Changes diff moves on to the next file; a commit diff stays put.
+      if (!t.diff.nextChange(dir) && !t.commit) this.onDiffStep(dir);
       return;
     }
     t?.code?.nextChange(dir);
+  }
+
+  /**
+   * The active file's outline for Go to Symbol, or why there is none. `preview` is true when the
+   * file shows as rendered Markdown (headings are revealed there instead of in the source).
+   */
+  outline(): { syms: Sym[]; preview: boolean } | string {
+    const t = this.active;
+    if (!t) return "Open a file to see its symbols";
+    if (t.diff) return "Go to Symbol works in files, not diffs";
+    const lines = t.code ? t.code.lineTexts : t.md ? t.md.source.split(/\r\n|\r|\n/) : null;
+    if (!lines) return "This file has no symbols";
+    if (!hasSymbols(t.lang)) return `No outline for ${languageName(t.lang)} files`;
+    const syms = symbols(t.lang, lines);
+    return syms.length ? { syms, preview: !t.code } : "No symbols in this file";
+  }
+
+  /** Jumps to a symbol from `outline()`: a heading in a preview by its slug, else its line. */
+  revealSymbol(s: Sym, slug?: string) {
+    const t = this.active;
+    if (t?.md && slug && t.md.scrollToFragment(slug)) return;
+    this.goToLine(s.line + 1);
+    t?.code?.focus();
+  }
+
+  /**
+   * What Copy Reference names in the active tab: the selected lines (or the cursor line) of a code
+   * view, the bare path of a preview or image, or why there is nothing to reference.
+   */
+  referenceTarget(): { path: string; span: Span | null; lines: readonly string[] | null } | string {
+    const t = this.active;
+    if (!t) return "Open a file first";
+    if (t.diff) return "Open the file (not its diff) to copy a line reference";
+    if (!t.code) return { path: t.path, span: null, lines: null };
+    return { path: t.path, span: lineSpan(t.code.selection, t.code.activeLine), lines: t.code.lineTexts };
   }
 
   goToLine(line: number) {
@@ -558,9 +659,10 @@ export class Editor {
     const s: StatusInfo = { path: t.path, kind: t.kind, size: t.size, truncated: t.truncated };
     if (t.diff && t.file) {
       s.lang = languageName(t.lang);
-      s.git = `${labelOf(t.file)} ${this.diffContext.vs}`;
+      s.git = `${labelOf(t.file)} ${this.vsOf(t)}`;
       s.diff = t.diff.stats;
       s.encoding = t.encoding;
+      if (t.commit) s.size = undefined; // both sides come from git; the working file's size is beside the point
       return this.onStatus(s);
     }
     const g = this.git?.repo ? this.git.file(t.path) : null;
@@ -606,9 +708,11 @@ export class Editor {
       const g = t.isDiff && t.file ? { letter: letterOf(t.file.status), label: labelOf(t.file) } : this.git?.repo ? this.git.file(t.path) : null;
       if (g) cls.push(`git-${g.letter}`);
       t.tabEl.className = cls.join(" ");
-      t.tabEl.title = g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path;
+      t.tabEl.title = t.commit
+        ? `${t.path} · ${t.commit.oid.slice(0, 7)} ${t.commit.subject} (${t.commit.author}, ${relativeTime(t.commit.time)})`
+        : g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path;
       t.tabEl.setAttribute("aria-selected", String(t === this.active));
-      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(hint(t.path))}</span>` : ""}${t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
+      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(hint(t.path))}</span>` : ""}${t.commit ? `<span class="tab-kind oid">${t.commit.oid.slice(0, 7)}</span>` : t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
       t.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(t);
@@ -627,7 +731,9 @@ export class Editor {
         );
         if (!isLast) this.crumbs.append(h("span", { class: "crumb-sep" }, "›"));
       });
-      if (this.active.isDiff) this.crumbs.append(h("span", { class: "pill" }, `diff ${this.diffContext.vs}`));
+      const c = this.active.commit;
+      if (c) this.crumbs.append(h("span", { class: "pill", title: `${c.oid}\n${c.author}, ${relativeTime(c.time)}` }, `${c.oid.slice(0, 7)} · ${c.subject}`));
+      else if (this.active.isDiff) this.crumbs.append(h("span", { class: "pill" }, `diff ${this.diffContext.vs}`));
       if (this.active.truncated) this.crumbs.append(h("span", { class: "pill warn" }, `showing first ${formatBytes(8 * 1024 * 1024)}`));
       if (this.active.deleted) this.crumbs.append(h("span", { class: "pill warn" }, "deleted on disk"));
     }

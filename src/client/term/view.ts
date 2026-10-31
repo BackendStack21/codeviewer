@@ -1,5 +1,6 @@
 import { Terminal, WIDE } from "./terminal.ts";
 import { Renderer, type Theme, type Point } from "./renderer.ts";
+import { parseTarget } from "../reference.ts";
 
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -706,8 +707,8 @@ export class TerminalView {
       } catch {}
       return true;
     }
-    const m = /^(.*?)(?::(\d+))?(?::\d+)?$/.exec(t)!;
-    this.opts.onOpenPath?.(m[1]!, Number(m[2] ?? 0));
+    const { path, line } = parseTarget(t);
+    this.opts.onOpenPath?.(path, line);
     return true;
   }
 

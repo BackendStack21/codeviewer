@@ -436,6 +436,15 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           return b ? json(b) : fail(404, "no blame");
         }
 
+        case "/api/git/history": {
+          // Commits that changed one file (newest first); each opens as a diff through /api/git/base.
+          const g = await gitReady;
+          const rel = relParam(url);
+          if (!g || !(await resolveSafe(opts.root, rel))) return fail(404, "no history");
+          const list = await g.history(rel);
+          return list ? json(list) : fail(404, "no history");
+        }
+
         case "/api/update": {
           // GET: status (?check=1 forces a fresh check). Never throws for offline users.
           if (url.searchParams.has("check")) {

@@ -108,9 +108,9 @@ const code = (cmd: string) => {
 const fileName = (id: string) => `<code data-name="${id}">${esc(placeholder(id))}</code>`;
 
 const FEATURES: [string, string, string][] = [
-  ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code."],
+  ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code, and hand the agent a <code>path:12-40</code> reference with one key."],
   ["live", "Live while agents work", "Files reload in place as they change on disk. Changed lines flash, the explorer marks them, and nothing you are reading jumps."],
-  ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, and a Changes view that lists every file the branch touched as read-only diffs. It never writes to your repository."],
+  ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, a Changes view that lists every file the branch touched as read-only diffs, and the history of any file, one commit at a time. It never writes to your repository."],
   ["fast", "Fast at any size", "Virtualized everything: 100k-line files open instantly, quick-open searches 200k paths as you type, and the terminal streams megabytes per second."],
   ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, read-only file access with symlink containment, git hardened against hostile repositories and signed updates. Seven adversarial review rounds so far."],
   ["native", "Native and small", "A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies, so there is no supply chain to audit but this repository."],

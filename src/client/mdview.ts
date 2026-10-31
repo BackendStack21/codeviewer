@@ -144,6 +144,11 @@ export class MarkdownView {
   }
 
   /** Re-renders unless the text is identical; keeps scrollTop. Returns true when the tree was rebuilt. */
+  /** The Markdown source this preview renders. */
+  get source(): string {
+    return this.text;
+  }
+
   setText(text: string): boolean {
     if (text === this.text) return false;
     const top = this.el.scrollTop;

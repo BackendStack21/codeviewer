@@ -77,6 +77,18 @@ export interface ChangeFile {
   binary: boolean;
 }
 
+/** One commit of a file's history (see src/server/git.ts HistoryEntry). */
+export interface HistoryEntry {
+  oid: string;
+  parent: string | null;
+  author: string;
+  time: number;
+  subject: string;
+  path: string;
+  oldPath?: string;
+  status: "M" | "A" | "D" | "R" | "C" | "T";
+}
+
 export interface ChangesData {
   repo: boolean;
   scope: "head" | "branch";
@@ -146,6 +158,11 @@ export const api = {
     return r.ok
       ? ((await r.json()) as { hash: string; author: string; time: number; summary: string; you: boolean; uncommitted: boolean })
       : null;
+  },
+  /** Commits that changed a file, newest first (renames followed); null when there is no history. */
+  gitHistory: async (path: string): Promise<HistoryEntry[] | null> => {
+    const r = await fetch(`/api/git/history?path=${q(path)}`);
+    return r.ok ? ((await r.json()) as HistoryEntry[]) : null;
   },
   /** Update status; `check` forces a fresh look at the latest release. */
   update: async (check = false): Promise<UpdateInfo> => (await check_(await fetch(`/api/update${check ? "?check=1" : ""}`))).json(),
