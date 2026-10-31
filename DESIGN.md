@@ -835,3 +835,42 @@ Findings while building:
 | `diff.orderFile` is read whole by diffcore; `diffFiles` passed `-O/dev/null`, but `log --follow` sets up its own diff and ignores `-O`, so a repository with `diff.orderFile=/dev/zero` held File History for the 30 s timeout. | `diff.orderFile=/dev/null` joins the fixed hardening config every git call gets; the malicious-repository test now also sets `diff.orderFile` and `diff.external` and runs `history()`. |
 | File names are untrusted. Without bracketed paste (plain `sh`, many REPLs) a newline in a pasted reference ends the line, so "Insert Reference in Terminal" on a file named `x\nrm -rf ~` would have run a command. | References to paths with control or bidi characters are refused, for the terminal and the clipboard alike (`unsafePath`). |
 | `@` re-scanned the file on every keystroke. | The symbol list is computed once per palette opening. |
+
+## 19. Round 10: feature tour on the landing page, and images in the Mac app
+
+The landing page gained "A tour of every feature": four chapters (Find your way, Read anything,
+Review with git, Work with your agent) with one real screenshot per feature, in the visitor's colour
+scheme. The screenshots are reproducible: `bun run shots` builds a deterministic demo repository
+(`scripts/demo-repo.ts`: neutral authors and dates, a branch ahead of `main`, uncommitted edits),
+serves it with an isolated config directory, `HOME` and prompt, and drives an offscreen WKWebView
+(`packaging/macos/appshot.swift`) through the steps in `scripts/shots.list.ts`, cropping each shot to
+what it shows. An inventory expert listed every feature from the source first; three reviewers then
+checked the result independently: copy accuracy against the code, visual design and accessibility,
+and security.
+
+While taking the shots the user reported that JPEGs did not open in the app. The cause was not the
+format: in the Mac app every image failed. Images are fetched with the auth header and drawn from a
+`blob:` URL, and the window's content rule list blocked everything but `http://` and `ws://` on its
+own port, so WebKit refused the blob load and the viewer showed "This image could not be decoded".
+Browsers (the CLI, Linux) were unaffected, which is why tests and the headless shots never saw it.
+
+| Finding | Fix |
+| --- | --- |
+| Mac app: every image and every Markdown image failed to load (content rules blocked `blob:`). | One more anchored allow rule, `^blob:http://127\.0\.0\.1:<port>/`. Only script on that origin can mint such URLs (a sandboxed `/api/raw` document's blobs are `blob:null/…`), and navigation to `blob:` is still cancelled by `decidePolicyFor`. `test/images.test.ts` pins the rule set to exactly http, ws and blob:http. Verified with the real rule list compiled into a WKWebView. |
+| Common formats missing: `.jfif`, `.jpe`, `.apng`, TIFF and HEIC opened as a hex dump. | Added to `IMAGE_MIME` and the Markdown `IMAGE_EXT` (a test keeps the two lists equal). WebKit decodes TIFF/HEIC; elsewhere see the next row. |
+| (Security review) A format the window cannot decode, or a damaged file, ended at an error notice with no way to see the bytes. | The image tab falls back to the hex dump under a notice (`client.imageview.test.ts`). |
+| (Security review) `.svg` detection for the source toggle was case-sensitive. | `LOGO.SVG` gets the toggle too. |
+| (Security review) A Markdown preview loads each image whole; a README pointing at a several-hundred-MB TIFF would buffer it all. | `/api/raw?max=N` refuses larger files with 413 before reading; previews pass 20 MiB and show the alt text instead. |
+| (Security review) `bun scripts/demo-repo.ts <dir>` empties its directory, so a typo could erase a checkout. | The CLI refuses a directory that is not empty. |
+| (Security review) The shot server inherited `GIT_*` (a hook's `GIT_DIR` would aim the terminal's git at the real repository); Ctrl-C left the server and temp dir behind; the WebView wrote to `~/Library/WebKit`. | `GIT_*` stripped from its environment, a SIGINT handler cleans up, and the WebView uses a non-persistent data store. |
+| (Visual review) Card shots were captured too wide: code showed at about 8 px; the shortcut sheet showed app chrome through its edges; the context menu hid the Explorer letters it was meant to illustrate; crops cut lines in half. | Crops tightened to the content (whole lines, the sheet's first two groups, the menu under the last row); the status bar strip keeps its 1x size and scrolls sideways on phones. |
+| (Visual review) Phones downloaded 1600 px images to show them at 300 px. | Every shot also has a half-size variant, served through `srcset`/`sizes`; the hero gets `fetchpriority="high"`. |
+| (Visual review) In a card the image came before its heading for screen readers; separators sat inside `<kbd>`. | The `h4` comes first in the markup (CSS shows the picture on top); "F4 / ⇧F4" renders as two keys. |
+| (Accuracy review) Alt texts said "1 of several", "the two changed lines", and named a letter the menu covered; File History claimed "every commit"; "seven review rounds" was stale. | Alt texts describe what each image shows; "up to 500 commits"; the round count is gone from the copy. Every shortcut and capability on the page was checked against the source. |
+| Line helpers in the shot steps were off by one: the code view's `data-n` is 0-based. | `lineEl`/`clickLine` take 1-based line numbers. |
+| (Final review) The tour missed features the inventory listed: several terminals and the panel's position, the hex dump, the welcome screen, updates, tabs, zoom and themes. | Four more shots (`panels`, `hexdump`, `welcome`, `updates`, the last with GitHub's answer stubbed inside the page so the shots never go online) and their copy; README gained a Layout bullet for the rest. The demo repository lives at a fixed `/tmp/codeviewer-demo/harbor`, because the welcome screen prints the folder's absolute path. |
+
+The Linux app was not affected by the image bug: its Chromium is confined with
+`--host-resolver-rules` and an unreachable `--proxy-server`, neither of which applies to `blob:`
+URLs, which never reach the network stack. There, TIFF and HEIC (which Chromium cannot decode) now
+open as the hex dump under a notice.

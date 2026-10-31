@@ -11,6 +11,8 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
 
 ![Codeviewer](docs/assets/screenshot-dark.jpg)
 
+Every feature below has a screenshot in the [feature tour](https://codeviewer.21no.de/#tour).
+
 - **Zero dependencies.** Bun + TypeScript only: the terminal emulator, syntax highlighter,
   fuzzy finder, file watcher and UI are all written from scratch.
 - **Standalone app.** On macOS it's a native app (AppKit + the system WebKit), installed from a
@@ -57,11 +59,21 @@ signed build provenance; see [how to verify](https://codeviewer.21no.de/#verify)
   update pill in the status bar when a new version is out. Installing verifies the release's
   Ed25519 signature and the file's SHA-256 before an atomic swap, then restarts. Turn off the
   launch-time check with "Toggle Automatic Update Checks" or `CODEVIEWER_NO_UPDATE_CHECK=1`.
+- **Images:** PNG, JPEG, GIF, WebP, AVIF, BMP, ICO and SVG open in an image viewer (Fit, 1:1, zoom
+  from 2% to 6400%, ⌘/Ctrl+wheel); the Mac app also shows TIFF and HEIC. SVGs switch to their source,
+  and other binary files open as a hex dump.
 - **Live:** files that change on disk reload in place, the changed lines flash, the gutter marks
   them, and the explorer shows dots on changed files.
 - **Private:** no telemetry, crash reporting, account or cloud. The only outbound connection is the
   launch-time update check against GitHub's releases API, and it can be switched off (see
   [Privacy](#privacy)).
+- **Layout:** pinned and preview tabs (a single click previews in italics, a double click pins),
+  tabs coloured by git status, breadcrumbs, several terminals as tabs, and a terminal panel at the
+  bottom or on the right that can be maximized ("Move Terminal Panel", "Maximize/Restore Terminal
+  Panel"). The title bar button cycles the System, Dark and Light themes. The palette also has
+  Copy Path, Copy Absolute Path, Close All Tabs and Clear Terminal. In a diff tab, ‹ › step to the
+  previous or next changed file and "Open file" opens the file itself; the Changes view switches
+  between "Uncommitted" and "vs main".
 - **Keyboard and screen-reader friendly:** ⌘/ lists every shortcut in your platform's key names.
   Explorer, search results, Changes and the palette expose their selection to assistive tech, the
   terminal mirrors each finished line into a live region, splitters and diff gaps work from the keyboard,
@@ -105,6 +117,8 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘P / Ctrl+P | Go to file (`path:line` works) |
 | ⌘⇧P / Ctrl+Shift+P | Command palette |
 | ⌃\` | Toggle / focus terminal · ⌃⇧\` new terminal |
+| ⌘J / Ctrl+J | Hide / show the terminal panel |
+| ⌘K / Ctrl+Shift+K in the terminal | Clear the terminal |
 | ⌘F · ⌃G | Find in file · go to line |
 | ⌘⇧O / Ctrl+Shift+O | Go to symbol in the file (or `@` in ⌘P) |
 | ⌥⌘C / Ctrl+Alt+C | Copy a `path:line` reference to the cursor or selected lines |
@@ -135,7 +149,8 @@ line, Find and Go to line always use the source. The preview updates live when t
 - **Untrusted content:** the preview is built with `createElement`/`textContent` only. There is no raw HTML
   (it is shown as text), links use an allowlist (`http`, `https`, `mailto`, `#fragment`, relative paths), and
   relative links open inside the viewer.
-- **Images:** relative images of a type the server serves (png, jpg, gif, webp, avif, bmp, ico, svg) load
+- **Images:** relative images of a type the server serves (png, apng, jpg/jpeg/jpe/jfif, gif, webp, avif, bmp,
+  ico, svg, and tif/tiff/heic/heif where the window can decode them) load
   through the authenticated raw endpoint; at most 100 images per render. Remote images (`http(s)`, `//host`,
   `data:`) are never loaded: a placeholder shows the alt text and host, with a link to open it in your browser.
 - **Limits:** files over 1 MiB open in source with a "Too large to preview · Render anyway" note; nesting,
@@ -199,6 +214,7 @@ bun run build:local   # this machine only: dist/bin/codeviewer + its app (on a M
 bun scripts/build.ts --slim             # binaries only, no browser download
 bun scripts/build.ts --browser <tag|latest>  # re-pin the Linux browser (packaging/browser-pins.json)
 bun run site          # regenerate docs/index.html (the landing page; release data loads live from GitHub)
+bun run shots         # retake the landing page screenshots in a demo repository (macOS; then bun run site)
 ```
 
 ### Release signing (once)

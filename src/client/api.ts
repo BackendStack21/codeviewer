@@ -171,9 +171,12 @@ export const api = {
   /** Opens an http(s) link in the user's default browser, outside the app window. */
   external: (url: string) =>
     fetch("/api/external", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url }) }),
-  /** Raw file as a blob: URL (images can't send the auth header themselves). Caller revokes it. */
-  rawBlobUrl: async (path: string): Promise<string> =>
-    URL.createObjectURL(await (await check(await fetch(`/api/raw?path=${q(path)}`))).blob()),
+  /**
+   * Raw file as a blob: URL (images can't send the auth header themselves). Caller revokes it.
+   * With `max`, a file larger than that many bytes is refused by the server (413) instead.
+   */
+  rawBlobUrl: async (path: string, max?: number): Promise<string> =>
+    URL.createObjectURL(await (await check(await fetch(`/api/raw?path=${q(path)}${max ? `&max=${max}` : ""}`))).blob()),
   /** Streams search events; ends quietly on abort, throws the server's error message on failure. */
   async *search(params: SearchParams, signal?: AbortSignal): AsyncGenerator<SearchEvent> {
     const sp = new URLSearchParams({ q: params.q });

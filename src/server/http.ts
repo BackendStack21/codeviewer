@@ -343,6 +343,12 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           } catch (e) {
             return fail(400, (e as Error).message);
           }
+          // ?max=N: refuse files larger than N bytes outright (Markdown previews load images whole).
+          const max = Number(url.searchParams.get("max"));
+          if (max > 0 && opened.st.size > max) {
+            await opened.fh.close();
+            return fail(413, "too large");
+          }
           const limit = Number(url.searchParams.get("limit"));
           const total = limit > 0 ? Math.min(limit, opened.st.size) : opened.st.size;
           const fh = opened.fh;

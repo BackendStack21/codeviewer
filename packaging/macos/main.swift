@@ -9,13 +9,15 @@ import Cocoa
 import WebKit
 
 /// Content rules for one window: block everything except this window's own server
-/// (http and ws on 127.0.0.1:<port>). WebKit's rule regexes support no alternation, hence one
-/// rule per scheme. In the raw strings, "\\." is a JSON-escaped regex dot.
+/// (http and ws on 127.0.0.1:<port>) and blob: URLs the page minted on that origin, which is how
+/// the image viewer and Markdown previews show images fetched with the auth header. WebKit's rule
+/// regexes support no alternation, hence one rule per scheme. In the raw strings, "\\." is a
+/// JSON-escaped regex dot.
 func contentRules(port: Int) -> String {
     let allow = { (scheme: String) in
         #"{"trigger":{"url-filter":"^"# + scheme + #"://127\\.0\\.0\\.1:"# + String(port) + #"/"},"action":{"type":"ignore-previous-rules"}}"#
     }
-    return #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},"# + allow("http") + "," + allow("ws") + "]"
+    return #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},"# + allow("http") + "," + allow("ws") + "," + allow("blob:http") + "]"
 }
 
 // MARK: - Server process

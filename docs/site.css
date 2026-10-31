@@ -296,52 +296,99 @@ h1 {
   margin-top: 0;
 }
 
-/* split */
-.split {
-  display: grid;
-  grid-template-columns: 1fr 1.25fr;
-  gap: 48px;
-  align-items: center;
+/* feature tour */
+.chapter {
+  margin-top: 64px;
 }
-.split h2 {
-  text-align: left;
+.chapter h3 {
+  font-size: 24px;
 }
-.split p {
+.chsub {
+  margin: 6px 0 22px;
   color: var(--muted);
 }
-.shot-sm {
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+.tour h4 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  color: var(--fg-strong);
+  letter-spacing: -0.01em;
 }
-.ticks {
-  padding: 0;
-  list-style: none;
-  color: var(--fg);
+.tlead p,
+.tcard p {
+  margin: 0;
+  color: var(--muted);
   font-size: 15px;
 }
-.ticks li {
-  position: relative;
-  padding-left: 26px;
-  margin: 10px 0;
+.tlead p b,
+.tcard p b {
+  color: var(--fg);
+  font-weight: 600;
 }
-.ticks li::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 8px;
-  width: 10px;
-  height: 6px;
-  border-left: 2px solid var(--ok);
-  border-bottom: 2px solid var(--ok);
-  transform: rotate(-45deg);
+.tlead .keys,
+.tcard .keys {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
-.ticks b {
-  font-family: var(--mono);
+.tshot {
+  margin: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
 }
-.gM { color: var(--git-mod); }
-.gA, .gU { color: var(--git-add); }
-.gD { color: var(--git-del); }
-.gC { color: var(--git-conflict); }
+.tshot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.tlead {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.tlead .tshot {
+  box-shadow: var(--shadow);
+}
+.tgrid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.tcard {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 16px 16px 20px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+.tcard .tshot {
+  order: -1;
+  margin-bottom: 16px;
+}
+/* Tall shots (the Explorer) would tower over their column: cap them.
+   A strip (the status bar) keeps its 1x size, so its text stays legible. */
+.tcard.strip .tshot img {
+  width: 430px; /* its 1x size: the capture is 860 px at 2x */
+  max-width: 100%;
+  height: auto;
+}
+.tcard.tall .tshot img {
+  max-height: 520px;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto;
+}
 
 /* downloads */
 .dl {
@@ -563,8 +610,26 @@ h1 {
   .grid.three {
     grid-template-columns: 1fr;
   }
-  .split {
-    grid-template-columns: 1fr;
+  .tlead {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .tgrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tlead {
+    padding: 12px;
+  }
+  .tcard {
+    padding: 12px 12px 16px;
+  }
+  /* The status bar strip keeps a legible size and scrolls sideways instead of shrinking. */
+  .tcard.strip .tshot {
+    overflow-x: auto;
+  }
+  .tcard.strip .tshot img {
+    max-width: none;
+    width: 430px;
   }
   .nav nav a:not(.gh) {
     display: none;

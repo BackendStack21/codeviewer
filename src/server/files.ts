@@ -11,16 +11,28 @@ export interface Entry {
 
 export const MAX_TEXT_BYTES = 8 * 1024 * 1024;
 
+/**
+ * Image types shown in the image viewer and in Markdown previews (kept in sync with IMAGE_EXT in
+ * src/client/mdimage.ts). They are only ever drawn by an <img> from a blob: URL, so an SVG never
+ * runs script. TIFF and HEIC decode in the Mac app (WebKit); Chromium shows the decode notice.
+ */
 const IMAGE_MIME: Record<string, string> = {
   png: "image/png",
+  apng: "image/apng",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
+  jpe: "image/jpeg",
+  jfif: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
   avif: "image/avif",
   bmp: "image/bmp",
   ico: "image/x-icon",
   svg: "image/svg+xml",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  heic: "image/heic",
+  heif: "image/heif",
 };
 
 export function extOf(p: string): string {
@@ -28,6 +40,9 @@ export function extOf(p: string): string {
   const dot = base.lastIndexOf(".");
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
 }
+
+/** Every extension the image viewer opens. */
+export const IMAGE_EXTS: readonly string[] = Object.keys(IMAGE_MIME);
 
 export function imageMime(p: string): string | undefined {
   return IMAGE_MIME[extOf(p)];

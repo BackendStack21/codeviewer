@@ -105,7 +105,8 @@ describe("AC-24 seeded fuzz of the safety invariants", () => {
       for (const { v, i } of views) check(v.el as FakeElement, i, true);
       for (const { v } of views) v.dispose();
       // no request ever targets a non-image or escaping path
-      for (const c of m.calls) expect(c.url).toMatch(/^\/api\/raw\?path=[^&]*\.(png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i);
+      // (and every one carries the preview's size cap)
+      for (const c of m.calls) expect(c.url).toMatch(/^\/api\/raw\?path=[^&]*\.(a?png|jpe?g|jpe|jfif|gif|webp|avif|bmp|ico|svg|tiff?|hei[cf])&max=20971520$/i);
     } finally {
       m.restore();
       URL.createObjectURL = oc;
