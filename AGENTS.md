@@ -70,6 +70,11 @@ bun run build:local               # binaries + the app for this machine (needs X
   the Mac window's content rules allow `blob:http://127.0.0.1:<port>/` (`contentRules` in
   `main.swift`, pinned by `test/images.test.ts`). The server's `IMAGE_MIME` and the client's
   `IMAGE_EXT` (`mdimage.ts`) list the same extensions.
+- **Terminal hot paths.** `Terminal.write` copies ASCII runs (`printAscii`) and must match
+  per-character `print()` exactly (`asciiRuns = false` turns it off; `test/terminal.perf.test.ts`
+  compares both). The renderer skips rows whose cells and overlay key are unchanged: anything new
+  that changes a row's pixels goes into `rowKey()` or calls `invalidate()`. Hidden terminals do
+  not paint (`TerminalView.setVisible`, driven by `TerminalPanel.activate`/`setShown`).
 - **Terminal input is the user's.** On macOS ⌘-shortcuts belong to the app; on Linux Ctrl+key
   combinations stay with the shell unless the README lists them.
 
@@ -83,10 +88,10 @@ bun run build:local               # binaries + the app for this machine (needs X
   `class="…" data-i=`.
 - Accessibility: keep `aria-activedescendant` on the scroller, stable row ids, `role="status"` for
   counts and `aria-live` regions for notifications. Respect `prefers-reduced-motion`.
-- The fake DOM does not materialise `innerHTML` children, has no `clientHeight`,
-  `getBoundingClientRect`, `insertAdjacentHTML` or selection API, and does not model native
-  `Event` dispatch; stub what a test needs on the prototype and assert through the component's
-  state.
+- The fake DOM does not materialise `innerHTML` children, has no `clientHeight`, canvas,
+  `insertAdjacentHTML` or selection API (`getBoundingClientRect` returns a settable `rect`), and
+  does not model native `Event` dispatch; stub what a test needs on the prototype, restore the
+  original afterwards (test files share one process), and assert through the component's state.
 - Visual checks on macOS: a `WKWebView` snapshot tool works headlessly if `requestAnimationFrame`
   is stubbed in a `WKUserScript` at document start and entrance animations are set to `none`.
   Snapshots write to the real settings file (tabs, zoom, panel): restore them afterwards.

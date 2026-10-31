@@ -886,3 +886,20 @@ were refuted or accepted as trade-offs.
 | The WebSocket Origin check compared `Origin` against the request's own `Host` header, so under a non-loopback `--host` (where the DNS-rebinding `hostOk` allowlist is skipped) a page could connect with a self-consistent attacker Host+Origin pair and get `101 Switching Protocols`. RED: `test/http.wsorigin.security.test.ts`. | Origin is now checked against the server's own origins — loopback names plus every local interface address (`os.networkInterfaces()`), never anything client-controlled. Deliberate consequence: the origin host must be a literal loopback or interface address; reaching the server via a DNS/mDNS name is rejected, because resolving a client-supplied hostname back to a local address would reopen the rebinding hole. |
 | (Review) `alias.*`/`pager.*` in a hostile repo config were claimed to run commands. | Refuted by test: git does not expand an alias that shadows a builtin subcommand (`test/git.alias.security.test.ts` pins this, marker file stays empty). Kept as a regression net. |
 | (Review) `HARDEN` overrides travel as `-c key=value` despite the GIT_CONFIG_KEY_n rule; token in the WS query string; missing-Origin bypass; regex CPU burn in the search worker; pty replay resync edge cases. | Not exploitable as written (values self-authored; query token is the documented WS mechanism; local DoS only). No change; recorded here for the next pass. |
+
+## 20. Round 11: terminal CPU in long agent sessions
+
+Agent TUIs redraw constantly, but Claude Code sends little (its fullscreen renderer writes cell
+diffs; the classic one prints the transcript once, then diffs). The cost was in the client doing
+more work than the output needed. The terminal now follows these rules:
+
+| Rule | Where |
+| --- | --- |
+| Paint only rows whose pixels change: each viewport row keeps a snapshot of its cells plus a key (cursor, selection, link hover, reverse video). New pixel state belongs in the key, or calls `invalidate()`; theme, font, resize and a restored canvas context invalidate. | `Renderer.rowKey`, `unchanged`, `remember` |
+| Hidden terminals (other tabs, closed panel) parse but neither paint nor feed the screen-reader log; showing one repaints it in full. | `Renderer.setVisible`, `TerminalPanel.activate`/`setShown` |
+| Printable ASCII is copied into the line in runs; anything with per-character rules goes through `print()`. A seeded fuzz test keeps both paths identical. | `Terminal.printAscii` |
+| Completed lines are stringified at the end of a write, the newest 200 only; a line redrawn within one write is reported once, as it finally reads. | `Terminal.announce`, `flushAnnounced` |
+| No layout reads per frame: the scrollbar measures its track after a resize only and writes styles only on change. | `TerminalView.updateScrollbar` |
+
+Measured on JavaScriptCore: parsing an 8,000-line reprint went from 41 to 21 ms, a spinner tick
+repaints one row instead of the whole status region, and plain text parses at about 24 MB/s.

@@ -78,8 +78,9 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   Explorer, search results, Changes and the palette expose their selection to assistive tech, the
   terminal mirrors each finished line into a live region, splitters and diff gaps work from the keyboard,
   and the UI chrome scales with the font size.
-- **Fast:** a virtualized code view and tree, an incremental highlighter, and dirty-row
-  terminal rendering. A 100k-line file opens instantly.
+- **Fast:** a virtualized code view and tree, an incremental highlighter, and a terminal that
+  repaints only rows whose content changed and nothing in hidden tabs, so long agent sessions
+  (Claude Code and other TUIs that redraw constantly) stay cheap. A 100k-line file opens instantly.
 
 See [DESIGN.md](DESIGN.md) for the expert-panel design review and the architecture, and
 [AGENTS.md](AGENTS.md) if you (or your agent) want to work on the code.

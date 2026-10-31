@@ -123,6 +123,7 @@ export class TerminalView {
         if (!this.logFrame) this.logFrame = requestAnimationFrame(() => this.flushLog());
       },
     });
+    this.term.announceLimit = LOG_LIMIT; // the log keeps no more than this per frame anyway
     this.renderer = new Renderer(this.term);
     this.renderer.setTheme(opts.theme);
     this.renderer.onFrame = () => this.updateScrollbar();
@@ -151,7 +152,10 @@ export class TerminalView {
     this.el.append(this.renderer.canvas, this.input, this.log, this.scrollbar);
     this.bindKeyboard();
     this.bindMouse();
-    this.ro = new ResizeObserver(() => this.fit());
+    this.ro = new ResizeObserver(() => {
+      this.sb.h = 0; // re-measured on the next frame
+      this.fit();
+    });
     this.ro.observe(this.el);
     this.renderer.setFont(opts.fontFamily, opts.fontSize, opts.lineHeight);
     // Browser zoom / moving between displays changes devicePixelRatio: re-measure the font.
@@ -169,6 +173,15 @@ export class TerminalView {
   private onWindowKeyUp = (e: KeyboardEvent) => {
     if (e.code === "AltLeft") this.leftAltDown = false;
   };
+
+  /**
+   * Hidden terminals (other tabs, closed panel) keep their state but neither paint nor feed the
+   * screen-reader log (a hidden live region is not announced).
+   */
+  setVisible(on: boolean) {
+    this.term.announceLimit = on ? LOG_LIMIT : 0;
+    this.renderer.setVisible(on);
+  }
 
   write(data: Uint8Array | string, silent = false) {
     this.term.silent = silent;
@@ -561,20 +574,32 @@ export class TerminalView {
     }
   }
 
+  /** Last scrollbar state written, so a frame that changes nothing touches no style. */
+  private sb = { shown: true, h: 0, th: -1, top: -1, scrolled: false };
+
+  /**
+   * Runs after every painted frame: writes styles only when they change, and reads the track
+   * height only after a resize (reading it every frame forced a layout of the page per frame).
+   */
   private updateScrollbar() {
     const total = this.term.totalLines;
     const rows = this.term.rows;
-    if (total <= rows || this.term.alt) {
-      this.scrollbar.style.display = "none";
-      return;
+    const sb = this.sb;
+    const shown = total > rows && !this.term.alt;
+    if (shown !== sb.shown) {
+      sb.shown = shown;
+      sb.h = 0;
+      this.scrollbar.style.display = shown ? "" : "none";
     }
-    this.scrollbar.style.display = "";
-    const h = this.scrollbar.clientHeight;
+    if (!shown) return;
+    if (!sb.h) sb.h = this.scrollbar.clientHeight || 0;
+    const h = sb.h;
     const th = Math.max(24, (rows / total) * h);
     const top = ((total - rows - this.renderer.viewOffset) / (total - rows)) * (h - th);
-    this.thumb.style.height = `${th}px`;
-    this.thumb.style.transform = `translateY(${top}px)`;
-    this.scrollbar.classList.toggle("scrolled", this.renderer.viewOffset > 0);
+    if (th !== sb.th) this.thumb.style.height = `${(sb.th = th)}px`;
+    if (top !== sb.top) this.thumb.style.transform = `translateY(${(sb.top = top)}px)`;
+    const scrolled = this.renderer.viewOffset > 0;
+    if (scrolled !== sb.scrolled) this.scrollbar.classList.toggle("scrolled", (sb.scrolled = scrolled));
   }
 
   // ───────────────────────────── selection ─────────────────────────────

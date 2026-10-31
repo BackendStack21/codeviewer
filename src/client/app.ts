@@ -115,15 +115,16 @@ class App {
     this.recent = store.get("recent", []);
     this.applyTheme();
     // The terminal measures its cell grid once, so the real faces must be loaded first.
-    await Promise.race([
-      Promise.all(
-        ["400", "700", "italic 400", "italic 700"].map((w) => document.fonts.load(`${w} ${BASE_SIZE}px "JetBrains Mono"`)),
-      ).then(() => document.fonts.load(`13px "Inter"`)),
-      new Promise((r) => setTimeout(r, 2000)),
-    ]);
+    const faces = Promise.all(
+      ["400", "700", "italic 400", "italic 700"].map((w) => document.fonts.load(`${w} ${BASE_SIZE}px "JetBrains Mono"`)),
+    ).then(() => document.fonts.load(`13px "Inter"`));
+    const loaded = await Promise.race([faces.then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 2000))]);
     this.info = await api.info();
     document.title = `${this.info.name} · codeviewer`;
     this.build();
+    // Faces that arrive after the wait: re-measure the terminals. They repaint only rows whose
+    // cells change, so a row drawn in the fallback font would otherwise stay that way.
+    if (!loaded) void faces.then(() => this.terms.setFont(cssVar("--font-mono"), this.L.termSize, TERM_LINE_HEIGHT), () => {});
     this.tree.git = this.git;
     this.editor.git = this.git;
     this.git.onChange(() => {
@@ -139,7 +140,7 @@ class App {
     this.bindKeys();
     this.connectEvents();
     this.terms.restore();
-    if (!this.L.panel) this.terms.el.hidden = true;
+    if (!this.L.panel) this.terms.setShown(false);
     // Restore pinned tabs from last session.
     const tabs = store.get<{ tabs: string[]; active: string | null }>(`tabs:${this.info.root}`, { tabs: [], active: null });
     for (const p of tabs.tabs) await this.editor.open(p, { pin: true, focus: false });
@@ -588,7 +589,7 @@ class App {
   private togglePanel(on = !this.L.panel) {
     this.L.panel = on;
     if (on && this.terms.count === 0) this.terms.create();
-    this.terms.el.hidden = !on;
+    this.terms.setShown(on);
     if (!on && this.L.maximized) this.L.maximized = false;
     this.applyLayout();
     if (on) requestAnimationFrame(() => this.terms.focus());
