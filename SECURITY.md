@@ -48,7 +48,9 @@ with `createElement` and `textContent` only (never `innerHTML`), shows raw HTML 
 `http`, `https`, `mailto`, `#fragment` and relative link targets, prefixes heading ids with `md-`, and loads
 no remote images: relative images are fetched through the authenticated raw endpoint as blob URLs (revoked on
 re-render and close, image extensions only, at most 100 per render) and the Content-Security-Policy is not
-widened. Report any way around these as a vulnerability.
+widened. In the Mac app those blob URLs are the only addition to the window's network rules: it blocks every
+URL except `http://` and `ws://` on its own `127.0.0.1` port and `blob:` URLs minted by that same origin. Report
+any way around these as a vulnerability.
 
 ## Verifying a download
 

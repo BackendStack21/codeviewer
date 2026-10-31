@@ -2,6 +2,8 @@ import { resolveRepoPath } from "./markdown.ts";
 
 /** At most this many images are loaded per render; the rest show their alt text. */
 export const MAX_IMAGES = 100;
+/** A preview loads each image whole into memory: larger files show their alt text instead. */
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 /** What an image source in Markdown refers to. */
 export type ImageTarget =
@@ -10,7 +12,7 @@ export type ImageTarget =
   | { kind: "none" };
 
 /** Image types the server serves (src/server/files.ts IMAGE_MIME). */
-const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg"]);
+export const IMAGE_EXT = new Set(["png", "apng", "jpg", "jpeg", "jpe", "jfif", "gif", "webp", "avif", "bmp", "ico", "svg", "tif", "tiff", "heic", "heif"]);
 const NONE: ImageTarget = { kind: "none" };
 
 /** Classifies an image source: a repo image (extension gated), a remote placeholder, or nothing. */

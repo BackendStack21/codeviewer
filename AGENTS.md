@@ -19,6 +19,7 @@ bun test test/foo.test.ts         # one file; add -t "name" for one test
 bun scripts/build.ts --client-only
 bun src/server/main.ts . --no-open --port 4573   # run the app against this repo; prints the URL (keep its #t= token)
 bun run site                      # regenerate docs/index.html after editing scripts/site.ts
+bun run shots [name…]             # retake landing page screenshots (macOS; shots in scripts/shots.list.ts)
 bun run build:local               # binaries + the app for this machine (needs Xcode CLT on a Mac)
 ```
 
@@ -46,6 +47,7 @@ bun run build:local               # binaries + the app for this machine (needs X
 | `src/client/symbols.ts`, `reference.ts` | Go to Symbol patterns per language (pure); `path:line` references and their parsing |
 | `src/client/styles.css` | All styling; colour tokens at the top, dark and light |
 | `test/helpers/fakedom.ts`, `selfake.ts` | Minimal fake DOM for client tests (see limits below) |
+| `scripts/shots.ts`, `shots.list.ts`, `demo-repo.ts` | Landing page screenshots: a deterministic demo repo, an isolated server, `packaging/macos/appshot.swift` driving an offscreen WKWebView |
 | `DESIGN.md` | Architecture and every review round with findings and fixes |
 
 ## Rules that are easy to break
@@ -64,6 +66,10 @@ bun run build:local               # binaries + the app for this machine (needs X
   hosts only). Adding another network call is a product decision, not a code change.
 - **Untrusted content.** Markdown renders with `createElement`/`textContent` only; raw HTML is
   text, link schemes are allow-listed, remote images never load, and the CSP does not widen.
+- **Images are blob: URLs.** They are fetched with the auth header and drawn from `blob:` URLs, so
+  the Mac window's content rules allow `blob:http://127.0.0.1:<port>/` (`contentRules` in
+  `main.swift`, pinned by `test/images.test.ts`). The server's `IMAGE_MIME` and the client's
+  `IMAGE_EXT` (`mdimage.ts`) list the same extensions.
 - **Terminal input is the user's.** On macOS ⌘-shortcuts belong to the app; on Linux Ctrl+key
   combinations stay with the shell unless the README lists them.
 
@@ -91,7 +97,9 @@ bun run build:local               # binaries + the app for this machine (needs X
 - `SECURITY.md`: anything that changes the threat model.
 - `DESIGN.md`: a new round section with a findings → fixes table for every review or sizeable change.
 - `scripts/site.ts` then `bun run site`: the landing page (`docs/index.html` is generated, do not
-  edit it by hand).
+  edit it by hand). Its feature tour has one screenshot per feature: after a UI change, retake the
+  affected ones with `bun run shots <name>` and read every image before committing (no real user
+  name, host or path may appear; the demo repo and prompt are neutral).
 - This file.
 
 ## Releasing

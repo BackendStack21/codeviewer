@@ -7,7 +7,7 @@
 // and nothing needs regenerating when a release is published.
 //
 //   bun run site
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "..");
@@ -108,11 +108,11 @@ const code = (cmd: string) => {
 const fileName = (id: string) => `<code data-name="${id}">${esc(placeholder(id))}</code>`;
 
 const FEATURES: [string, string, string][] = [
-  ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code, and hand the agent a <code>path:12-40</code> reference with one key."],
+  ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code, and hand the agent a <code>path:12-40</code> reference: <kbd>⌥⌘C</kbd> copies it, the palette types it at the prompt."],
   ["live", "Live while agents work", "Files reload in place as they change on disk. Changed lines flash, the explorer marks them, and nothing you are reading jumps."],
   ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, a Changes view that lists every file the branch touched as read-only diffs, and the history of any file, one commit at a time. It never writes to your repository."],
   ["fast", "Fast at any size", "Virtualized everything: 100k-line files open instantly, quick-open searches 200k paths as you type, and the terminal streams megabytes per second."],
-  ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, read-only file access with symlink containment, git hardened against hostile repositories and signed updates. Seven adversarial review rounds so far."],
+  ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, read-only file access with symlink containment, git hardened against hostile repositories and signed updates. Reviewed adversarially, round after round."],
   ["native", "Native and small", "A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies, so there is no supply chain to audit but this repository."],
 ];
 
@@ -124,6 +124,243 @@ const FEATURE_ICONS: Record<string, string> = {
   lock: `<path d="M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3" />`,
   native: `<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM4 8.5h16M7 6.2h.01M9 6.2h.01" />`,
 };
+
+// ───────────────────────────── feature tour ─────────────────────────────
+// Screenshots come from `bun run shots` (scripts/shots.ts): docs/assets/features/<shot>-{dark,light}.jpg.
+
+interface TourItem {
+  shot: string;
+  title: string;
+  body: string;
+  keys?: string[];
+  alt: string;
+}
+interface Chapter {
+  id: string;
+  title: string;
+  sub: string;
+  lead: TourItem;
+  items: TourItem[];
+}
+
+const TOUR: Chapter[] = [
+  {
+    id: "tour-find",
+    title: "Find your way",
+    sub: "Files, symbols, text and commands, all from the keyboard.",
+    lead: {
+      shot: "search",
+      title: "Search in files",
+      body: "Searches the whole project as you type: literal, whole word or regex, with case sensitivity and include/exclude globs. <code>.gitignore</code> is respected unless you include ignored files. Results stream in grouped by file and open at the exact match, and a Refresh appears when files change on disk. Right-click a folder for <b>Search in Folder…</b>",
+      keys: ["⌘⇧F", "F4 / ⇧F4"],
+      alt: "The Search view with the query “expires”, its match case, whole word and regex toggles and include and exclude globs, four results in cache.ts, and the second one open in the editor with inline blame.",
+    },
+    items: [
+      {
+        shot: "quick-open",
+        title: "Go to file",
+        body: "Fuzzy-matches file names first, then whole paths. Type <code>path:line</code> to land on a line; an empty box lists recent files.",
+        keys: ["⌘P"],
+        alt: "Go to file with “ca” typed, listing cache.ts, cache.test.ts and other matches with the matched letters highlighted.",
+      },
+      {
+        shot: "symbols",
+        title: "Go to Symbol",
+        body: "An indented outline of the file's types, classes, functions and Markdown headings; type to filter, Enter to jump. Twenty-odd languages, matched by patterns rather than a parser.",
+        keys: ["⌘⇧O"],
+        alt: "Go to Symbol listing the types Job and QueueOptions, the class Queue and its methods constructor, add, attempt, pump and drain, each with its line number.",
+      },
+      {
+        shot: "commands",
+        title: "Command palette",
+        body: "Every command with its shortcut: terminals, panels, theme, font size, git, references, updates. The same box takes <code>&gt;</code> for commands, <code>:</code> for a line and <code>@</code> for symbols.",
+        keys: ["⌘⇧P"],
+        alt: "The command palette filtered by “git”: Next Change, Show Changes, File History, Previous Change, Peek HEAD on Current Line, Compare With Base Branch / HEAD and Toggle Automatic Update Checks, with their shortcuts.",
+      },
+      {
+        shot: "find",
+        title: "Find in file and go to line",
+        body: "Match case, whole word and regex toggles with a live count; Enter and ⇧Enter step through the matches. <kbd>⌃G</kbd> jumps to a line.",
+        keys: ["⌘F", "⌃G"],
+        alt: "The find bar over queue.ts with the query “queue”, showing match 1 of 3 and the case, word and regex toggles.",
+      },
+      {
+        shot: "explorer",
+        title: "Explorer with git status",
+        body: "Letters for modified, added, untracked, deleted, renamed and conflicted files, rolled up into folders; ignored files are dimmed. Right-click, or <kbd>⇧F10</kbd>, for Search in Folder…, View Changes and File History.",
+        keys: ["⌘⇧E", "⌘B"],
+        alt: "The Explorer with docs and src expanded: router.ts marked M, rate-limit.ts U and health.ts A, ignored dist and harbor.log dimmed, and a context menu on tsconfig.json offering Open in New Tab, View Changes and File History.",
+      },
+      {
+        shot: "help",
+        title: "Every shortcut, one key away",
+        body: "The cheat sheet uses your platform's key names. The whole app works from the keyboard, and lists, the palette and the terminal expose what they show to screen readers.",
+        keys: ["⌘/"],
+        alt: "The Keyboard shortcuts sheet, showing its Files and In a file groups.",
+      },
+    ],
+  },
+  {
+    id: "tour-read",
+    title: "Read anything",
+    sub: "Code, Markdown, images and binaries open read-only, in the right view.",
+    lead: {
+      shot: "markdown",
+      title: "Markdown, rendered safely",
+      body: "READMEs and docs open rendered: GFM tables, task lists, strikethrough and highlighted code, with images from the repository. Raw HTML is shown as text and remote images never load: a placeholder names the host and links out. <b>View source</b> switches to the highlighted source; ⌘⇧O lists the headings.",
+      alt: "A rendered README: the Harbor heading, a placeholder for a remote image from img.shields.io, a features table and a roadmap task list.",
+    },
+    items: [
+      {
+        shot: "image",
+        title: "Images",
+        body: "PNG, JPEG, GIF, WebP, AVIF, BMP, ICO and SVG open in an image viewer with Fit, 1:1 and zoom from 2% to 6400% (and TIFF and HEIC in the Mac app). SVGs switch to their source; other binary files get a hex dump.",
+        alt: "A PNG logo shown at 1:1 in the image viewer, on a checkerboard.",
+      },
+      {
+        shot: "live",
+        title: "Live while agents work",
+        body: "Files reload in place the moment they change on disk. The changed lines flash and get gutter markers, nothing you are reading jumps, and the Explorer dots changed files you haven't opened since.",
+        alt: "time.ts right after a command in the terminal edited it: lines 4 to 6 flash, and the two edited lines carry gutter markers.",
+      },
+      {
+        shot: "hexdump",
+        title: "Binary files",
+        body: "Anything that is not text opens as a hex dump of its first 4 KB, with offsets and printable characters. Text files over 8 MB open truncated with a notice, and very long lines are cut at 4,000 columns, so nothing can stall the view.",
+        alt: "A 320-byte binary file, data/queue.snap, shown as a hex dump with offsets, hex bytes and the printable text HRBSNAP queue=resize;retries=3.",
+      },
+      {
+        shot: "welcome",
+        title: "Start here",
+        body: "With no tab open, the window shows the folder and the shortcuts worth learning first. Pinned tabs come back on the next launch; a single click opens a preview tab (in italics) that the next one replaces.",
+        alt: "The welcome screen: the folder name harbor, its path, and shortcuts for Go to file, Commands, Toggle terminal, Find, Search, Go to line, Changes, Toggle sidebar and All shortcuts, and a tip about codeviewer open.",
+      },
+    ],
+  },
+  {
+    id: "tour-git",
+    title: "Review with git",
+    sub: "Everything git knows about the code in front of you, without ever writing to the repository.",
+    lead: {
+      shot: "changes",
+      title: "Review the branch",
+      body: "Lists every file the branch touched since it left <code>main</code>, or only what is uncommitted, with <code>+/−</code> counts. Each file opens as a read-only diff. <kbd>⌥F5</kbd> walks hunk by hunk and on to the next file, and reviewed files dim until they change again.",
+      keys: ["⌘⇧G", "⌥F5 / ⌥⇧F5"],
+      alt: "The Changes view comparing the branch with main: six files with their status letters and line counts, and cache.ts open as a unified diff with added and removed lines.",
+    },
+    items: [
+      {
+        shot: "peek",
+        title: "Peek at HEAD",
+        body: "Gutter bars mark added, changed and deleted lines against HEAD. Click one to see what the last commit had there.",
+        alt: "A peek popup under a changed block in router.ts, showing the single line HEAD had where there are now three.",
+      },
+      {
+        shot: "blame",
+        title: "Inline blame",
+        body: "The active line names who changed it, when, and the commit's subject. Uncommitted lines say so.",
+        alt: "The active line in cache.ts with the blame “Ada Park, 2 weeks ago · Expire cache entries after a TTL”.",
+      },
+      {
+        shot: "history",
+        title: "File history",
+        body: "Up to 500 commits that changed the file, renames followed, newest first. Type to filter; Enter opens what that commit changed as a diff tab.",
+        alt: "File History for cache.ts listing three commits with their short ids, authors and dates.",
+      },
+      {
+        shot: "statusbar",
+        title: "Status at a glance",
+        body: "The branch with ahead/behind, merge or rebase state, stash count and change counts, all live as you, or an agent, edit, stage, commit or switch branch.",
+        alt: "The status bar showing the folder, the branch feature/cache-ttl with uncommitted changes, 3 changed and 1 untracked.",
+      },
+    ],
+  },
+  {
+    id: "tour-terminal",
+    title: "Work with your agent",
+    sub: "A real terminal next to the code, and one key to tell the agent where to look.",
+    lead: {
+      shot: "terminal",
+      title: "A real terminal",
+      body: "A native PTY with a from-scratch emulator: truecolor, mouse, alternate screen, bracketed paste, OSC 8 links and pixel-exact box drawing, so Claude Code, Codex, aider, vim and htop just work. <kbd>⌥⌘C</kbd> copies <code>path:line</code> for the cursor or selection, <b>Insert Reference in Terminal</b> types it at the prompt, and ⌘-click on a <code>path:line</code> in the output opens it.",
+      keys: ["⌃`", "⌃⇧`", "⌥⌘C"],
+      alt: "The terminal panel showing git log, git diff --stat against main and wc -l, with the reference src/cache.ts:25 inserted at the prompt.",
+    },
+    items: [
+      {
+        shot: "panels",
+        title: "Your layout",
+        body: "Several terminals as tabs, a panel at the bottom or on the right (<b>Move Terminal Panel</b>), maximized or hidden. Tabs are coloured by git status and the breadcrumb shows where a file lives. <kbd>⌘=</kbd> <kbd>⌘-</kbd> <kbd>⌘0</kbd> scale code, terminal and chrome together, and the moon button cycles System, Dark and Light themes.",
+        keys: ["⌃⇧`", "⌘⇧[ / ⌘⇧]", "⌘J", "⌘K"],
+        alt: "The terminal panel on the right with two zsh tabs, one listing src; the editor with pinned queue.ts and cache.ts tabs, router.ts open as an italic preview tab coloured as modified, and the Explorer.",
+      },
+      {
+        shot: "updates",
+        title: "Signed updates",
+        body: "A launch-time check, which you can turn off, shows an update pill in the status bar when a release is out. Installing verifies the release's Ed25519 signature and the file's SHA-256 before an atomic swap and a restart. <b>Check for Updates…</b> is in the palette and the Mac app menu.",
+        alt: "The update dialog announcing a newer Codeviewer version, with release notes and the buttons Release notes, Later and Install and restart.",
+      },
+    ],
+  },
+];
+
+/** Width and height of a baseline or progressive JPEG, from its SOF marker. */
+function jpegSize(buf: Uint8Array): [number, number] {
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) throw new Error("not a JPEG");
+    const marker = buf[i + 1]!;
+    const len = (buf[i + 2]! << 8) | buf[i + 3]!;
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return [(buf[i + 7]! << 8) | buf[i + 8]!, (buf[i + 5]! << 8) | buf[i + 6]!];
+    }
+    i += 2 + len;
+  }
+  throw new Error("no JPEG size");
+}
+
+const shotSizes = new Map<string, [number, number]>();
+for (const ch of TOUR)
+  for (const it of [ch.lead, ...ch.items]) shotSizes.set(it.shot, jpegSize(await readFile(path.join(out, "assets/features", `${it.shot}-dark.jpg`))));
+
+/**
+ * A screenshot that follows the visitor's colour scheme, like the hero. Each has a half-size
+ * variant (-half.jpg) for phones and 1x screens.
+ */
+const shotPicture = (it: TourItem, sizes: string) => {
+  const [w, h] = shotSizes.get(it.shot)!;
+  const base = `assets/features/${it.shot}`;
+  const set = (theme: string) => `${base}-${theme}-half.jpg ${Math.round(w / 2)}w, ${base}-${theme}.jpg ${w}w`;
+  return `<picture><source srcset="${set("light")}" sizes="${sizes}" media="(prefers-color-scheme: light)"><img src="${base}-dark.jpg" srcset="${set("dark")}" sizes="${sizes}" width="${w}" height="${h}" alt="${esc(it.alt)}" loading="lazy" decoding="async"></picture>`;
+};
+/** Shortcut chips: "F4 / ⇧F4" becomes two keys with the separator outside them. */
+const keyList = (keys?: string[]) =>
+  keys?.length
+    ? `<p class="keys">${keys.map((k) => k.split(" / ").map((p) => `<kbd>${esc(p)}</kbd>`).join(" / ")).join(" ")}</p>`
+    : "";
+const tourCard = (it: TourItem) => {
+  const [w, h] = shotSizes.get(it.shot)!;
+  const shape = h / w > 1 ? " tall" : h / w < 0.12 ? " strip" : "";
+  // The heading comes first for screen readers; CSS shows the picture on top.
+  return `
+        <article class="tcard${shape}">
+          <h4>${it.title}</h4>
+          <figure class="tshot">${shotPicture(it, "(max-width: 860px) 100vw, 540px")}</figure>
+          <p>${it.body}</p>${keyList(it.keys)}
+        </article>`;
+};
+const chapter = (ch: Chapter) => `
+    <div class="chapter" id="${ch.id}">
+      <h3>${ch.title}</h3>
+      <p class="chsub">${ch.sub}</p>
+      <article class="tlead">
+        <figure class="tshot">${shotPicture(ch.lead, "(max-width: 860px) 100vw, 680px")}</figure>
+        <div>
+          <h4>${ch.lead.title}</h4>
+          <p>${ch.lead.body}</p>${keyList(ch.lead.keys)}
+        </div>
+      </article>${ch.items.length ? `\n      <div class="tgrid">${ch.items.map(tourCard).join("")}\n      </div>` : ""}
+    </div>`;
 
 const row = (p: Platform) => `
         <tr data-asset="${p.id}">
@@ -184,6 +421,7 @@ const html = `<!doctype html>
   <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" width="22" height="22"><span>Codeviewer</span></a>
   <nav>
     <a href="#features">Features</a>
+    <a href="#tour">Tour</a>
     <a href="#privacy">Privacy</a>
     <a href="#security">Security</a>
     <a href="#download">Download</a>
@@ -203,8 +441,8 @@ const html = `<!doctype html>
     <p class="fine"><a href="#verify">${ICON.shield} Verify your download</a> · SHA-256 and signed build provenance for every file</p>
     <figure class="shot">
       <picture>
-        <source srcset="assets/screenshot-light.jpg" media="(prefers-color-scheme: light)">
-        <img src="assets/screenshot-dark.jpg" width="2400" height="1508" alt="Codeviewer showing a project's explorer with git status letters, a TypeScript file with git gutter markers and inline blame, and a terminal running git log.">
+        <source srcset="assets/screenshot-light-half.jpg 1280w, assets/screenshot-light.jpg 2560w" sizes="(max-width: 1160px) 100vw, 1112px" media="(prefers-color-scheme: light)">
+        <img src="assets/screenshot-dark.jpg" srcset="assets/screenshot-dark-half.jpg 1280w, assets/screenshot-dark.jpg 2560w" sizes="(max-width: 1160px) 100vw, 1112px" width="2560" height="1600" fetchpriority="high" alt="Codeviewer showing a project's Explorer with git status letters, a TypeScript file with gutter markers and inline blame on an uncommitted change, and a terminal running git log and git status.">
       </picture>
     </figure>
   </section>
@@ -223,17 +461,10 @@ ${FEATURES.map(
     </div>
   </section>
 
-  <section class="split">
-    <div>
-      <h2>See what HEAD had</h2>
-      <p>Click any gutter marker to peek at the lines as they were in the last commit. Inline blame follows your cursor; the status bar shows the branch and how far ahead or behind you are. <kbd>⌘⇧G</kbd> opens the Changes view: everything the branch touched since it left <code>main</code>, or just what is uncommitted, each file one click from a read-only diff. Press <kbd>⌘/</kbd> for every shortcut; the whole app works from the keyboard and with a screen reader.</p>
-      <ul class="ticks">
-        <li>Explorer letters: <b class="gM">M</b> modified, <b class="gA">A</b> added, <b class="gU">U</b> untracked, <b class="gD">D</b> deleted, <b class="gC">C</b> conflict</li>
-        <li>Live as you or an agent edit, stage, commit or switch branch</li>
-        <li>Safe on untrusted repositories: no hooks, filters or drivers ever run</li>
-      </ul>
-    </div>
-    <img class="shot-sm" src="assets/screenshot-light.jpg" width="2400" height="1508" alt="Light theme with a peek popup showing the HEAD version of a changed line." loading="lazy">
+  <section id="tour" class="tour">
+    <h2>A tour of every feature</h2>
+    <p class="sub">Screenshots of the real app, in your colour scheme. Shortcuts are shown for macOS; on Linux, ⌘ is Ctrl.</p>
+${TOUR.map(chapter).join("\n")}
   </section>
 
   <section id="privacy" class="security">
@@ -248,7 +479,7 @@ ${FEATURES.map(
 
   <section id="security" class="security">
     <h2>A shell in a window deserves care</h2>
-    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in, seven rounds so far. Every confirmed finding was fixed and pinned with a test.</p>
+    <p class="sub">Codeviewer serves a real terminal, so it was designed and then attacked by reviewers looking for a way in, round after round. Every confirmed finding was fixed and pinned with a test.</p>
     <div class="grid three">
       <article class="card"><h3>Only its own server</h3><p>The Mac window blocks every request except its own local port, with a strict Content-Security-Policy on top. External links open in your browser, never inside the app.</p></article>
       <article class="card"><h3>No ambient credentials</h3><p>A random 256-bit token lives in the URL fragment and a request header. No cookies, no token in process lists, Host and Origin checked on every request. Terminals get a narrower token that can only ask the viewer to open a file.</p></article>

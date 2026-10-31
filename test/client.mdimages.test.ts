@@ -95,7 +95,7 @@ describe("AC-20 relative images load through api.rawBlobUrl", () => {
   test("the img src is the blob URL, never the source text, and alt is kept", async () => {
     const v = view("![the alt](img/x.png)");
     await flush();
-    expect(calls.map((c) => c.url)).toEqual(["/api/raw?path=docs%2Fimg%2Fx.png"]);
+    expect(calls.map((c) => c.url)).toEqual([`/api/raw?path=docs%2Fimg%2Fx.png&max=${I.MAX_IMAGE_BYTES}`]);
     const imgs = q(v.el, "img");
     expect(imgs.length).toBe(1);
     expect(imgs[0]!.getAttribute("src")).toBe(created[0]!);

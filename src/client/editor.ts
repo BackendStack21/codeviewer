@@ -375,7 +375,7 @@ export class Editor {
             blame(line);
           };
           tab.el.append(tab.code.el);
-          if (tab.path.endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "Preview image", icons.image));
+          if (tab.path.toLowerCase().endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "Preview image", icons.image));
           else if (isMarkdown(tab.path)) {
             tab.el.prepend(this.viewToggle(tab, toggleLabel("source"), icons.image));
             if (tooLarge) {
@@ -400,9 +400,9 @@ export class Editor {
         if (tab.image && reload) tab.image.reload(tab.mtime);
         else {
           this.dropCode(tab);
-          tab.image = new ImageView(tab.path, tab.mtime, () => this.status());
+          tab.image = new ImageView(tab.path, tab.mtime, f.size, () => this.status());
           tab.el.replaceChildren(tab.image.el);
-          if (tab.path.endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
+          if (tab.path.toLowerCase().endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
         }
       } else if (f.kind === "binary") {
         this.dropCode(tab);
@@ -757,6 +757,7 @@ class ImageView {
   constructor(
     private path: string,
     mtime: number,
+    private size: number,
     private onInfo: () => void,
   ) {
     this.img = h("img", { class: "img", alt: basename(path), draggable: "false" });
@@ -774,9 +775,7 @@ class ImageView {
       this.dims = `${this.img.naturalWidth} × ${this.img.naturalHeight}`;
       this.apply();
     });
-    this.img.addEventListener("error", () => {
-      this.stage.replaceChildren(h("div", { class: "notice error" }, "This image could not be decoded."));
-    });
+    this.img.addEventListener("error", () => void this.undecodable());
     this.stage.addEventListener("dblclick", () => this.setMode(this.mode === "fit" ? 1 : "fit"));
     this.stage.addEventListener(
       "wheel",
@@ -792,6 +791,15 @@ class ImageView {
   }
 
   private blobUrl = "";
+  private failed = false;
+
+  /** The window cannot decode the file (damaged, or TIFF/HEIC outside WebKit): show its bytes. */
+  private async undecodable() {
+    if (this.failed) return;
+    this.failed = true;
+    const note = h("div", { class: "notice error" }, "This image could not be displayed: the file is damaged, or this window cannot decode its format. Its first bytes:");
+    this.el.replaceChildren(note, await binaryView(this.path, this.size));
+  }
 
   reload(_mtime: number) {
     void api.rawBlobUrl(this.path).then(
@@ -800,7 +808,7 @@ class ImageView {
         this.blobUrl = u;
         this.img.src = u;
       },
-      () => this.img.dispatchEvent(new Event("error")),
+      () => void this.undecodable(),
     );
   }
 

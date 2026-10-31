@@ -199,6 +199,9 @@ test("/api/raw: mime types, CSP sandbox, content-length, ?limit, errors", async 
   expect(await lim.text()).toBe("x".repeat(10));
   const big = await get("/api/raw?path=noext&limit=999999");
   expect((await big.text()).length).toBe(1000);
+  // ?max refuses a larger file before sending a byte; at or under the cap it streams as usual.
+  expect((await get("/api/raw?path=noext&max=999")).status).toBe(413);
+  expect(await (await get("/api/raw?path=noext&max=1000")).text()).toBe("x".repeat(1000));
   expect((await get("/api/raw?path=missing")).status).toBe(404);
   expect((await get("/api/raw?path=sub")).status).toBe(400);
   expect((await get("/api/raw?path=escape")).status).toBe(404);

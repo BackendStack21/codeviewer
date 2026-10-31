@@ -1,4 +1,5 @@
 import { api } from "./api.ts";
+import { MAX_IMAGE_BYTES } from "./mdimage.ts";
 import { parseMarkdown, slugify } from "./markdown.ts";
 import { renderMarkdown } from "./mdrender.ts";
 import { isEditable } from "./util.ts";
@@ -117,7 +118,7 @@ export class MarkdownView {
   }
 
   private loadImage(img: HTMLElement, path: string, alt: string, wrap: HTMLElement, epoch: number) {
-    api.rawBlobUrl(path).then(
+    api.rawBlobUrl(path, MAX_IMAGE_BYTES).then(
       (url) => {
         if (epoch !== this.epoch) return void URL.revokeObjectURL(url);
         this.blobs.push(url);
