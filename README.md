@@ -227,7 +227,8 @@ updated. Commit that file. Releases fail until the key exists.
 
 ### Releasing
 
-1. Bump `version` in `package.json` and commit.
+1. Bump `version` in `package.json` and commit `Release X.Y.Z` with a one-paragraph summary. That
+   paragraph becomes the GitHub release notes and the notes in the update dialog.
 2. `git tag v<version> && git push --tags`
 3. The release workflow runs the tests, builds every package, signs `SHA256SUMS`, attests
    provenance and publishes the GitHub release. The landing page picks it up by itself: it

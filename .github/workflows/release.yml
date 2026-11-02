@@ -49,7 +49,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The notes are the release commit's summary paragraph (HEAD of the checked-out tag),
+          # written outside dist/release so they are not uploaded as an asset.
+          bun scripts/release-notes.ts > "$RUNNER_TEMP/release-notes.md"
           gh release create "$GITHUB_REF_NAME" dist/release/* \
             --verify-tag \
             --title "Codeviewer $GITHUB_REF_NAME" \
-            --notes "Downloads, checksums and verification steps: https://codeviewer.21no.de/#verify"
+            --notes-file "$RUNNER_TEMP/release-notes.md"

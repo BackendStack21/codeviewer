@@ -114,5 +114,6 @@ bun run build:local               # binaries + the app for this machine (needs X
 ## Releasing
 
 1. Merge to `main` (squash). 2. Bump `version` in `package.json`, commit `Release X.Y.Z` with a
-one-paragraph summary. 3. `git tag vX.Y.Z && git push origin main --tags`. The release workflow
+one-paragraph summary (`scripts/release-notes.ts` turns it into the GitHub release notes, which the
+update dialog shows; hard-wrapping is fine). 3. `git tag vX.Y.Z && git push origin main --tags`. The release workflow
 builds, signs `SHA256SUMS` and publishes; the landing page reads the release from GitHub at runtime.

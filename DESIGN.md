@@ -917,3 +917,14 @@ Claude Code 2.1.316 through the server reproduced one cause.
 | (Review) `sendReplay` guessed "trimmed" from the byte count, cutting the first line of replays that were complete. | It uses `ringTrimmed`. |
 | (Review) A reattach at a new size was nudged on top of its real resize. | Nudge only when the size did not change. |
 | (Review) Not changed. The 150 ms gap is fixed, so a program stalled for longer sees no change and stays as it was. `ringTrimmed` is never reset, so a TUI started after a trim gets a needless repaint on reattach. Rate-limiting nudges was rejected: each resync resets the screen, so a skipped nudge leaves it blank. | Open: inline TUIs on the normal screen (Claude Code's classic renderer) and programs that ignore SIGWINCH are still not repaired. Keeping screen state on the server, with `Terminal`, would cover them without resizing. |
+
+## 22. Round 13: release notes in the update dialog
+
+The "Codeviewer X is available" dialog showed only the verify link instead of what changed.
+
+| Finding | Fix |
+| --- | --- |
+| `release.yml` created every release with a fixed `--notes` line, so the release body, which the updater forwards to the dialog, never held the real notes. The summary paragraph lives in the `Release X.Y.Z` commit. | `scripts/release-notes.ts` builds the notes from the release commit (`git log -1 --format=%B`, no shell string): drops the subject and the Co-Authored-By/Signed-off-by trailers, unwraps hard-wrapped paragraphs (lists, headings, quotes, fences and indented blocks stay as written) and appends the verify line. An empty body warns with `::warning::`. The workflow writes the file to `$RUNNER_TEMP` (not uploaded) and passes `--notes-file`; commit text never goes through `${{ }}`. |
+| Hard-wrapped paragraphs would break mid-sentence in `.upd-notes` (`white-space: pre-wrap`). | They are unwrapped in the script. |
+| The verify line is noise in the dialog (the updater verifies by itself) but useful on the GitHub page. | `RELEASE_FOOTER` in `update.ts` is the single definition; `Updater.check()` strips it before the 4000 cap, so a footer-only body (all older releases) gives empty notes and the dialog shows no box. |
+| Fetching the tag's commit at runtime would be a new network request. | Not done (privacy rule). Existing releases keep their old body and are not edited. |
