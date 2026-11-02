@@ -173,10 +173,10 @@ class PtySession {
   private requestRepaint() {
     const alt = this.modes.get(1049) || this.modes.get(1047) || this.modes.get(47);
     if (!this.ringTrimmed || !alt || this.nudge || this.exited !== null || this.size.rows < 2) return;
-    this.term.resize(this.size.cols, this.size.rows - 1);
+    this.resizePty(this.size.cols, this.size.rows - 1);
     this.nudge = setTimeout(() => {
       this.nudge = null;
-      if (this.exited === null) this.term.resize(this.size.cols, this.size.rows);
+      this.resizePty(this.size.cols, this.size.rows);
     }, REPAINT_NUDGE_MS);
     this.nudge.unref?.();
   }
@@ -191,7 +191,7 @@ class PtySession {
     if (!this.chunks.length) return;
     const first = this.chunks[0]!;
     let head = first.data;
-    if (this.bytes >= REPLAY_BYTES - 64 * 1024) {
+    if (this.ringTrimmed) {
       // History was trimmed: the first chunk may start mid-escape or mid-UTF-8.
       const nl = head.indexOf(0x0a);
       if (nl >= 0) head = head.subarray(nl + 1);
@@ -215,8 +215,10 @@ class PtySession {
     this.pending = [];
     this.pendingBytes = 0;
     this.sendReplay(ws);
+    // A real size change already makes the program repaint: a nudge on top only flickers.
+    const sameSize = ws.data.cols === this.size.cols && ws.data.rows === this.size.rows;
     this.resize(ws.data.cols, ws.data.rows);
-    this.requestRepaint();
+    if (sameSize) this.requestRepaint();
   }
 
   detach(ws: ServerWebSocket<PtySocketData>) {
@@ -224,7 +226,10 @@ class PtySession {
   }
 
   write(data: string | Uint8Array) {
-    if (this.exited === null) this.term.write(data);
+    if (this.exited !== null) return;
+    try {
+      this.term.write(data);
+    } catch {} // the PTY closed (see resizePty)
   }
 
   resize(cols: number, rows: number) {
@@ -232,7 +237,18 @@ class PtySession {
     this.size = { cols, rows };
     // During a repaint nudge the end of the nudge applies the latest size: resizing now would
     // undo the size change before the program sees it (the page sends its size right after connecting).
-    if (!this.nudge) this.term.resize(cols, rows);
+    if (!this.nudge) this.resizePty(cols, rows);
+  }
+
+  /**
+   * kill() closes the PTY at once, and the shell can take up to 1.5 s to die: until then `exited`
+   * is still null and a resize throws. A throw in a WebSocket handler or timer exits the server.
+   */
+  private resizePty(cols: number, rows: number) {
+    if (this.exited !== null) return;
+    try {
+      this.term.resize(cols, rows);
+    } catch {}
   }
 
   kill() {

@@ -91,10 +91,13 @@ export class Renderer {
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
     // Unchanged rows are never repainted, so a canvas whose backing store was discarded (GPU
     // reset, memory pressure) must be repainted in full when the browser restores it.
-    this.canvas.addEventListener?.("contextrestored", () => {
-      this.ctxDefaults();
-      this.invalidate();
-    });
+    this.canvas.addEventListener?.("contextrestored", () => this.recover());
+  }
+
+  /** Repaints after a possible loss of the canvas: its context settings go with its pixels. */
+  recover() {
+    this.ctxDefaults();
+    this.invalidate();
   }
 
   setTheme(t: Theme) {

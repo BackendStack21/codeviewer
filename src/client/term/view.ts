@@ -175,7 +175,7 @@ export class TerminalView {
   }
 
   private onReveal = () => {
-    if (document.visibilityState !== "hidden") this.renderer.invalidate();
+    if (document.visibilityState !== "hidden") this.renderer.recover();
   };
 
   private onWindowResize: () => void = () => {};

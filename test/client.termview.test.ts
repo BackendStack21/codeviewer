@@ -152,14 +152,29 @@ describe("terminal visibility and the screen-reader log", () => {
     v.dispose();
   });
 
+  // If the canvas was discarded its context state went too: unset, the cached font and spacing lie.
+  test("returning to the window restores the canvas settings, not only the pixels", () => {
+    const { v } = mk();
+    frame();
+    const ctx = (v.renderer as unknown as { ctx: { font: string } }).ctx;
+    ctx.font = "10px sans-serif";
+    window.dispatchEvent(new FakeEvent("focus"));
+    expect(ctx.font).not.toBe("10px sans-serif");
+    v.dispose();
+  });
+
   test("a page going into the background, or a disposed view, does not repaint", () => {
     const { v } = mk();
     frame();
     frame();
     v.renderer.rowsPainted = 0;
-    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
-    document.dispatchEvent(new FakeEvent("visibilitychange"));
-    delete (document as unknown as { visibilityState?: string }).visibilityState;
+    const proto = Object.getPrototypeOf(document);
+    Object.defineProperty(proto, "visibilityState", { value: "hidden", configurable: true });
+    try {
+      document.dispatchEvent(new FakeEvent("visibilitychange"));
+    } finally {
+      delete proto.visibilityState;
+    }
     frame();
     expect(v.renderer.rowsPainted).toBe(0);
     v.dispose();
