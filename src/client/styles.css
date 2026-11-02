@@ -298,6 +298,12 @@ svg {
   user-select: none !important;
 }
 
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after {
+  transition: none !important;
+}
+
 .icon-btn {
   display: inline-grid;
   place-items: center;

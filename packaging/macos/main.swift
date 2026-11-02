@@ -240,7 +240,7 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
     }
 
     // Messages from the page:
-    //   {t: "theme", dark, bg}  sync the window appearance
+    //   {t: "theme", mode, dark, bg}  sync the window appearance
     //   {t: "drag"}            mouse-down on empty title bar: move the window
     //   {t: "dblclick"}        double-click on the title bar: system zoom/minimize action
     func userContentController(_ ucc: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -263,7 +263,9 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
         }
         guard t == "theme" else { return }
         let dark = body["dark"] as? Bool ?? true
-        window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        // WKWebView's prefers-color-scheme follows the window: forcing it in system mode would make
+        // the page read back its own last choice and never see macOS.
+        window.appearance = body["mode"] as? String == "system" ? nil : NSAppearance(named: dark ? .darkAqua : .aqua)
         if let hex = body["bg"] as? String, let c = NSColor(hex: hex) {
             window.backgroundColor = c
             webView.underPageBackgroundColor = c

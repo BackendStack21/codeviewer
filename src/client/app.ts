@@ -7,6 +7,7 @@ import { markdownToggleCommand } from "./mdcommands.ts";
 import { TerminalPanel } from "./terminals.ts";
 import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
+import { nativeThemeMessage, setDocumentTheme, type ThemeName } from "./theme.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
 import { basename, debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, store } from "./util.ts";
@@ -20,7 +21,6 @@ import { reference, referenceWithCode, unsafePath } from "./reference.ts";
 import { headingText } from "./symbols.ts";
 import { slugify } from "./markdown.ts";
 
-type ThemeName = "dark" | "light" | "system";
 
 interface Layout {
   sidebar: boolean;
@@ -643,9 +643,9 @@ class App {
   private applyTheme() {
     const t = this.L.theme;
     const dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    setDocumentTheme(document.documentElement, dark ? "dark" : "light");
     // Codeviewer.app: match the native window (traffic lights, background) to the theme.
-    nativeBridge()?.postMessage({ t: "theme", dark, bg: cssVar("--bg") });
+    nativeBridge()?.postMessage(nativeThemeMessage(t, dark, cssVar("--bg")));
     if (this.themeBtn) {
       this.themeBtn.innerHTML = dark ? icons.moon : icons.sun;
       this.themeBtn.title = `Theme: ${t} (click to change)`;
