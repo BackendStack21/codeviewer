@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { installDom, uninstallDom, FakeElement } from "./helpers/fakedom.ts";
+import { installDom, uninstallDom, FakeElement, FakeEvent } from "./helpers/fakedom.ts";
 
 // TerminalView per-frame work: the scrollbar must not force a layout every frame, and the
 // screen-reader log must not stringify output it will drop.
@@ -132,6 +132,40 @@ describe("terminal visibility and the screen-reader log", () => {
     expect(raf.length).toBe(1);
     frame();
     expect(v.renderer.rowsPainted).toBeGreaterThan(0);
+  });
+
+  // WebKit has no contextrestored: coming back is the only signal that pixels may be gone.
+  test("returning to the window or tab repaints every row, not only the ones that change", () => {
+    const { v } = mk();
+    v.write("some output\r\n");
+    frame();
+    frame();
+    for (const fire of [
+      () => window.dispatchEvent(new FakeEvent("focus")),
+      () => document.dispatchEvent(new FakeEvent("visibilitychange")),
+    ]) {
+      v.renderer.rowsPainted = 0;
+      fire();
+      frame();
+      expect(v.renderer.rowsPainted).toBe(v.term.rows);
+    }
+    v.dispose();
+  });
+
+  test("a page going into the background, or a disposed view, does not repaint", () => {
+    const { v } = mk();
+    frame();
+    frame();
+    v.renderer.rowsPainted = 0;
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new FakeEvent("visibilitychange"));
+    delete (document as unknown as { visibilityState?: string }).visibilityState;
+    frame();
+    expect(v.renderer.rowsPainted).toBe(0);
+    v.dispose();
+    window.dispatchEvent(new FakeEvent("focus"));
+    frame();
+    expect(v.renderer.rowsPainted).toBe(0);
   });
 
   test("a burst of output keeps the newest 200 lines in the log", () => {

@@ -174,6 +174,38 @@ test("large output is coalesced into frames and bounded by the replay ring", asy
   expect(/^(\x1b\[\?\d+h)*line-\d+-/.test(text)).toBe(true);
 });
 
+test("a lagging client's resync makes a TUI repaint when the replay no longer holds its first paint", async () => {
+  const m = await manager();
+  await Bun.write(
+    path.join(cwd, "tui.sh"),
+    `trap 'echo "SIZE=$(stty size | tr " " x)"' WINCH
+printf '\033[?1049h'
+i=0; while [ $i -lt 9000 ]; do echo "line $i ............................................................"; i=$((i+1)); done
+echo FLOODED
+while :; do sleep 0.05; done
+`,
+  );
+  const a = fakeWs("repaint-after-lag");
+  m.open(asWs(a));
+  m.message(asWs(a), Buffer.from("sh ./tui.sh\n"));
+  await until(() => a.output().includes("FLOODED"), 20000);
+
+  // The socket falls behind: the next output marks the client lagging, and nothing more is sent.
+  a.buffered = 9 * 1024 * 1024;
+  m.message(asWs(a), Buffer.from("x"));
+  await Bun.sleep(100);
+  a.bins = [];
+  a.texts = [];
+  m.message(asWs(a), Buffer.from("x"));
+  await Bun.sleep(100);
+  expect(a.bins.length).toBe(0);
+
+  a.buffered = 0;
+  m.drain(asWs(a));
+  expect(a.texts).toContain(JSON.stringify({ t: "replay" }));
+  await until(() => a.output().includes("SIZE=23x80") && a.output().includes("SIZE=24x80"));
+}, 40_000);
+
 test("a lagging client stops receiving live data and is resynced once its socket drains", async () => {
   const m = await manager();
   const a = fakeWs("s8");

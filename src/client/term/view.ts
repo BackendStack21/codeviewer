@@ -167,7 +167,16 @@ export class TerminalView {
       }
     };
     window.addEventListener("resize", this.onWindowResize);
+    // Unchanged rows are never repainted, so pixels the browser discarded while the window was in
+    // the background would stay blank. WebKit (the Mac app) has no contextlost/contextrestored
+    // events to report that, so repaint whenever the terminal may have been out of sight.
+    window.addEventListener("focus", this.onReveal);
+    document.addEventListener("visibilitychange", this.onReveal);
   }
+
+  private onReveal = () => {
+    if (document.visibilityState !== "hidden") this.renderer.invalidate();
+  };
 
   private onWindowResize: () => void = () => {};
   private onWindowKeyUp = (e: KeyboardEvent) => {
@@ -258,6 +267,8 @@ export class TerminalView {
     cancelAnimationFrame(this.logFrame);
     window.removeEventListener("resize", this.onWindowResize);
     window.removeEventListener("keyup", this.onWindowKeyUp);
+    window.removeEventListener("focus", this.onReveal);
+    document.removeEventListener("visibilitychange", this.onReveal);
     this.el.remove();
   }
 

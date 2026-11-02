@@ -9,6 +9,11 @@ const FLUSH_BYTES = 64 * 1024;
 const HIGH_WATER = 8 * 1024 * 1024;
 /** A shell that exits while nobody is attached (page reload) is kept this long for its exit notice. */
 const EXIT_GRACE_MS = 60_000;
+/**
+ * How long the PTY stays one row shorter when asking a TUI to repaint. Two resizes in a row reach
+ * Claude Code 2.1.316 as no change at all; 120 ms apart they repaint the whole screen (measured).
+ */
+const REPAINT_NUDGE_MS = 150;
 
 /** Private modes that change how input/output must be interpreted; restored on replay. */
 const TRACKED = [1, 25, 1000, 1002, 1003, 1004, 1006, 2004, 47, 1047, 1049];
@@ -38,6 +43,10 @@ class PtySession {
   /** Replay ring: each chunk remembers the mode-restoring prefix in effect before it. */
   private chunks: { data: Uint8Array; modes: string }[] = [];
   private bytes = 0;
+  /** The ring has dropped output, so a replay no longer holds everything since the session began. */
+  private ringTrimmed = false;
+  private size: { cols: number; rows: number };
+  private nudge: ReturnType<typeof setTimeout> | null = null;
   private modes = new Map<number, boolean>();
   private modesStr = "";
   private carry = "";
@@ -56,6 +65,7 @@ class PtySession {
     rows: number,
     private onGone: (id: string) => void,
   ) {
+    this.size = { cols, rows };
     this.proc = Bun.spawn([opts.shell, "-l"], {
       cwd: opts.cwd,
       env: opts.env,
@@ -68,6 +78,7 @@ class PtySession {
     this.term = (this.proc as unknown as { terminal: PtySession["term"] }).terminal;
     this.proc.exited.then((code) => {
       this.exited = code;
+      this.endNudge();
       if (!this.ws) {
         // Nobody attached (page reload mid-exit): keep the final output and exit code for the
         // next attach, unless no one comes back within the grace period.
@@ -93,7 +104,10 @@ class PtySession {
     const copy = data.slice();
     this.chunks.push({ data: copy, modes: this.modesStr });
     this.bytes += copy.length;
-    while (this.bytes > REPLAY_BYTES && this.chunks.length > 1) this.bytes -= this.chunks.shift()!.data.length;
+    while (this.bytes > REPLAY_BYTES && this.chunks.length > 1) {
+      this.bytes -= this.chunks.shift()!.data.length;
+      this.ringTrimmed = true;
+    }
     this.trackModes(copy);
     if (!this.ws || this.lagging) return;
     this.pending.push(copy);
@@ -147,6 +161,29 @@ class PtySession {
     if (!this.lagging || !this.ws || this.ws.getBufferedAmount() > HIGH_WATER / 4) return;
     this.lagging = false;
     this.sendReplay(this.ws);
+    this.requestRepaint();
+  }
+
+  /**
+   * Full-screen TUIs send cell diffs against what they drew earlier, so once that first paint has
+   * left the ring a replay rebuilds a mostly blank screen (Claude Code: 1 row of 31). Only the
+   * program can redraw it, and it does so when its size changes. A shell prompt is left alone: the
+   * normal screen replays fine as plain text, and a resize would only reprint the prompt.
+   */
+  private requestRepaint() {
+    const alt = this.modes.get(1049) || this.modes.get(1047) || this.modes.get(47);
+    if (!this.ringTrimmed || !alt || this.nudge || this.exited !== null || this.size.rows < 2) return;
+    this.term.resize(this.size.cols, this.size.rows - 1);
+    this.nudge = setTimeout(() => {
+      this.nudge = null;
+      if (this.exited === null) this.term.resize(this.size.cols, this.size.rows);
+    }, REPAINT_NUDGE_MS);
+    this.nudge.unref?.();
+  }
+
+  private endNudge() {
+    if (this.nudge) clearTimeout(this.nudge);
+    this.nudge = null;
   }
 
   /** Mode prefix + the retained tail, starting at a line boundary when history was trimmed. */
@@ -179,6 +216,7 @@ class PtySession {
     this.pendingBytes = 0;
     this.sendReplay(ws);
     this.resize(ws.data.cols, ws.data.rows);
+    this.requestRepaint();
   }
 
   detach(ws: ServerWebSocket<PtySocketData>) {
@@ -190,10 +228,15 @@ class PtySession {
   }
 
   resize(cols: number, rows: number) {
-    if (cols > 0 && rows > 0 && this.exited === null) this.term.resize(cols, rows);
+    if (!(cols > 0 && rows > 0) || this.exited !== null) return;
+    this.size = { cols, rows };
+    // During a repaint nudge the end of the nudge applies the latest size: resizing now would
+    // undo the size change before the program sees it (the page sends its size right after connecting).
+    if (!this.nudge) this.term.resize(cols, rows);
   }
 
   kill() {
+    this.endNudge();
     if (this.grace) {
       clearTimeout(this.grace);
       this.onGone(this.id);
