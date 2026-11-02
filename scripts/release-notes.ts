@@ -32,14 +32,18 @@ export function releaseNotes(message: string): string {
   return out.join("\n\n");
 }
 
-if (import.meta.main) {
-  const ref = process.argv[2] ?? "HEAD";
-  const git = Bun.spawnSync(["git", "log", "-1", "--format=%B", ref, "--"], { stderr: "pipe" });
-  if (git.exitCode !== 0) {
-    console.error(`release-notes: git log failed for ${ref}: ${git.stderr.toString().trim()}`);
-    process.exit(1);
-  }
+/** What the CLI prints for `ref` in the repository at `cwd` (default: the current directory). */
+export function cli(ref: string, cwd?: string): { code: number; out: string; err: string } {
+  const git = Bun.spawnSync(["git", "log", "-1", "--format=%B", ref, "--"], { stderr: "pipe", cwd });
+  if (git.exitCode !== 0) return { code: 1, out: "", err: `release-notes: git log failed for ${ref}: ${git.stderr.toString().trim()}\n` };
   const notes = releaseNotes(git.stdout.toString());
-  if (notes === RELEASE_FOOTER) console.error(`::warning::The commit ${ref} has no summary paragraph: the release notes are only the verify line.`);
-  process.stdout.write(notes + "\n");
+  const err = notes === RELEASE_FOOTER ? `::warning::The commit ${ref} has no summary paragraph: the release notes are only the verify line.\n` : "";
+  return { code: 0, out: notes + "\n", err };
+}
+
+if (import.meta.main) {
+  const r = cli(process.argv[2] ?? "HEAD");
+  process.stderr.write(r.err);
+  process.stdout.write(r.out);
+  process.exit(r.code);
 }
