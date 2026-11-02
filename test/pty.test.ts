@@ -108,7 +108,8 @@ async function reattached(id: string, setup: string) {
   const a = connect(id);
   await a.opened;
   a.send(await winchProgram(id, setup));
-  expect(await line(a.term, "DONE")).toBeDefined();
+  // Not line(): dash leaves the cursor after its prompt, so on a fresh alternate screen this is indented.
+  expect(await until(a.term, "DONE")).toBe(true);
   a.ws.close();
   await Bun.sleep(200);
   return connect(id);
