@@ -75,6 +75,10 @@ bun run build:local               # binaries + the app for this machine (needs X
   compares both). The renderer skips rows whose cells and overlay key are unchanged: anything new
   that changes a row's pixels goes into `rowKey()` or calls `invalidate()`. Hidden terminals do
   not paint (`TerminalView.setVisible`, driven by `TerminalPanel.activate`/`setShown`).
+- **Terminal replay.** Replay holds only the last 512 KB of output, which for a full-screen TUI may be
+  diffs with no full paint. `PtySession.requestRepaint` makes the program redraw with a real size
+  change; a same-size resize, or two in a row, does nothing. WebKit has no canvas
+  `contextlost`/`contextrestored` events: repaint on `TerminalView.onReveal` instead of relying on them.
 - **Terminal input is the user's.** On macOS ⌘-shortcuts belong to the app; on Linux Ctrl+key
   combinations stay with the shell unless the README lists them.
 

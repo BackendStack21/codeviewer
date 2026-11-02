@@ -79,6 +79,90 @@ test("a reload restores alt screen, bracketed paste and mouse modes even after h
   b.ws.close();
 }, 30_000);
 
+/**
+ * A program that reports each SIGWINCH on screen; the size proves what the PTY was resized to.
+ * A script, not typed commands: an interactive shell gives `sleep` its own foreground process
+ * group, so its own trap would never see the signal.
+ */
+async function winchProgram(name: string, setup: string) {
+  const file = `${name}.sh`;
+  await Bun.write(
+    path.join(dir, file),
+    `trap 'echo "SIZE=$(stty size | tr " " x)"' WINCH
+${setup}
+echo DONE
+while :; do sleep 0.05; done
+`,
+  );
+  return `sh ./${file}\n`;
+}
+const ALT = `printf '\\033[?1049h'`;
+const FLOOD = `i=0; while [ $i -lt 9000 ]; do echo "line $i ............................................................"; i=$((i+1)); done`;
+const shows = (term: Terminal, text: string) => term.lines.some((l) => l.toString().includes(text));
+async function until(term: Terminal, text: string) {
+  for (let i = 0; i < 50 && !shows(term, text); i++) await Bun.sleep(100);
+  return shows(term, text);
+}
+/** Runs the program in one connection, then reattaches like a reload. */
+async function reattached(id: string, setup: string) {
+  const a = connect(id);
+  await a.opened;
+  a.send(await winchProgram(id, setup));
+  // Not line(): dash leaves the cursor after its prompt, so on a fresh alternate screen this is indented.
+  expect(await until(a.term, "DONE")).toBe(true);
+  a.ws.close();
+  await Bun.sleep(200);
+  return connect(id);
+}
+const kill = (c: ReturnType<typeof connect>) => {
+  c.ws.send(JSON.stringify({ t: "kill" }));
+  c.ws.close();
+};
+
+test("reattaching to a TUI whose first paint left the replay window makes it repaint", async () => {
+  const b = await reattached("repaint-trimmed-alt", `${ALT}\n${FLOOD}`);
+  await b.opened;
+  // Both size changes reach the program (a same-size resize would be no signal at all), and the
+  // PTY ends at the size the client asked for.
+  expect(await until(b.term, "SIZE=23x80")).toBe(true);
+  expect(await until(b.term, "SIZE=24x80")).toBe(true);
+  kill(b);
+}, 30_000);
+
+test("a resize sent during the repaint nudge neither cuts it short nor is lost", async () => {
+  const b = await reattached("repaint-resize-race", `${ALT}\n${FLOOD}`);
+  await b.opened;
+  b.ws.send(JSON.stringify({ t: "resize", cols: 80, rows: 30 }));
+  expect(await until(b.term, "SIZE=23x80")).toBe(true);
+  expect(await until(b.term, "SIZE=30x80")).toBe(true);
+  kill(b);
+}, 30_000);
+
+test("a same-size resize right after connecting (what the page sends) does not cancel the repaint", async () => {
+  const b = await reattached("repaint-same-size", `${ALT}\n${FLOOD}`);
+  await b.opened;
+  b.ws.send(JSON.stringify({ t: "resize", cols: 80, rows: 24 }));
+  expect(await until(b.term, "SIZE=23x80")).toBe(true);
+  expect(await until(b.term, "SIZE=24x80")).toBe(true);
+  kill(b);
+}, 30_000);
+
+for (const [what, id, setup] of [
+  ["a complete replay (the first paint is still in it)", "repaint-untrimmed", ALT],
+  ["a program on the normal screen (a prompt would be redrawn for nothing)", "repaint-normal-screen", FLOOD],
+] as const) {
+  test(`reattaching does not disturb ${what}`, async () => {
+    const b = await reattached(id, setup);
+    await b.opened;
+    await Bun.sleep(800);
+    expect(shows(b.term, "SIZE=")).toBe(false);
+    // The trap works: a real resize is reported, so the silence above means something.
+    b.ws.send(JSON.stringify({ t: "resize", cols: 80, rows: 20 }));
+    expect(await until(b.term, "SIZE=20x80")).toBe(true);
+    kill(b);
+  }, 30_000);
+}
+
 test("output is coalesced into few frames", async () => {
   const c = connect("coalesce-test-1");
   await c.opened;

@@ -903,3 +903,17 @@ more work than the output needed. The terminal now follows these rules:
 
 Measured on JavaScriptCore: parsing an 8,000-line reprint went from 41 to 21 ms, a spinner tick
 repaints one row instead of the whole status region, and plain text parses at about 24 MB/s.
+
+## 21. Round 12: a blank terminal in long agent sessions
+
+A long Claude Code session could come back blank or with a few rows of content. Replaying real
+Claude Code 2.1.316 through the server reproduced one cause.
+
+| Finding | Fix |
+| --- | --- |
+| Full-screen TUIs send cell diffs against what they drew earlier. Once their last full paint has left the 512 KB replay ring, a reattach (page reload, the Mac app reloading after its web process dies, the backpressure resync) rebuilds a mostly blank screen: 0 of 30 rows for real Claude Code with only diffs in the ring. The same-size resize sent on attach is no signal, so nothing repaired it. | `PtySession.requestRepaint`: after a replay, if the ring was trimmed and the session is in the alternate screen, the PTY is one row shorter for 150 ms, and the program repaints: 30 of 30 rows, identical. The delay matters: two resizes in a row reach Claude Code as no change. Resizes arriving meanwhile are held and applied at the end. The normal screen is left alone (it replays as text, and a resize only reprints a prompt). |
+| The row skipping of round 11 assumes the canvas keeps its pixels, and repaints after `contextrestored`. WebKit, so the Mac app, has neither `contextlost` nor `contextrestored` (checked in `WKWebView`): pixels discarded in the background would stay blank except for rows that change. Whether WebKit discards them here was not reproduced; the repaint is cheap either way. | `TerminalView.onReveal` calls `Renderer.recover()` (context settings, then every row) on window `focus` and when the page becomes visible. |
+| (Review) `resize` and `write` on a killed session throw `Terminal is closed` while the shell is still dying, and a throw in a WebSocket handler or timer exits the server: every terminal dies. Reproduced; `resize` already had this. | `PtySession.resizePty`, and `write` catches it too. |
+| (Review) `sendReplay` guessed "trimmed" from the byte count, cutting the first line of replays that were complete. | It uses `ringTrimmed`. |
+| (Review) A reattach at a new size was nudged on top of its real resize. | Nudge only when the size did not change. |
+| (Review) Not changed. The 150 ms gap is fixed, so a program stalled for longer sees no change and stays as it was. `ringTrimmed` is never reset, so a TUI started after a trim gets a needless repaint on reattach. Rate-limiting nudges was rejected: each resync resets the screen, so a skipped nudge leaves it blank. | Open: inline TUIs on the normal screen (Claude Code's classic renderer) and programs that ignore SIGWINCH are still not repaired. Keeping screen state on the server, with `Terminal`, would cover them without resizing. |

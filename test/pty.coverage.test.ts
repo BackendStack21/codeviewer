@@ -174,6 +174,97 @@ test("large output is coalesced into frames and bounded by the replay ring", asy
   expect(/^(\x1b\[\?\d+h)*line-\d+-/.test(text)).toBe(true);
 });
 
+test("a lagging client's resync makes a TUI repaint when the replay no longer holds its first paint", async () => {
+  const { m, a } = await trimmedTui("repaint-after-lag");
+
+  // The socket falls behind: the next output marks the client lagging, and nothing more is sent.
+  a.buffered = 9 * 1024 * 1024;
+  m.message(asWs(a), Buffer.from("x"));
+  await Bun.sleep(100);
+  a.bins = [];
+  a.texts = [];
+  m.message(asWs(a), Buffer.from("x"));
+  await Bun.sleep(100);
+  expect(a.bins.length).toBe(0);
+
+  a.buffered = 0;
+  m.drain(asWs(a));
+  expect(a.texts).toContain(JSON.stringify({ t: "replay" }));
+  await until(() => a.output().includes("SIZE=23x80") && a.output().includes("SIZE=24x80"));
+}, 40_000);
+
+const TUI = `trap 'echo "SIZE=$(stty size | tr " " x)"' WINCH
+printf '\033[?1049h'
+i=0; while [ $i -lt 9000 ]; do echo "line $i ............................................................"; i=$((i+1)); done
+echo FLOODED
+while :; do sleep 0.05; done
+`;
+/** A session running a TUI whose first paint has left the replay ring. */
+async function trimmedTui(id: string) {
+  const m = await manager();
+  await Bun.write(path.join(cwd, "tui.sh"), TUI);
+  const a = fakeWs(id);
+  m.open(asWs(a));
+  m.message(asWs(a), Buffer.from("sh ./tui.sh\n"));
+  await until(() => a.output().includes("FLOODED"), 20000);
+  return { m, a };
+}
+
+// A throw in a WebSocket handler or timer exits the server, and every terminal with it. The PTY
+// is closed at once by kill() while the shell can take up to 1.5 s to die.
+test("a session being killed survives a drain, an attach, a resize and input", async () => {
+  const { m, a } = await trimmedTui("killed-session");
+  a.buffered = 9 * 1024 * 1024;
+  m.message(asWs(a), Buffer.from("x"));
+  await Bun.sleep(100);
+  m.message(asWs(a), JSON.stringify({ t: "kill" }));
+  a.buffered = 0;
+  expect(() => m.drain(asWs(a))).not.toThrow();
+  expect(() => m.message(asWs(a), JSON.stringify({ t: "resize", cols: 90, rows: 30 }))).not.toThrow();
+  expect(() => m.message(asWs(a), Buffer.from("x"))).not.toThrow();
+  const b = fakeWs("killed-session", 100, 40);
+  expect(() => m.open(asWs(b))).not.toThrow();
+}, 40_000);
+
+test("a kill during the repaint nudge cancels the size it would restore", async () => {
+  const { m, a } = await trimmedTui("killed-mid-nudge");
+  m.close(asWs(a));
+  const b = fakeWs("killed-mid-nudge");
+  m.open(asWs(b)); // starts the nudge
+  m.message(asWs(b), JSON.stringify({ t: "kill" }));
+  await Bun.sleep(300); // past the nudge: an uncaught throw in its timer fails this test
+}, 40_000);
+
+test("reattaching at a new size relies on that resize: no extra repaint nudge", async () => {
+  const { m, a } = await trimmedTui("attach-new-size");
+  m.close(asWs(a));
+  const b = fakeWs("attach-new-size", 80, 30);
+  m.open(asWs(b));
+  await until(() => b.output().includes("SIZE=30x80"));
+  await Bun.sleep(400);
+  expect(b.output()).not.toContain("SIZE=29x80");
+  expect(b.output().match(/SIZE=30x80/g)!.length).toBe(1);
+}, 40_000);
+
+test("a replay close to the ring's size is not cut when nothing was dropped", async () => {
+  const m = await manager();
+  await Bun.write(path.join(cwd, "big.sh"), `echo FIRSTLINE
+i=0; while [ $i -lt 6800 ]; do echo "line $i ............................................................"; i=$((i+1)); done
+echo FLOODED
+`);
+  const a = fakeWs("almost-full-ring");
+  m.open(asWs(a));
+  m.message(asWs(a), Buffer.from("sh ./big.sh\n"));
+  await until(() => a.output().includes("FLOODED"), 20000);
+  const size = Buffer.concat(a.bins).length;
+  expect(size).toBeGreaterThan(450 * 1024); // inside the old "probably trimmed" guess
+  expect(size).toBeLessThan(510 * 1024);
+  m.close(asWs(a));
+  const b = fakeWs("almost-full-ring");
+  m.open(asWs(b));
+  expect(b.output()).toBe(a.output());
+}, 40_000);
+
 test("a lagging client stops receiving live data and is resynced once its socket drains", async () => {
   const m = await manager();
   const a = fakeWs("s8");
