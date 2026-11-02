@@ -21,6 +21,8 @@ import updateKeyPem from "../../packaging/update-key.pub" with { type: "text" };
 /** Ed25519 public key (PEM / SPKI) whose private half signs every release's SHA256SUMS. */
 export const UPDATE_PUBLIC_KEY: string = updateKeyPem as unknown as string;
 export const REPO = "BackendStack21/codeviewer";
+/** Last paragraph of every release body (scripts/release-notes.ts); the update dialog hides it. */
+export const RELEASE_FOOTER = "Downloads, checksums and verification steps: https://codeviewer.21no.de/#verify";
 
 export type InstallKind = "macos-app" | "linux-app" | "cli" | "source";
 
@@ -227,7 +229,7 @@ export class Updater {
     const release: Release = {
       version,
       url: rel.html_url ?? `https://github.com/${REPO}/releases`,
-      notes: (rel.body ?? "").slice(0, 4000),
+      notes: (rel.body ?? "").replaceAll(RELEASE_FOOTER, "").trim().slice(0, 4000),
       assets: Object.fromEntries((rel.assets ?? []).map((a) => [a.name, a.browser_download_url])),
     };
     const info: UpdateInfo = {
