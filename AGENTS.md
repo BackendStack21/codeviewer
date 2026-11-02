@@ -79,6 +79,10 @@ bun run build:local               # binaries + the app for this machine (needs X
   diffs with no full paint. `PtySession.requestRepaint` makes the program redraw with a real size
   change; a same-size resize, or two in a row, does nothing. WebKit has no canvas
   `contextlost`/`contextrestored` events: repaint on `TerminalView.onReveal` instead of relying on them.
+- **Theme switches do not animate.** Set the theme with `setDocumentTheme` (`theme.ts`): a transition
+  started by a theme change freezes while WebKit is not rendering, leaving old colours on the new
+  background. In the Mac app "system" must leave `window.appearance` nil, because
+  `prefers-color-scheme` follows the window.
 - **Terminal input is the user's.** On macOS ⌘-shortcuts belong to the app; on Linux Ctrl+key
   combinations stay with the shell unless the README lists them.
 

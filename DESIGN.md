@@ -928,3 +928,14 @@ The "Codeviewer X is available" dialog showed only the verify link instead of wh
 | Hard-wrapped paragraphs would break mid-sentence in `.upd-notes` (`white-space: pre-wrap`). | They are unwrapped in the script. |
 | The verify line is noise in the dialog (the updater verifies by itself) but useful on the GitHub page. | `RELEASE_FOOTER` in `update.ts` is the single definition; `Updater.check()` strips it before the 4000 cap, so a footer-only body (all older releases) gives empty notes and the dialog shows no box. |
 | Fetching the tag's commit at runtime would be a new network request. | Not done (privacy rule). Existing releases keep their old body and are not edited. |
+
+## 23. Round 14: buttons out of step with the theme
+
+The title bar buttons could look missing. They were drawn, in the previous theme's colour. An
+on-screen `WKWebView` set up like the Mac window reproduced it, and a second theme bug with it.
+
+| Finding | Fix |
+| --- | --- |
+| `.icon-btn` has `transition: color`. A transition started by a theme change does not advance while WebKit is not rendering, so after a switch in a hidden or minimized window the page was already in the new theme and the buttons were not (computed `rgb(139, 148, 165)`, the dark colour, on the light title bar at 2.8:1). The omnibox, sash and other transitioned colours are exposed the same way. | `setDocumentTheme` applies a theme under `data-theme-switching`, which turns all transitions off, and forces a layout so the new styles commit before they return. Buttons match on reveal in all four flips tried, in computed colours and in pixels. |
+| In the Mac app "system" never followed macOS. WKWebView's `prefers-color-scheme` follows the window, and the window's appearance was always forced from the page, so "system" read back the page's last choice: light on a Dark Mac after Light, dark on a light Mac from launch. | The theme message carries the mode, and system sets `window.appearance = nil`. The `matchMedia` listener then re-applies the theme with the real value. |
+| Not checked. `takeSnapshot` draws web content only and window capture needs Screen Recording permission, so the native toolbar over the title bar was not captured in the light theme. | None needed so far: the user's screenshot of the dark state matches the snapshot pixels. |
