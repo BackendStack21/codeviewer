@@ -47,15 +47,16 @@ export class Settings {
     if (!changes || typeof changes !== "object" || Array.isArray(changes)) return Promise.reject(new Error("object expected"));
     if (depth(changes) > MAX_DEPTH) return Promise.reject(new Error("settings nested too deeply"));
     return this.enqueue(async () => {
-      const cur = await this.read();
+      // Merged in a Map: the keys come from the request, and a plain object would take
+      // `__proto__`, `constructor` and friends as property writes on itself.
+      const cur = new Map(Object.entries(await this.read()));
       for (const [k, v] of Object.entries(changes)) {
-        if (k === "__proto__") continue;
-        delete cur[k];
-        if (v !== null) cur[k] = v; // null removes the key
+        cur.delete(k);
+        if (v !== null) cur.set(k, v); // null removes the key
       }
-      const roots = Object.keys(cur).filter((k) => k.startsWith("tabs:"));
-      for (const k of roots.slice(0, Math.max(0, roots.length - MAX_TAB_ROOTS))) delete cur[k];
-      await this.persist(serialize(cur));
+      const roots = [...cur.keys()].filter((k) => k.startsWith("tabs:"));
+      for (const k of roots.slice(0, Math.max(0, roots.length - MAX_TAB_ROOTS))) cur.delete(k);
+      await this.persist(serialize(Object.fromEntries(cur)));
     });
   }
 

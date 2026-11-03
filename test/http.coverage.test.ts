@@ -607,3 +607,13 @@ test("PATCH /api/settings merges changed keys, null removes one, and old tabs: r
   expect((await patch(JSON.parse(`{"a":${"[".repeat(100)}${"]".repeat(100)}}`))).status).toBe(400);
   await fetch(`${base}/api/settings`, { method: "PUT", headers: json, body: "{}" });
 });
+
+test("PATCH /api/settings stores prototype-named keys as plain data", async () => {
+  const patch = (body: string) => fetch(`${base}/api/settings`, { method: "PATCH", headers: json, body });
+  expect((await patch('{"__proto__":{"polluted":1},"constructor":"x","toString":2}')).status).toBe(200);
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  const s = JSON.parse(await (await get("/api/settings")).text());
+  expect(Object.hasOwn(s, "constructor")).toBe(true);
+  expect(s.toString).toBe(2);
+  await fetch(`${base}/api/settings`, { method: "PUT", headers: json, body: "{}" });
+});
