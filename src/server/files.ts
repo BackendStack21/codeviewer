@@ -1,4 +1,4 @@
-import { open, readdir, realpath, stat } from "node:fs/promises";
+import { open, readdir, readlink, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
@@ -45,8 +45,13 @@ export function extOf(p: string): string {
 export const IMAGE_EXTS: readonly string[] = Object.keys(IMAGE_MIME);
 
 export function imageMime(p: string): string | undefined {
-  return IMAGE_MIME[extOf(p)];
+  // Own keys only: `x.constructor` must not find Object.prototype.constructor.
+  const ext = extOf(p);
+  return Object.hasOwn(IMAGE_MIME, ext) ? IMAGE_MIME[ext] : undefined;
 }
+
+/** Path separators in a root-relative path from the client. */
+export const SEP_RE: RegExp = path.sep === "\\" ? /[\\/]+/ : /\/+/;
 
 /**
  * Resolves a root-relative path ("" = root, "/"-separated) to an absolute real path.
@@ -54,7 +59,8 @@ export function imageMime(p: string): string | undefined {
  */
 export async function resolveSafe(rootReal: string, rel: string): Promise<string | null> {
   if (rel.includes("\0") || path.isAbsolute(rel) || /^[a-zA-Z]:/.test(rel)) return null;
-  const parts = rel.split(/[\\/]+/).filter(Boolean);
+  // "\\" is a separator only on Windows: on POSIX `a\\b` is one file name, never `a/b`.
+  const parts = rel.split(SEP_RE).filter(Boolean);
   if (parts.some((p) => p === "..")) return null;
   const joined = path.join(rootReal, ...parts);
   if (!within(rootReal, joined)) return null;
@@ -149,21 +155,38 @@ export function looksBinary(buf: Uint8Array): boolean {
  * Opens a resolved path for reading, safely: never follows a symlink swapped in after
  * resolveSafe() (O_NOFOLLOW), never blocks on FIFOs/devices (O_NONBLOCK), and refuses
  * anything that isn't a regular file.
+ *
+ * With `root`, the file actually opened must still be inside it: O_NOFOLLOW guards only the last
+ * component, so a parent directory swapped for a symlink between resolveSafe() and open() would
+ * otherwise open a file outside the root. Linux names the open file (/proc/self/fd); elsewhere the
+ * path is resolved again and must lead to the same inode.
  */
-export async function openRegular(abs: string) {
+export async function openRegular(abs: string, root?: string) {
   const fh = await open(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  const st = await fh.stat();
-  if (!st.isFile()) {
+  try {
+    const st = await fh.stat();
+    if (!st.isFile()) throw new Error("not a regular file");
+    if (root !== undefined && !(await stillInside(root, abs, fh.fd, st))) throw new Error("file changed while opening");
+    return { fh, st };
+  } catch (e) {
     await fh.close();
-    throw new Error("not a regular file");
+    throw e;
   }
-  return { fh, st };
 }
 
-export async function readForView(abs: string, forceText = false): Promise<{ meta: FileMeta; body?: Uint8Array }> {
+async function stillInside(root: string, abs: string, fd: number, st: { dev: number; ino: number }): Promise<boolean> {
+  const viaProc = await readlink(`/proc/self/fd/${fd}`).catch(() => null);
+  if (viaProc !== null && path.isAbsolute(viaProc)) return within(root, viaProc);
+  const real = await realpath(abs).catch(() => null);
+  if (real === null || !within(root, real)) return false;
+  const again = await stat(real).catch(() => null);
+  return again !== null && again.dev === st.dev && again.ino === st.ino;
+}
+
+export async function readForView(abs: string, forceText = false, root?: string): Promise<{ meta: FileMeta; body?: Uint8Array }> {
   const s0 = await stat(abs);
   if (s0.isDirectory()) return { meta: { kind: "dir", size: s0.size, mtime: s0.mtimeMs, truncated: false } };
-  const { fh, st: s } = await openRegular(abs);
+  const { fh, st: s } = await openRegular(abs, root);
   const meta: FileMeta = { kind: "text", size: s.size, mtime: s.mtimeMs, truncated: false };
   if (imageMime(abs) && !forceText) {
     await fh.close();

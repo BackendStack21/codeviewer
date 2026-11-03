@@ -321,7 +321,10 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
   }
 
   if (L.special === "yaml") {
-    const m = /^(\s*-?\s*)([^\s#:'"][^#:]*?|"[^"]*"|'[^']*')(\s*:)(?=\s|$)/.exec(text.slice(i));
+    // The key may not end in whitespace (`[^#:]*[^#:\s]`), so `\s*:` never competes with it for the
+    // same spaces, and the indent is `\s*(?:-\s*)?` (not `\s*-?\s*`): a line of spaces was quadratic
+    // (171 ms for 10 000).
+    const m = /^(\s*(?:-\s*)?)([^\s#:'"](?:[^#:]*[^#:\s])?|"[^"]*"|'[^']*')(\s*:)(?=\s|$)/.exec(text.slice(i));
     if (m && i === 0) {
       out.push([m[1]!.length, m[1]!.length + m[2]!.length, "p"]);
       i = m[0].length;
@@ -515,10 +518,18 @@ const REGEX_AFTER_WORD = new Set(["return", "typeof", "case", "do", "else", "in"
 function regexLiteralEnd(text: string, i: number): number {
   const next = text[i + 1];
   if (next === "/" || next === "*") return 0;
-  const before = text.slice(0, i).trimEnd();
-  const last = before[before.length - 1];
+  // Scanned backwards from `i`, never by slicing the prefix: a regex anchored at `$` over the whole
+  // prefix, per "/", made one long line take seconds (cubic in the line length).
+  let k = i - 1;
+  while (k >= 0 && /\s/.test(text[k]!)) k--;
+  const last = k >= 0 ? text[k] : undefined;
   if (last !== undefined && !"(,=:[!&|?{};+-*%<>~^".includes(last)) {
-    const word = /[A-Za-z_$][\w$]*$/.exec(before)?.[0];
+    // The word before it ([A-Za-z_$][\w$]*); no keyword in REGEX_AFTER_WORD is longer than 10.
+    let w = k;
+    while (w >= 0 && k - w <= 11 && /[\w$]/.test(text[w]!)) w--;
+    if (w >= 0 && k - w > 11 && /[\w$]/.test(text[w]!)) return 0; // a long identifier: division
+    let word = text.slice(w + 1, k + 1);
+    word = word.replace(/^\d+/, "");
     if (!word || !REGEX_AFTER_WORD.has(word)) return 0; // division: a / b, x) / 2, arr[i] / n
   }
   let inClass = false;

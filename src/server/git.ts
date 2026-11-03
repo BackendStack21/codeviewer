@@ -504,7 +504,7 @@ export class Git {
 
   private async countLines(e: ChangeEntry) {
     try {
-      const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")));
+      const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")), this.root);
       try {
         if (st.size > COUNT_MAX_BYTES) return;
         const buf = new Uint8Array(64 * 1024);

@@ -960,3 +960,23 @@ rendering of untrusted text.
 | `parseTarget` threw on a ⌘-clicked OSC 8 target holding U+2028/U+2029 (`.` does not match them); `codeviewer open` had the same regex. | The `s` flag. |
 | `esc` left `'` alone (no single-quoted attribute uses it today). | Escaped as `&#39;`. |
 | Not changed. OSC 52 from a hidden terminal still writes the clipboard, with the notice (the trade-off chosen in round 3, §11). The search test that expects `a.txt` over its hard link `a-hardlink.txt` depends on readdir order (the same inode is reported once, under whichever name comes first). | — |
+
+### Adversarial pass
+
+Five reviewers attacked the HTTP layer, git, the terminal, the client views and the fixes above;
+each finding below was reproduced before it was fixed.
+
+| Finding | Fix |
+| --- | --- |
+| Any request whose handler threw got Bun's development error page: HTML, no security headers, the process cwd, file paths and source. `Host: [` did it before auth (`new URL` throws). | `development: false`, an `error` handler returning a JSON 500, and the Host check before the URL is parsed. |
+| `PUT /api/settings` capped the request, not the file: indented output grows with the square of the nesting depth (6 KB of `[` wrote 18 MB, 40 KB wrote 800 MB, and the server ran out of memory). | Settings deeper than 32 levels are refused and the serialized file is capped at 1 MB. |
+| A parent directory swapped for a symlink between `resolveSafe` and `open` read a file outside the root (O_NOFOLLOW guards the last component only; reproduced with a swap loop). The search worker re-joined the path the same way. | `openRegular(abs, root)` checks the file actually opened (Linux: `/proc/self/fd`; elsewhere a fresh realpath must reach the same inode). The worker opens the path it checked. Listings are not covered (names only). |
+| `IMAGE_MIME`/`MIME` lookups found `Object.prototype` keys: `z.constructor` was served as `Content-Type: function Object() {…}`. | Own keys only. |
+| `?limit=1.5` sent `content-length: 1.5` and reset the connection. | Floored. |
+| `/api/open` accepted the root, folders and FIFOs. | Regular files only. |
+| On POSIX `\` was a path separator: `a\b` opened `a/b`. | `SEP_RE` splits on `\` only on Windows. |
+| A file created while the index was being built was missed until the next structural change. | `apply()` during a build invalidates it; a build overtaken by `invalidate()` walks again (three times at most). |
+| Driver keys from `git config --get-regexp` were split on newlines. | `-z`. |
+| Main-thread hangs on untrusted files: the JS lexer's regex-after-word check ran `/[A-Za-z_$][\w$]*$/` over the whole prefix per `/` (10 KB line: 76 s; a 12.6 KB file froze the app 4.6 s); Java/C# and TOML symbol patterns with long space runs (cubic); Markdown headings without the line cap; `headingText` on `[` runs; the YAML key pattern on indented lines; bare-URL `)` trimming recounting parentheses. | A bounded backward scan in the lexer; space runs collapsed before symbol patterns; `MAX_LINE` for headings; unambiguous patterns; parentheses counted once. `test/client.redos.test.ts` times each. |
+| Not changed: an invalid range (`bytes=5-3`) stays 416 (pinned by a test, allowed by RFC 9110); search previews collapse a tab to one space (`nowrap`); palette highlights drift when lowercasing changes a string's length (`İ`); bidi overrides in rendered Markdown prose; in-file Find runs the user's own regex on the main thread; `--host localhost` in the Chromium app window (the resolver rules map every host name) was not checked. | — |
+

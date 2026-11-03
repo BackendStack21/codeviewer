@@ -529,3 +529,60 @@ test("/api/raw fails the body instead of sending fewer bytes than content-length
   expect(failed).toBe(true);
   expect((await get("/api/info")).status).toBe(200);
 });
+
+test("round 15: no Bun error page, own-key MIME lookups, whole-byte limits, files-only open", async () => {
+  // A Host header that makes the URL unparseable: a JSON 400/421, never an HTML page with paths.
+  const raw = await new Promise<string>((resolve, reject) => {
+    let out = "";
+    void Bun.connect({
+      hostname: "127.0.0.1",
+      port,
+      socket: {
+        open(s) {
+          s.write("GET /api/info HTTP/1.1\r\nHost: [\r\nConnection: close\r\n\r\n");
+        },
+        data(_s, d) {
+          out += new TextDecoder().decode(d);
+        },
+        close() {
+          resolve(out);
+        },
+        error(_s, e) {
+          reject(e);
+        },
+      },
+    });
+  });
+  expect(raw).not.toContain("text/html");
+  expect(raw).not.toContain(process.cwd());
+  expect(raw).toMatch(/^HTTP\/1\.1 4\d\d/);
+
+  // Prototype keys are not extensions.
+  await writeFile(path.join(dir, "z.constructor"), "x");
+  await writeFile(path.join(dir, "y.__proto__"), "x");
+  expect((await get("/api/raw?path=z.constructor")).headers.get("content-type")).toBe("application/octet-stream");
+  expect((await get("/api/file?path=y.__proto__")).headers.get("x-cv-kind")).toBe("text");
+
+  // A fractional limit is a whole number of bytes, and the body matches it.
+  const lim = await get("/api/raw?path=noext&limit=1.5");
+  expect(await lim.text()).toBe("x");
+
+  // /api/open: regular files only (not the root, not a folder).
+  const post = (body: unknown) => fetch(`${base}/api/open`, { method: "POST", headers: json, body: JSON.stringify(body) });
+  expect((await post({ path: dir })).status).toBe(404);
+  expect((await post({ path: "sub" })).status).toBe(404);
+});
+
+test("round 15: settings refuse deep nesting (indented output grows with depth squared)", async () => {
+  const put = (body: string) => fetch(`${base}/api/settings`, { method: "PUT", headers: json, body });
+  const deep = `{"a":${"[".repeat(3000)}${"]".repeat(3000)}}`;
+  expect((await put(deep)).status).toBe(400);
+  expect((await readFile(path.join(cfg, "codeviewer", "settings.json"), "utf8").catch(() => "")).length).toBeLessThan(100_000);
+  expect((await put(JSON.stringify({ tabs: [{ path: "a" }], nested: { a: { b: { c: 1 } } } }))).status).toBe(200);
+});
+
+test("round 15: on POSIX a backslash is part of a file name, not a separator", async () => {
+  if (process.platform === "win32") return;
+  await writeFile(path.join(dir, "sub\\b.ts"), "BACKSLASH");
+  expect(await (await get(`/api/file?path=${encodeURIComponent("sub\\b.ts")}`)).text()).toBe("BACKSLASH");
+});

@@ -151,8 +151,11 @@ export function symbols(lang: string, lines: readonly string[]): Sym[] {
     if (!t || t.startsWith("//") || t.startsWith("*") || (hash && t.startsWith("#")) || ((lang === "lua" || lang === "hs" || lang === "sql") && t.startsWith("--"))) continue;
     const depth = indentOf(raw);
     if (depth > 0 && TOP_LEVEL_ONLY.has(lang)) continue;
+    // Runs of spaces collapse to one first: several patterns let `\s+` and a class holding `\s`
+    // share the same spaces, which backtracks cubically (`public` + 990 spaces: 360 ms a line).
+    const c = t.replace(/[ \t]{2,}/g, " ");
     for (const [re, kind] of rules) {
-      const m = re.exec(t);
+      const m = re.exec(c);
       if (m && m[1]) {
         out.push({ name: m[1].trim(), kind, line: i, depth });
         break;
@@ -177,7 +180,8 @@ function mdHeadings(lines: readonly string[]): Sym[] {
       fence = f[1]!;
       continue;
     }
-    const m = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(l);
+    // Long lines are skipped like everywhere else in this file: the pattern is quadratic in them.
+    const m = l.length > MAX_LINE ? null : /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$/.exec(l);
     if (m) {
       const name = (m[2] ?? "").trim();
       if (name) out.push({ name, kind: "heading", line: i, depth: m[1]!.length - 1 });
@@ -196,7 +200,8 @@ function mdHeadings(lines: readonly string[]): Sym[] {
 /** Heading text as it renders (for the slug): emphasis, code ticks and link targets dropped. */
 export function headingText(src: string): string {
   return src
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // `[^\][]`: an unclosed `[` stops at the next one instead of scanning to the end (quadratic).
+    .replace(/!?\[([^\][]*)\]\([^)]*\)/g, "$1")
     .replace(/[*_`~]/g, "")
     .trim();
 }

@@ -23,8 +23,12 @@ export class FileIndex {
 
   private dirs: Set<string> | null = null;
 
+  /** Bumped by invalidate(): a build that started before it must not store its (stale) result. */
+  private gen = 0;
+
   /** Forces a full rebuild on the next request. */
   invalidate() {
+    this.gen++;
     this.files = null;
     this.building = null;
     this.text = null;
@@ -47,9 +51,15 @@ export class FileIndex {
   }
 
   async get(): Promise<string> {
-    if (!this.files) {
-      this.building ??= this.build().then((set) => (this.files = set));
-      await this.building;
+    // A build that an invalidate() overtook does not store its result (it may have walked past a
+    // new file): walk again, a few times at most, so a tree that never settles still gets a list.
+    for (let tries = 0; !this.files; tries++) {
+      const gen = this.gen;
+      const set = await (this.building ??= this.build());
+      if (this.gen === gen || tries >= 3) {
+        this.files ??= set;
+        this.building = null;
+      }
     }
     return (this.text ??= [...this.files!].join("\n"));
   }
@@ -60,7 +70,11 @@ export class FileIndex {
    */
   async apply(paths: string[]): Promise<boolean> {
     const files = this.files;
-    if (!files) return true;
+    if (!files) {
+      // A build in progress may already have walked past these paths.
+      if (this.building) this.invalidate();
+      return true;
+    }
     if (paths.length > 2000) {
       this.invalidate();
       return true;

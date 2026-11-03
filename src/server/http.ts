@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { realpath, stat } from "node:fs/promises";
-import { listDir, readForView, resolveSafe, imageMime, toRel, looksBinary, openRegular, MAX_TEXT_BYTES } from "./files.ts";
+import { listDir, readForView, resolveSafe, imageMime, toRel, looksBinary, openRegular, MAX_TEXT_BYTES, SEP_RE } from "./files.ts";
 import { FileIndex } from "./index.ts";
 import { watchTree } from "./watch.ts";
 import { PtyManager, type PtySocketData } from "./pty.ts";
@@ -251,17 +251,27 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
   const relParam = (url: URL) => url.searchParams.get("path") ?? "";
   /** A well-formed root-relative path (for blobs read from history, which need not exist on disk). */
   const relOk = (rel: string) =>
-    !!rel && !rel.includes("\0") && !path.isAbsolute(rel) && !/^[a-zA-Z]:/.test(rel) && !rel.split(/[\\/]+/).some((p) => p === "..");
+    !!rel && !rel.includes("\0") && !path.isAbsolute(rel) && !/^[a-zA-Z]:/.test(rel) && !rel.split(SEP_RE).some((p) => p === "..");
 
   const server = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.host,
     idleTimeout: 0,
+    // Never Bun's development error page: it shows source, paths and the cwd to anyone who can
+    // make a handler throw (a `Host: [` header did, before any auth).
+    development: false,
+    error() {
+      return fail(500, "internal error");
+    },
     async fetch(req, srv) {
-      const url = new URL(req.url);
-      const p = url.pathname;
-
       if (!hostOk(req)) return fail(421, "unexpected host");
+      let url: URL;
+      try {
+        url = new URL(req.url);
+      } catch {
+        return fail(400, "bad request");
+      }
+      const p = url.pathname;
 
       // The app shell (HTML/JS/CSS/fonts) is public and contains no secrets.
       const asset = assets[p === "/" ? "/index.html" : p];
@@ -330,7 +340,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const abs = await resolveSafe(opts.root, relParam(url));
           if (!abs) return fail(404, "not found");
           try {
-            const { meta, body } = await readForView(abs, url.searchParams.has("text"));
+            const { meta, body } = await readForView(abs, url.searchParams.has("text"), opts.root);
             const h = securityHeaders(
               new Headers({
                 "content-type": "text/plain; charset=utf-8",
@@ -352,14 +362,15 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const rel = relParam(url);
           const abs = await resolveSafe(opts.root, rel);
           if (!abs) return fail(404, "not found");
-          const type = imageMime(rel) ?? MIME[rel.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+          const ext = rel.split(".").pop()?.toLowerCase() ?? "";
+          const type = imageMime(rel) ?? (Object.hasOwn(MIME, ext) ? MIME[ext] : undefined) ?? "application/octet-stream";
           const h = securityHeaders(new Headers({ "content-type": type, "cache-control": "no-store" }));
           // Even if an SVG is opened directly, it must not run script.
           h.set("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
           // Read through a verified regular-file handle (no FIFOs/devices, no symlink swaps).
           let opened;
           try {
-            opened = await openRegular(abs);
+            opened = await openRegular(abs, opts.root);
           } catch (e) {
             return fail(400, (e as Error).message);
           }
@@ -369,7 +380,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
             await opened.fh.close();
             return fail(413, "too large");
           }
-          const limit = Number(url.searchParams.get("limit"));
+          const limit = Math.floor(Number(url.searchParams.get("limit")));
           const total = limit > 0 ? Math.min(limit, opened.st.size) : opened.st.size;
           const fh = opened.fh;
           // One `bytes=a-b` / `bytes=a-` / `bytes=-n` range, so media elements can seek.
@@ -540,7 +551,10 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const given = body.path;
           const abs = path.isAbsolute(given) ? path.join(await realpath(path.dirname(given)).catch(() => path.dirname(given)), path.basename(given)) : null;
           const rel = abs !== null ? toRel(opts.root, abs) : given;
-          if (rel === null || !(await resolveSafe(opts.root, rel))) return fail(404, "path is outside the viewed directory");
+          const target = rel === null ? null : await resolveSafe(opts.root, rel);
+          if (rel === null || !target) return fail(404, "path is outside the viewed directory");
+          // Files only: the root itself, folders and FIFOs have nothing to open.
+          if (!(await stat(target).catch(() => null))?.isFile()) return fail(404, "not a file");
           broadcast({ t: "open", path: rel, line: Number.isInteger(body.line) && body.line! > 0 ? body.line : 0 });
           return json({ ok: true, clients: events.size });
         }

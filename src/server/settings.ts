@@ -28,14 +28,36 @@ export class Settings {
 
   write(data: unknown): Promise<void> {
     if (!data || typeof data !== "object" || Array.isArray(data)) return Promise.reject(new Error("object expected"));
+    // Indented output grows with the square of the nesting depth (40 KB of `[` became an 800 MB
+    // file): settings are shallow, so deep values are refused and the written size is capped.
+    if (depth(data) > MAX_DEPTH) return Promise.reject(new Error("settings nested too deeply"));
+    const text = JSON.stringify(data, null, 2);
+    if (text.length > MAX_BYTES) return Promise.reject(new Error("settings too large"));
     // Serialize writes and replace atomically so a crash never leaves a torn file.
     // A failed write must not poison every later one.
     this.queue = this.queue.catch(() => {}).then(async () => {
       await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
       const tmp = `${this.file}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+      await writeFile(tmp, text, { mode: 0o600 });
       await rename(tmp, this.file);
     });
     return this.queue;
   }
+}
+
+const MAX_DEPTH = 32;
+const MAX_BYTES = 1024 * 1024;
+
+/** Nesting depth of a JSON value, stopping as soon as it passes MAX_DEPTH (no deep recursion). */
+function depth(v: unknown): number {
+  let level: unknown[] = [v];
+  let d = 0;
+  while (level.length) {
+    d++;
+    if (d > MAX_DEPTH) return d;
+    const next: unknown[] = [];
+    for (const x of level) if (x && typeof x === "object") for (const y of Object.values(x as object)) next.push(y);
+    level = next;
+  }
+  return d - 1;
 }
