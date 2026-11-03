@@ -84,3 +84,15 @@ describe("file contents keep their tabs; names do not", () => {
     expect(c.markBidi("plain &amp; text")).toBe("plain &amp; text");
   });
 });
+
+describe("bidi markers stay bounded (a file of U+202E lines once made 248 000 elements)", () => {
+  test("one marker per run, at most MAX_BIDI_MARKS per line, escapes after that", async () => {
+    const c = await import("../src/client/codeview.ts");
+    const run = c.markBidi("a‮‮‮b");
+    expect(run.match(/class="bidi"/g)!.length).toBe(1);
+    const many = c.markBidi("a‮".repeat(100), { left: c.MAX_BIDI_MARKS });
+    expect(many.match(/class="bidi"/g)!.length).toBe(c.MAX_BIDI_MARKS);
+    expect(many).toContain("\\u202e"); // the rest as visible escapes
+    expect(many.replace(/<span[^>]*>[^<]*<\/span>/g, "")).not.toMatch(/[‪-‮⁦-⁩]/); // never raw
+  });
+});

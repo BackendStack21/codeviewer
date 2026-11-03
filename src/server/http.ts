@@ -475,7 +475,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const rel = relParam(url);
           const line = Number(url.searchParams.get("line"));
           if (!g || !Number.isInteger(line) || line < 1 || !(await resolveSafe(opts.root, rel))) return fail(404, "no blame");
-          const b = await g.blame(rel, line);
+          const b = await g.blame(rel, line, req.signal); // killed when the page moves on
           return b ? json(b) : fail(404, "no blame");
         }
 

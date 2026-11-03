@@ -42,9 +42,24 @@ export function markRanges(n: number, ranges: readonly MarkRange[]): Uint8Array 
  * displays in logical order, while the character stays in the DOM: selection offsets and copy are
  * unchanged. Runs on already-escaped HTML (esc() leaves these characters alone).
  */
-export function markBidi(html: string): string {
-  return html.replace(/[\u202a-\u202e\u2066-\u2069]/g, (c) => `<span class="bidi" title="U+${c.charCodeAt(0).toString(16).toUpperCase()}">${c}</span>`);
+export function markBidi(html: string, budget: { left: number } = { left: MAX_BIDI_MARKS }): string {
+  // One marker per run of controls, and at most MAX_BIDI_MARKS per line: a marker per character
+  // made 248 000 elements for a file of U+202E lines (seconds of layout, gigabytes of memory).
+  // Past the budget a line shows the code points as escapes instead (its offsets shift; such a
+  // line is hostile anyway), never the raw characters, which would reorder it again.
+  return html.replace(/[\u202a-\u202e\u2066-\u2069]+/g, (run) => {
+    if (budget.left <= 0) return [...run].map((c) => `\\u${c.charCodeAt(0).toString(16)}`).join("");
+    budget.left--;
+    const cps = [...run].map((c) => `U+${c.charCodeAt(0).toString(16).toUpperCase()}`).join(" ");
+    return `<span class="bidi" title="${run.length > 8 ? `${run.length} bidi controls` : cps}">${run}</span>`;
+  });
 }
+
+/** Bidi markers per rendered line (see markBidi). */
+export const MAX_BIDI_MARKS = 32;
+/** Rows and columns the HEAD peek shows at most (it is not virtualized). */
+const PEEK_ROWS = 500;
+const PEEK_COLS = 4000;
 
 /** New scrollLeft that brings 0-based column `col` into view, or `scrollLeft` when it already is. */
 export function revealCol(scrollLeft: number, clientWidth: number, gutterW: number, charW: number, col: number): number {
@@ -519,8 +534,14 @@ export class CodeView {
       removed.length && addedN ? `Changed: ${removed.length} line${removed.length === 1 ? "" : "s"} in HEAD → ${addedN} now` :
       removed.length ? `Deleted: ${removed.length} line${removed.length === 1 ? "" : "s"} from HEAD` :
       `Added: ${addedN} new line${addedN === 1 ? "" : "s"}`;
+    // Not virtualized: at most PEEK_ROWS rows of PEEK_COLS columns (a whole 8 MB file of changed
+    // lines built 1.6 million rows synchronously and exhausted memory).
+    const shown = removed.slice(0, PEEK_ROWS);
+    const more = removed.length - shown.length;
     const body = removed.length
-      ? `<div class="peek-code">${removed.map((l, i) => `<div class="peek-line"><span class="peek-n">${hk.a0 + i + 1}</span><span class="peek-t">${markBidi(esc(l)) || " "}</span></div>`).join("")}</div>`
+      ? `<div class="peek-code">${shown.map((l, i) => `<div class="peek-line"><span class="peek-n">${hk.a0 + i + 1}</span><span class="peek-t">${markBidi(esc(l.slice(0, PEEK_COLS))) || " "}</span></div>`).join("")}` +
+        (more > 0 ? `<div class="peek-line"><span class="peek-n"></span><span class="peek-t trunc">… ${more.toLocaleString()} more lines</span></div>` : "") +
+        `</div>`
       : "";
     const box = h("div", { class: "peek", role: "dialog", "aria-label": title },
       h("div", { class: "peek-head" }, h("span", { class: "peek-badge" }, "HEAD"), h("span", null, title),
@@ -651,9 +672,10 @@ export class CodeView {
     }
     let out = "";
     let s = 0;
+    const bidi = { left: MAX_BIDI_MARKS };
     for (let p = 1; p <= n; p++) {
       if (p === n || cls[p] !== cls[s] || (mark && mark[p] !== mark[s])) {
-        const seg = markBidi(esc(text.slice(s, p)));
+        const seg = markBidi(esc(text.slice(s, p)), bidi);
         const t = cls[s] ? TOKS[cls[s]! - 1] : "";
         const m = mark?.[s];
         let piece = t ? `<span class="t-${t}">${seg}</span>` : seg;

@@ -1,3 +1,5 @@
+import { imageRefusal } from "./imagecheck.ts";
+
 export interface Entry {
   name: string;
   type: "dir" | "file" | "link-broken";
@@ -163,8 +165,9 @@ export const api = {
   },
   /** Changed files vs HEAD or vs the base branch (see src/server/git.ts Changes). */
   gitChanges: async (scope: "head" | "branch"): Promise<ChangesData> => (await check(await fetch(`/api/git/changes?scope=${scope}`))).json(),
-  gitBlame: async (path: string, line: number) => {
-    const r = await fetch(`/api/git/blame?path=${q(path)}&line=${line}`);
+  gitBlame: async (path: string, line: number, signal?: AbortSignal) => {
+    const r = await fetch(`/api/git/blame?path=${q(path)}&line=${line}`, { signal }).catch(() => null);
+    if (!r) return null; // aborted (the cursor moved on) or offline
     return r.ok
       ? ((await r.json()) as { hash: string; author: string; time: number; summary: string; you: boolean; uncommitted: boolean })
       : null;
@@ -187,6 +190,9 @@ export const api = {
    */
   rawBlobUrl: async (path: string, max?: number): Promise<string> => {
     const blob = await (await check(await fetch(`/api/raw?path=${q(path)}${max ? `&max=${max}` : ""}`))).blob();
+    // Decompression and <use> bombs are refused before the browser decodes anything.
+    const refusal = imageRefusal(new Uint8Array(await blob.arrayBuffer()), blob.type);
+    if (refusal) throw new Error(refusal);
     // An SVG is a document: opened from a blob: URL ("Open image in new tab") its script runs in
     // this page's origin. A data: URL draws the same, and a data: document has an opaque origin.
     // The Mac window cancels blob: navigations already, and its content rules admit only blob:.

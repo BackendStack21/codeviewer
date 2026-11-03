@@ -22,12 +22,19 @@ test("searchPaths: same top results as a full sort, narrowing on longer queries,
   const files = Array.from({ length: 200_000 }, (_, i) => `src/pkg${i % 997}/module_${i}/file${i}.ts`);
   files.push("src/server/index.ts", "src/client/term/terminal.ts");
   const lower = files.map((p) => p.toLowerCase());
-  let t = performance.now();
-  const a = searchPaths("ser", files, lower, null);
-  const first = performance.now() - t;
-  t = performance.now();
-  const b = searchPaths("serind", files, lower, a.hits);
-  const narrowed = performance.now() - t;
+  // Best of five for each: one run apiece compared two noisy samples (it failed 1 run in 3 here).
+  const best = <T,>(f: () => T): [T, number] => {
+    let out!: T;
+    let ms = Infinity;
+    for (let r = 0; r < 5; r++) {
+      const t = performance.now();
+      out = f();
+      ms = Math.min(ms, performance.now() - t);
+    }
+    return [out, ms];
+  };
+  const [a, first] = best(() => searchPaths("ser", files, lower, null));
+  const [b, narrowed] = best(() => searchPaths("serind", files, lower, a.hits));
   expect(b.best[0]!.p).toBe("src/server/index.ts");
   expect(narrowed).toBeLessThan(first);
   expect(first).toBeLessThan(150 * BUDGET);

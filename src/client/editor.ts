@@ -593,10 +593,17 @@ export class Editor {
     if (tab === this.active) this.status();
   }
 
+  private blameAbort: AbortController | null = null;
+
   private async loadBlame(tab: Tab, code: CodeView, line: number) {
     const g = this.git?.repo ? this.git.file(tab.path) : null;
     if (!this.git?.repo || line < 0 || g?.letter === "U" || g?.letter === "I" || g?.letter === "A") return;
-    const b = await api.gitBlame(tab.path, line + 1);
+    // One blame at a time: the previous request is aborted, which kills its git process (a git
+    // blame on a deep history takes seconds, and every cursor move used to start another).
+    this.blameAbort?.abort();
+    const ac = (this.blameAbort = new AbortController());
+    const b = await api.gitBlame(tab.path, line + 1, ac.signal);
+    if (this.blameAbort === ac) this.blameAbort = null;
     if (!b || tab.code !== code || code.activeLine !== line) return;
     const who = b.you ? "You" : esc(showHidden(b.author));
     const html = b.uncommitted ? "You · uncommitted change" : `${who}, ${relativeTime(b.time)} · ${esc(showHidden(b.summary))}`;
@@ -823,10 +830,10 @@ class ImageView {
   private failed = false;
 
   /** The window cannot decode the file (damaged, or TIFF/HEIC outside WebKit): show its bytes. */
-  private async undecodable() {
+  private async undecodable(reason?: string) {
     if (this.failed) return;
     this.failed = true;
-    const note = h("div", { class: "notice error" }, "This image could not be displayed: the file is damaged, or this window cannot decode its format. Its first bytes:");
+    const note = h("div", { class: "notice error" }, `${reason ?? "This image could not be displayed: the file is damaged, or this window cannot decode its format."} Its first bytes:`);
     this.el.replaceChildren(note, await binaryView(this.path, this.size));
   }
 
@@ -839,7 +846,7 @@ class ImageView {
         this.blobUrl = u;
         this.img.src = u;
       },
-      () => void this.undecodable(),
+      (e: unknown) => void this.undecodable(e instanceof Error && /too large|too many times/.test(e.message) ? e.message : undefined),
     );
   }
 

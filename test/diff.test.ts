@@ -68,3 +68,14 @@ describe("line diff", () => {
     expect(apply(a, b, h)).toEqual(b);
   });
 });
+
+test("a huge rewritten middle is one replaced hunk, quickly", async () => {
+  const { diffLines, MAX_DIFF_LINES } = await import("../src/client/diff.ts");
+  const n = MAX_DIFF_LINES;
+  const a = Array.from({ length: n }, (_, i) => `old line ${i}`);
+  const b = Array.from({ length: n }, (_, i) => `new line ${i}`);
+  a.unshift("same"); b.unshift("same");
+  const t0 = performance.now();
+  expect(diffLines(a, b)).toEqual([{ a0: 1, a1: n + 1, b0: 1, b1: n + 1 }]);
+  expect(performance.now() - t0).toBeLessThan(500);
+});

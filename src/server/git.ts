@@ -256,10 +256,10 @@ export class Git {
     return env;
   }
 
-  private async git(args: string[], maxBytes = MAX_OUT) {
+  private async git(args: string[], maxBytes = MAX_OUT, signal?: AbortSignal) {
     const env = await this.neutralize();
     if (!env) return { code: 1, out: new Uint8Array(0), truncated: false };
-    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, env);
+    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, env, signal);
   }
 
   /**
@@ -596,12 +596,12 @@ export class Git {
     } catch {}
   }
 
-  async blame(rel: string, line: number): Promise<BlameLine | null> {
+  async blame(rel: string, line: number, signal?: AbortSignal): Promise<BlameLine | null> {
     this.fresh();
     // --no-ignore-revs-file: blame.ignoreRevsFile from a hostile config (a missing file fails every
     // blame, /dev/zero reads forever). `-c blame.ignoreRevsFile=` does not reset it: the empty value
     // sorts first among the configured ones. A repository's real ignore list is not applied either.
-    const r = await this.git(["blame", "--porcelain", "--no-textconv", "--no-ignore-revs-file", "-L", `${line},${line}`, "--", rel], 1 << 20);
+    const r = await this.git(["blame", "--porcelain", "--no-textconv", "--no-ignore-revs-file", "-L", `${line},${line}`, "--", rel], 1 << 20, signal);
     if (r.code !== 0) return null;
     const out = new TextDecoder().decode(r.out).split("\n");
     const hash = out[0]?.split(" ")[0] ?? "";
@@ -797,7 +797,8 @@ function field(rec: string, n: number): string {
   return rec.slice(idx);
 }
 
-async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT, env: Record<string, string | undefined> = ENV) {
+async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT, env: Record<string, string | undefined> = ENV, signal?: AbortSignal) {
+  if (signal?.aborted) return { code: 1, out: new Uint8Array(0), truncated: false };
   let p: ReturnType<typeof Bun.spawn>;
   try {
     p = Bun.spawn([bin, ...args], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
@@ -813,6 +814,9 @@ async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT,
     truncated = true;
     p.kill();
   }, RUN_TIMEOUT_MS);
+  // The request that wanted this answer is gone (the cursor moved on): stop the process now.
+  const onAbort = () => p.kill();
+  signal?.addEventListener("abort", onAbort, { once: true });
   const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
   for (let r = await reader.read(); !r.done; r = await reader.read()) {
     if (size + r.value.length > maxBytes) {
@@ -825,6 +829,7 @@ async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT,
   }
   const code = await p.exited;
   clearTimeout(timer);
+  signal?.removeEventListener("abort", onAbort);
   const out = new Uint8Array(size);
   let o = 0;
   for (const c of chunks) {

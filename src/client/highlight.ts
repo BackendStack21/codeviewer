@@ -459,7 +459,9 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
       }
     }
     if (L.dollarVars && c === 36 /* $ */) {
-      const m = /\$(?:\{[^}]*\}|\(|[\w@#?*!$-]+)/y;
+      // `${…}` stops at the next "{" and after 256 characters: scanning to the line's end for
+      // every unclosed `${` was quadratic.
+      const m = /\$(?:\{[^{}]{0,256}\}|\(|[\w@#?*!$-]+)/y;
       m.lastIndex = i;
       const r = m.exec(text);
       if (r) {
@@ -519,6 +521,9 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
   return 0;
 }
 
+/** Longest JS regex literal recognised as one (longer ones lex as operators and text). */
+const MAX_REGEX_LITERAL = 512;
+
 const REGEX_AFTER_WORD = new Set(["return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "yield", "await", "instanceof"]);
 
 /**
@@ -543,7 +548,9 @@ function regexLiteralEnd(text: string, i: number): number {
     if (!word || !REGEX_AFTER_WORD.has(word)) return 0; // division: a / b, x) / 2, arr[i] / n
   }
   let inClass = false;
-  for (let j = i + 1; j < text.length; j++) {
+  // A regex literal ends within a few hundred characters; scanning to the end of the line for
+  // every unterminated "/" was quadratic.
+  for (let j = i + 1, stop = Math.min(text.length, i + 1 + MAX_REGEX_LITERAL); j < stop; j++) {
     const ch = text[j];
     if (ch === "\\") j++;
     else if (ch === "[") inClass = true;
@@ -678,6 +685,15 @@ function lexMarkdown(text: string, state: number, out: Span[]): number {
  * Per-document highlighter: caches the lexer state at each line start and lazily
  * advances it, so the cost of highlighting line N is paid once.
  */
+/**
+ * Columns of a line that are lexed: views colour at most 1000 (codeview HIGHLIGHT_COLS) or 4000,
+ * and some scans are quadratic in the line (an unterminated regex per "/", `${`, `[`): lexing a
+ * 10 000-character line in full took seconds for 100 crafted lines. A construct that opens past
+ * this column (a block comment in a minified line) does not carry to the next line.
+ */
+export const LEX_COLS = 2000;
+const lexed = (text: string) => (text.length > LEX_COLS ? text.slice(0, LEX_COLS) : text);
+
 export class Highlighter {
   private states: Int32Array;
   private known = 1; // states[0..known) are valid
@@ -698,7 +714,7 @@ export class Highlighter {
       const scratch: Span[] = [];
       for (let i = this.known - 1; i < idx; i++) {
         scratch.length = 0;
-        this.states[i + 1] = lines[i]!.length > 10_000 ? 0 : lexLine(this.lang, lines[i]!, this.states[i]!, scratch);
+        this.states[i + 1] = lines[i]!.length > 10_000 ? 0 : lexLine(this.lang, lexed(lines[i]!), this.states[i]!, scratch);
       }
       this.known = idx + 1;
     }
@@ -706,7 +722,7 @@ export class Highlighter {
     out.length = 0;
     const text = lines[idx]!;
     if (text.length > 10_000) return [];
-    lexLine(this.lang, text, this.states[idx]!, out);
+    lexLine(this.lang, lexed(text), this.states[idx]!, out);
     return out.slice().sort((a, b) => a[0] - b[0]);
   }
 }

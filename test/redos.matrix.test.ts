@@ -37,6 +37,15 @@ function inputs(n: number): string[] {
     "  ".repeat(n / 2) + "x",
     "[".repeat(n),
     "![a](".repeat(n / 5),
+    // Multi-character openers that start a scan for their closer (DESIGN.md §24, third pass).
+    "(/[".repeat(n / 3),
+    "${".repeat(n / 2),
+    "$(".repeat(n / 2),
+    "[(".repeat(n / 2),
+    "<!--".repeat(n / 4),
+    "/*".repeat(n / 2),
+    "'\"`".repeat(n / 3),
+    "x = /".repeat(n / 5),
   );
   return out.map((s) => s.slice(0, n));
 }

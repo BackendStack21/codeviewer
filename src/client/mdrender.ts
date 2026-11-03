@@ -1,4 +1,4 @@
-import { languageFor, lexLine, type Span } from "./highlight.ts";
+import { languageFor, lexLine, type Span, LEX_COLS } from "./highlight.ts";
 import { showHiddenText } from "./util.ts";
 import { classifyImage, MAX_IMAGES } from "./mdimage.ts";
 import {
@@ -39,7 +39,7 @@ function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
     const line = lines[i]!;
     if (i) code.append("\n");
     spans.length = 0;
-    state = line.length > 10_000 ? 0 : lexLine(id, line, state, spans);
+    state = line.length > 10_000 ? 0 : lexLine(id, line.length > LEX_COLS ? line.slice(0, LEX_COLS) : line, state, spans);
     let at = 0;
     for (const [s, e, t] of spans) {
       if (s < at || e <= s) continue;

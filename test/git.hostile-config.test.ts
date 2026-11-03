@@ -182,3 +182,13 @@ const g = await Git.open(${JSON.stringify(plain)}); console.log(g ? "repo" : "no
   const p = Bun.spawnSync(["bun", "-e", script], { env: { ...process.env, GIT_DIR: path.join(other, ".git"), GIT_WORK_TREE: plain } });
   expect(p.stdout.toString().trim()).toBe("none");
 });
+
+test("an aborted blame stops at once (its git process is killed)", async () => {
+  const g = (await Git.open(repo))!;
+  const ac = new AbortController();
+  ac.abort();
+  const t0 = performance.now();
+  expect(await g.blame("a.txt", 1, ac.signal)).toBeNull();
+  expect(performance.now() - t0).toBeLessThan(1000);
+  g.stop();
+});
