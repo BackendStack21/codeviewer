@@ -41,7 +41,8 @@ never press Enter.
 
 The in-app updater downloads only from GitHub over https, caps the sizes it will read, requires a
 valid Ed25519 signature on `SHA256SUMS` from `packaging/update-key.pub`, verifies the file's SHA-256
-and swaps the installation atomically. Prerelease versions are never offered.
+and swaps the installation atomically. The checksum is taken from the file as written, so a short
+write (a full disk) fails it. Prerelease versions (a `-` in the tag) are never offered.
 
 ## Markdown preview
 

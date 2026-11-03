@@ -224,7 +224,8 @@ export class Updater {
     const version = (rel.tag_name ?? "").replace(/^v/, "");
     // The whole tag is checked, not a prefix: the version becomes part of a file name in the
     // staging directory, so "1.2.3/../../x" must never get that far.
-    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) || rel.draft || rel.prerelease) {
+    // Pre-releases are never offered (SECURITY.md), even when the release isn't flagged as one.
+    if (!/^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/.test(version) || rel.draft || rel.prerelease) {
       this.cached = { info: base, release: null };
       return base;
     }
@@ -299,6 +300,7 @@ export class Updater {
 
       // 2. Download into a staging dir next to the target (same file system → atomic rename).
       const stage = await mkdtemp(path.join(path.dirname(inst.target), ".codeviewer-update-"));
+      let keepStage = false;
       try {
         const file = path.join(stage, name);
         const actual = await this.download(release.assets[name]!, file, (pct) => progress("download", `${pct}%`));
@@ -319,8 +321,15 @@ export class Updater {
         progress("done", release.version);
         this.cached = null;
         return { version: release.version, kind: inst.kind, target: inst.target };
+      } catch (e) {
+        // The old install could not be put back: it lives in the staging dir now, so keep it.
+        if (e instanceof RestoreFailed) {
+          keepStage = true;
+          throw new Error(`${e.message}; the previous version is in ${stage}`);
+        }
+        throw e;
       } finally {
-        await rm(stage, { recursive: true, force: true }).catch(() => {});
+        if (!keepStage) await rm(stage, { recursive: true, force: true }).catch(() => {});
       }
     } finally {
       this.busy = false;
@@ -333,7 +342,6 @@ export class Updater {
     if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
     const total = Number(res.headers.get("content-length")) || 0;
     if (total > MAX_ASSET_BYTES) throw new Error("release asset is too large");
-    const hash = new Bun.CryptoHasher("sha256");
     const sink = Bun.file(dest).writer();
     let got = 0;
     let last = -1;
@@ -344,8 +352,8 @@ export class Updater {
         await reader.cancel().catch(() => {});
         throw new Error("release asset is too large");
       }
-      hash.update(r.value);
-      sink.write(r.value);
+      // Awaited: a failed write (disk full) rejects here instead of going unnoticed.
+      await sink.write(r.value);
       const p = total ? Math.floor((got / total) * 100) : 0;
       if (p !== last) {
         last = p;
@@ -353,6 +361,14 @@ export class Updater {
       }
     }
     await sink.end();
+    // Hash what is on disk, not what arrived: a short write must fail the checksum.
+    const hash = new Bun.CryptoHasher("sha256");
+    let onDisk = 0;
+    for await (const chunk of Bun.file(dest).stream()) {
+      onDisk += chunk.length;
+      hash.update(chunk);
+    }
+    if (onDisk !== got) throw new Error(`download was not written completely (${onDisk} of ${got} bytes)`);
     return hash.digest("hex");
   }
 }
@@ -400,7 +416,14 @@ async function swap(target: string, staged: string, stage: string) {
   try {
     await rename(staged, target);
   } catch (e) {
-    await rename(old, target).catch(() => {});
+    try {
+      await rename(old, target);
+    } catch {
+      throw new RestoreFailed(`installing failed (${(e as Error).message}) and the previous version could not be restored`);
+    }
     throw e;
   }
 }
+
+/** swap() could not put the old install back: the staging dir holds the only copy. */
+class RestoreFailed extends Error {}

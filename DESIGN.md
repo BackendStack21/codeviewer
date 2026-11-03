@@ -985,3 +985,15 @@ each finding below was reproduced before it was fixed.
 | Replay after the ring trimmed restored the modes from before the first chunk and skipped its head, so a TUI that exited in those bytes came back as alt screen + mouse + paste over a shell prompt. The server's tracker also missed sequences split after 24 bytes, C1 CSI (`C2 9B`) and `:` sub-parameters, all of which the client honours. | `applyModes`/`modesPrefix`: the skipped head is applied to the prefix; the carry runs from the last escape (256 bytes at most); C1 and `:` are parsed (the "latin1" decoder is windows-1252, where 9B is U+203A); a hidden cursor is restored too. |
 | Deleting the viewed folder exited the server: `Bun.spawn` throws on a missing cwd, and the status refresh timer's rejection was unhandled (exit 1). It was also the "flaky" PTY replay test: an earlier test's refresh fired after its folder was removed. | `run()` reports a failed spawn as a failed git call; the refresh timer catches. |
 | Not changed: OSC 52 from `cat` (the notice stays the safeguard); C0 controls inside a CSI are not seen by the server's tracker; an invalid range (`bytes=5-3`) stays 416 (pinned by a test, allowed by RFC 9110); search previews collapse a tab to one space (`nowrap`); palette highlights drift when lowercasing changes a string's length (`İ`); bidi overrides in rendered Markdown prose; in-file Find runs the user's own regex on the main thread; `--host localhost` in the Chromium app window (the resolver rules map every host name) was not checked. | — |
+
+### Second adversarial pass
+
+| Finding | Fix |
+| --- | --- |
+| Updater: `FileSink.write` was not awaited and the hash covered the bytes received, not the bytes written. On a full disk (a 256 KB tmpfs) a truncated CLI binary passed the checksum and replaced the real one. | Writes are awaited, and the checksum is taken from the file on disk, whose size must match. Reproduced before and after: now ENOSPC fails the update and the old binary stays. |
+| A tag such as `v2.0.0-rc.1` published without the prerelease flag would have been offered to everyone, contradicting SECURITY.md. | Versions with a pre-release part are never offered. |
+| If the new install could not be moved in and the old one not moved back, the staging dir (holding the only copy) was deleted. | It is kept, and the error names it. |
+| Relaunch after an update dropped `--host` and `--shell`. | Forwarded (`--port` is not: the old process still holds it). |
+| Release signing ran in a job whose third-party actions were pinned by mutable tags, and checkout left the job token in `.git/config` for the build. | Actions pinned to the commits their tags named (checkout v5.1.0, setup-bun v2.2.0, attest-build-provenance v4.2.2); `persist-credentials: false`. |
+| Not changed: signing still shares the build job (moving it to its own job is a workflow redesign); `codesign --verify` without a requirement only proves a consistent signature (releases are ad hoc signed); a Linux update drops a setuid `chrome-sandbox`; redirects of signed downloads are not host-checked (the signature covers them). | — |
+

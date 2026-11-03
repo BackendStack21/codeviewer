@@ -49,7 +49,8 @@ async function main() {
   let dir: string | null = null;
   let port = 0;
   let host = "127.0.0.1";
-  let shell = process.env.SHELL || (existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash");
+  const defaultShell = process.env.SHELL || (existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash");
+  let shell = defaultShell;
   let open = true;
   let appWindow = true;
   let machine = false;
@@ -103,7 +104,9 @@ async function main() {
   const relaunch = {
     available: () => windowed,
     run() {
-      Bun.spawn([process.execPath, root], { stdio: ["ignore", "ignore", "ignore"], detached: true } as Parameters<typeof Bun.spawn>[1]).unref();
+      // The same interface and shell as this run (not --port: this process still holds it).
+      const keep = [...(host !== "127.0.0.1" ? ["--host", host] : []), ...(shell !== defaultShell ? ["--shell", shell] : [])];
+      Bun.spawn([process.execPath, root, ...keep], { stdio: ["ignore", "ignore", "ignore"], detached: true } as Parameters<typeof Bun.spawn>[1]).unref();
       closeAppWindow();
       quit();
     },
