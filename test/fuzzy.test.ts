@@ -27,6 +27,7 @@ test("searchPaths: same top results as a full sort, narrowing on longer queries,
     let out!: T;
     let ms = Infinity;
     for (let r = 0; r < 5; r++) {
+      Bun.gc(true);
       const t = performance.now();
       out = f();
       ms = Math.min(ms, performance.now() - t);

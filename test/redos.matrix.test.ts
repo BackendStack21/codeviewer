@@ -50,9 +50,10 @@ function inputs(n: number): string[] {
   return out.map((s) => s.slice(0, n));
 }
 
-const best = (f: () => void, reps = 3) => {
+const best = (f: () => void, reps = 3, gc = false) => {
   let t = Infinity;
   for (let r = 0; r < reps; r++) {
+    if (gc) Bun.gc(true); // the timed phase only: garbage from other tests must not land in a sample
     const t0 = performance.now();
     f();
     t = Math.min(t, performance.now() - t0);
@@ -70,8 +71,8 @@ function expectLinear(cases: { name: string; run: (input: string) => void }[], s
   const b = inputs(n * 8);
   const slow: string[] = [];
   for (const c of timed.slice(0, top)) {
-    const ta = best(() => c.run(a[c.i]!));
-    const tb = best(() => c.run(b[c.i]!));
+    const ta = best(() => c.run(a[c.i]!), 3, true);
+    const tb = best(() => c.run(b[c.i]!), 3, true);
     if (tb > 15 && tb / Math.max(ta, 0.05) > 24) slow.push(`${c.name} input #${c.i} ${JSON.stringify(b[c.i]!.slice(0, 12))}…: ${ta.toFixed(1)} ms → ${tb.toFixed(1)} ms`);
     // Whatever the growth, a single line must never take seconds.
     if (tb > 1000) slow.push(`${c.name} input #${c.i}: ${tb.toFixed(0)} ms at ${n * 8} chars`);
