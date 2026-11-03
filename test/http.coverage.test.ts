@@ -510,30 +510,38 @@ test("/api/raw honours a single byte range (206/416) so media can seek, also und
   expect((await get("/api/info")).status).toBe(200);
 });
 
-test("/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks", async () => {
-  // Repeated: Bun can lose the error and leave the connection open, about one run in four.
+for (const mb of [2, 2, 2, 8, 32, 256]) test(`/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks ${mb}`, async () => {
+  // Repeated: Bun can lose the error and leave the connection open, about one run in four. The file
+  // is large (and sparse) so that the transfer is still running when it shrinks.
+  const size = mb * 1024 * 1024;
+  const outcomes: string[] = [];
   for (let i = 0; i < 25; i++) {
     const p = path.join(dir, "shrink.bin");
-    await writeFile(p, new Uint8Array(2 * 1024 * 1024));
+    await writeFile(p, "");
+    await truncate(p, size);
     const r = await get("/api/raw?path=shrink.bin");
     expect(r.status).toBe(200);
     const reader = r.body!.getReader();
     const first = await reader.read();
     expect(first.done).toBe(false);
+    let bytes = first.value!.length;
     await truncate(p, 10);
-    // The transfer fails (the stream is errored): never a quiet success with a truncated body, never a hang.
     const drain = async () => {
       try {
-        for (let c = await reader.read(); !c.done; c = await reader.read());
-        return "clean end";
+        for (let c = await reader.read(); !c.done; c = await reader.read()) bytes += c.value.length;
+        return bytes === size ? "complete" : `short by ${size - bytes}`;
       } catch {
         return "failed";
       }
     };
-    expect(await Promise.race([drain(), Bun.sleep(1500).then(() => "hang")])).toBe("failed");
+    outcomes.push(await Promise.race([drain(), Bun.sleep(1500).then(() => "hang")]));
   }
+  console.log("SHRINK", mb, JSON.stringify(outcomes.reduce<Record<string, number>>((m, o) => ((m[o] = (m[o] ?? 0) + 1), m), {})));
+  // Never a hang and never a quiet success with a truncated body. "complete" means every byte had
+  // already been sent before the file shrank, which is a correct transfer.
+  expect(outcomes.filter((o) => o !== "failed" && o !== "complete")).toEqual([]);
   expect((await get("/api/info")).status).toBe(200);
-}, 30_000);
+}, 45_000);
 
 test("round 15: no Bun error page, own-key MIME lookups, whole-byte limits, files-only open", async () => {
   // A Host header that makes the URL unparseable: a JSON 400/421, never an HTML page with paths.
