@@ -602,7 +602,8 @@ export class Git {
     this.timer = setTimeout(async () => {
       this.timer = null;
       const t0 = performance.now();
-      const s = await this.status();
+      const s = await this.status().catch(() => null);
+      if (!s) return;
       this.lastMs = performance.now() - t0;
       if (this.again) {
         this.again = false;
@@ -670,7 +671,14 @@ function field(rec: string, n: number): string {
 }
 
 async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT, env: Record<string, string | undefined> = ENV) {
-  const p = Bun.spawn([bin, ...args], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  let p: ReturnType<typeof Bun.spawn>;
+  try {
+    p = Bun.spawn([bin, ...args], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  } catch {
+    // The viewed folder was deleted (spawn fails on a missing cwd), or git was removed: a failed
+    // run, never a throw (from a status refresh timer it was an unhandled rejection: exit 1).
+    return { code: 1, out: new Uint8Array(0), truncated: false };
+  }
   const chunks: Uint8Array[] = [];
   let size = 0;
   let truncated = false;

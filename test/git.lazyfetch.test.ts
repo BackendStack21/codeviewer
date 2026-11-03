@@ -80,3 +80,16 @@ test("a hostile blame.ignoreRevsFile neither breaks nor hangs blame", async () =
   }
   Bun.spawnSync(["git", "config", "--unset", "blame.ignoreRevsFile"], { cwd: src });
 });
+
+test("git calls fail cleanly (no throw) once the viewed folder is deleted", async () => {
+  const gone = path.join(dir, "gone");
+  await mkdir(gone);
+  sh(["init", "-q"], gone);
+  const g = (await Git.open(gone))!;
+  await rm(gone, { recursive: true, force: true });
+  // Bun.spawn throws on a missing cwd; from the status refresh timer that exited the server.
+  const s = await g.status();
+  expect(s.repo).toBe(true);
+  expect(await g.blame("f", 1)).toBeNull();
+  g.stop();
+});

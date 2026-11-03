@@ -17,7 +17,43 @@ const REPAINT_NUDGE_MS = 150;
 
 /** Private modes that change how input/output must be interpreted; restored on replay. */
 const TRACKED = [1, 25, 1000, 1002, 1003, 1004, 1006, 2004, 47, 1047, 1049];
-const MODE_RE = /\x1b\[\?([\d;]+)([hl])/g;
+const LATIN1 = new TextDecoder("latin1");
+/**
+ * DECSET/DECRST: 7-bit CSI, or C1 CSI as UTF-8 (C2 9B: the terminal decodes UTF-8 first, so a bare 9B byte is a continuation byte, not CSI); `;` or `:` separated.
+ * The text is decoded as "latin1", which WHATWG maps to windows-1252: byte 9B reads as U+203A.
+ */
+const MODE_RE = /(?:\x1b\[|\xc2\u203a)\?([\d;:]+)([hl])/g;
+/** An unfinished sequence carried into the next chunk is at most this long (one with many modes is fine). */
+const MAX_CARRY = 256;
+
+/** Applies every tracked DECSET/DECRST in `text` to `modes`; true when something changed. */
+export function applyModes(modes: Map<number, boolean>, text: string): boolean {
+  let changed = false;
+  MODE_RE.lastIndex = 0;
+  for (let m; (m = MODE_RE.exec(text)); ) {
+    for (const part of m[1]!.split(";")) {
+      const n = Number(part.split(":")[0]);
+      if (!TRACKED.includes(n)) continue;
+      const on = m[2] === "h";
+      if (n === 47 || n === 1047 || n === 1049) {
+        for (const k of [47, 1047, 1049]) if (k !== n && modes.delete(k)) changed = true;
+      }
+      if (modes.get(n) !== on) changed = true;
+      modes.set(n, on);
+    }
+  }
+  return changed;
+}
+
+/** The prefix that restores `modes` on a fresh terminal (a hidden cursor is the one "off" that differs from the default). */
+export function modesPrefix(modes: Map<number, boolean>): string {
+  let str = "";
+  for (const [n, on] of modes) {
+    if (on) str += `\x1b[?${n}h`;
+    else if (n === 25) str += "\x1b[?25l";
+  }
+  return str;
+}
 
 export interface PtyOptions {
   shell: string;
@@ -116,30 +152,15 @@ class PtySession {
     else this.flushTimer ??= setTimeout(() => this.flush(), FLUSH_MS);
   }
 
-  /** Remembers DECSET/DECRST of tracked modes (sequences may straddle chunks). */
+  /**
+   * Remembers DECSET/DECRST of tracked modes. A sequence may straddle chunks: the tail from the last
+   * escape is carried into the next one (re-applying a complete one there is harmless: same order).
+   */
   private trackModes(data: Uint8Array) {
-    const text = this.carry + new TextDecoder("latin1").decode(data);
-    this.carry = text.slice(-24);
-    let changed = false;
-    MODE_RE.lastIndex = 0;
-    for (let m; (m = MODE_RE.exec(text)); ) {
-      for (const n of m[1]!.split(";").map(Number)) {
-        if (!TRACKED.includes(n)) continue;
-        const on = m[2] === "h";
-        if (n === 47 || n === 1047 || n === 1049) {
-          this.modes.delete(47);
-          this.modes.delete(1047);
-          this.modes.delete(1049);
-        }
-        if (this.modes.get(n) !== on) changed = true;
-        this.modes.set(n, on);
-      }
-    }
-    if (changed) {
-      let str = "";
-      for (const [n, on] of this.modes) if (on) str += `\x1b[?${n}h`;
-      this.modesStr = str;
-    }
+    const text = this.carry + LATIN1.decode(data);
+    const esc = Math.max(text.lastIndexOf("\x1b"), text.lastIndexOf("\xc2"));
+    this.carry = esc >= 0 && text.length - esc <= MAX_CARRY ? text.slice(esc) : "";
+    if (applyModes(this.modes, text)) this.modesStr = modesPrefix(this.modes);
   }
 
   private flush() {
@@ -191,12 +212,19 @@ class PtySession {
     if (!this.chunks.length) return;
     const first = this.chunks[0]!;
     let head = first.data;
+    let prefix = first.modes;
     if (this.ringTrimmed) {
       // History was trimmed: the first chunk may start mid-escape or mid-UTF-8.
       const nl = head.indexOf(0x0a);
-      if (nl >= 0) head = head.subarray(nl + 1);
+      if (nl >= 0) {
+        // The skipped bytes may change modes (a TUI exiting): the prefix must include them.
+        const modes = new Map<number, boolean>();
+        applyModes(modes, first.modes);
+        if (applyModes(modes, LATIN1.decode(head.subarray(0, nl + 1)))) prefix = modesPrefix(modes);
+        head = head.subarray(nl + 1);
+      }
     }
-    const parts = [new TextEncoder().encode(first.modes), head, ...this.chunks.slice(1).map((c) => c.data)];
+    const parts = [new TextEncoder().encode(prefix), head, ...this.chunks.slice(1).map((c) => c.data)];
     ws.send(JSON.stringify({ t: "replay" }));
     ws.sendBinary(new Uint8Array(Bun.concatArrayBuffers(parts)));
   }
