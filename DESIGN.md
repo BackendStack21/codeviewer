@@ -939,3 +939,24 @@ on-screen `WKWebView` set up like the Mac window reproduced it, and a second the
 | `.icon-btn` has `transition: color`. A transition started by a theme change does not advance while WebKit is not rendering, so after a switch in a hidden or minimized window the page was already in the new theme and the buttons were not (computed `rgb(139, 148, 165)`, the dark colour, on the light title bar at 2.8:1). The omnibox, sash and other transitioned colours are exposed the same way. | `setDocumentTheme` applies a theme under `data-theme-switching`, which turns all transitions off, and forces a layout so the new styles commit before they return. Buttons match on reveal in all four flips tried, in computed colours and in pixels. |
 | In the Mac app "system" never followed macOS. WKWebView's `prefers-color-scheme` follows the window, and the window's appearance was always forced from the page, so "system" read back the page's last choice: light on a Dark Mac after Light, dark on a light Mac from launch. | The theme message carries the mode, and system sets `window.appearance = nil`. The `matchMedia` listener then re-applies the theme with the real value. |
 | Not checked. `takeSnapshot` draws web content only and window capture needs Screen Recording permission, so the native toolbar over the title bar was not captured in the light theme. | None needed so far: the user's screenshot of the dark state matches the snapshot pixels. |
+
+## 24. Round 15: bug and security sweep
+
+A review of the server routes, the git layer, the terminal sockets, the updater and the client's
+rendering of untrusted text.
+
+| Finding | Fix |
+| --- | --- |
+| Security (high). A partial clone (`--filter=blob:none`) fetches missing objects on demand from its promisor remote, and the repository's own config names the program that does it (`remote.origin.uploadpack`, `core.sshCommand`). Rename detection in Changes, blame, File History and `/api/git/base?rev=` all read blobs, so opening such a folder ran a command (reproduced with git 2.43). `protocol.*.allow` in a hostile config wins over a `protocol.allow` override. | `ENV` sets `GIT_ALLOW_PROTOCOL=""`, which git checks before any config, so no transport is allowed, and `GIT_NO_LAZY_FETCH=1` (git 2.44+). `test/git.lazyfetch.test.ts`. |
+| A hostile `blame.ignoreRevsFile` (a missing file, or `/dev/zero`) made every blame fail or run to the 30 s timeout. | `-c blame.ignoreRevsFile=` in `HARDEN` (an empty value resets the list). |
+| `Git.open` rejected a viewed folder whose name starts with `..` (`..cache/`) as outside the work tree. | Only `..`, `../…` or an absolute relative path are outside. |
+| A PTY text frame of valid non-object JSON (`null`) threw in the WebSocket handler, which exits the server. | Non-objects are ignored. |
+| `/ws/pty?cols=80.5` reached the PTY with a fractional size. | Floored, like resize messages. |
+| The updater accepted any tag that merely starts with `X.Y.Z`; the version becomes part of a staging file name (`1.2.3/../../x`). It still needed a signed checksum line, so this is defence in depth. | The whole tag must be a semver version. |
+| The live index listed a newly created symlink to a file outside the root, which a full rebuild never lists. | `FileIndex.apply` checks containment like `build()`. |
+| Trojan Source in the main code view and the HEAD peek: bidi overrides reordered the line as drawn, though round 4 (§13) set visible escapes as the rule. Escapes there would shift every DOM offset that native selection and copy rely on. | `markBidi` wraps each override/isolate in a zero-width inline-block `.bidi`, drawn as a red bar with the code point in its title. An atomic inline reorders nothing around it; the character stays in the DOM, so selection and copy are unchanged. |
+| File names, tab titles, palette rows, blame author/summary and terminal titles put bidi overrides and controls on screen raw (`invoice‮fdp.ts`). | `showHidden` there, as Changes already did. |
+| Every tab in the diff view, search previews and Markdown code showed as the text `\x09`. | `showHiddenText` (HIDDEN minus the tab) for file contents; names keep the strict rule. |
+| `parseTarget` threw on a ⌘-clicked OSC 8 target holding U+2028/U+2029 (`.` does not match them); `codeviewer open` had the same regex. | The `s` flag. |
+| `esc` left `'` alone (no single-quoted attribute uses it today). | Escaped as `&#39;`. |
+| Not changed. OSC 52 from a hidden terminal still writes the clipboard, with the notice (the trade-off chosen in round 3, §11). The search test that expects `a.txt` over its hard link `a-hardlink.txt` depends on readdir order (the same inode is reported once, under whichever name comes first). | — |

@@ -222,7 +222,9 @@ export class Updater {
     if (!res.ok) throw new Error(`update check failed: GitHub answered ${res.status}`);
     const rel = (await res.json()) as { tag_name?: string; html_url?: string; body?: string; draft?: boolean; prerelease?: boolean; assets?: { name: string; browser_download_url: string }[] };
     const version = (rel.tag_name ?? "").replace(/^v/, "");
-    if (!/^\d+\.\d+\.\d+/.test(version) || rel.draft || rel.prerelease) {
+    // The whole tag is checked, not a prefix: the version becomes part of a file name in the
+    // staging directory, so "1.2.3/../../x" must never get that far.
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) || rel.draft || rel.prerelease) {
       this.cached = { info: base, release: null };
       return base;
     }

@@ -28,7 +28,9 @@ files, search or attach to terminals.
 
 Every git call runs with filters, textconv, diff drivers, fsmonitor, signature checks, mailmap and
 submodule recursion off, with driver overrides passed as `GIT_CONFIG_KEY_n`/`VALUE_n`, and never
-writes the index. File History runs `git --literal-pathspecs log --follow` for one file that must
+writes the index. No git call may use a transport (`GIT_ALLOW_PROTOCOL` empty, `GIT_NO_LAZY_FETCH`):
+a partial clone would otherwise fetch missing objects from its promisor remote, running the
+programs the repository's config names for it (`remote.*.uploadpack`, `core.sshCommand`). File History runs `git --literal-pathspecs log --follow` for one file that must
 exist inside the served root, at most 500 commits and 4 MB of output; each side of a commit's diff is
 read with `cat-file` by full object id, never from a revision expression the client chose.
 

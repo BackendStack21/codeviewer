@@ -81,6 +81,8 @@ export class FileIndex {
             changed = true;
           }
         } else if (st && !files.has(p)) {
+          // Like build(): a new symlink to a file outside the root is never listed.
+          if (!(await this.inside(abs))) return;
           files.add(p);
           this.dirs = null;
           changed = true;

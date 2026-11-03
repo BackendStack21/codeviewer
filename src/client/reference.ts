@@ -49,6 +49,7 @@ export function referenceWithCode(path: string, span: Span, lines: readonly stri
 
 /** Splits `path`, `path:12`, `path:12:5` or `path:12-40` into the path and its first line (0 = none). */
 export function parseTarget(t: string): { path: string; line: number } {
-  const m = /^(.*?)(?::(\d+)(?:-\d+)?)?(?::\d+)?$/.exec(t)!;
+  // `s`: a link target from terminal output may hold U+2028/U+2029, which `.` does not match.
+  const m = /^(.*?)(?::(\d+)(?:-\d+)?)?(?::\d+)?$/s.exec(t)!;
   return { path: m[1]!, line: Number(m[2] ?? 0) };
 }

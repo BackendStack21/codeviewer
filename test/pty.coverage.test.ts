@@ -86,6 +86,8 @@ test("resize control messages are clamped and applied; bad messages are ignored"
   m.message(asWs(a), "{not json");
   m.message(asWs(a), JSON.stringify({ t: "resize" })); // missing dims: ignored
   m.message(asWs(a), JSON.stringify({ t: "nonsense" }));
+  // Valid JSON that is not an object must not throw (a throw in a socket handler exits the server).
+  for (const v of ["null", "1", '"resize"', "[]", "true"]) expect(() => m.message(asWs(a), v)).not.toThrow();
   expect(a.data).toMatchObject({ cols: 100, rows: 30 });
   m.message(asWs(a), Buffer.from("stty size\n"));
   await until(() => a.output().includes("30 100"));

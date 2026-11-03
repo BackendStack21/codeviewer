@@ -1,5 +1,5 @@
 import { api, type SearchEvent, type SearchMatch } from "./api.ts";
-import { esc, h, showHidden } from "./util.ts";
+import { esc, h, showHidden, showHiddenText } from "./util.ts";
 
 export type { SearchEvent };
 
@@ -20,6 +20,11 @@ type Opt = "case" | "word" | "regex" | "ignored";
 /** Shows control characters and bidi overrides as visible escapes, then HTML-escapes. */
 function safe(s: string): string {
   return esc(showHidden(s));
+}
+
+/** Like safe(), for a line of file content: tabs stay tabs. */
+function safeText(s: string): string {
+  return esc(showHiddenText(s));
 }
 
 /** An include glob for everything under `dir`: Bun.Glob metacharacters, commas (the list separator) and whitespace (trimmed from list entries) backslash-escaped, so the scope is literal. */
@@ -369,7 +374,7 @@ export class SearchView {
         if (g.collapsed) continue;
         const pv = m.preview;
         const on = i === this.sel;
-        html += `<div class="sv-row${on ? " sel" : ""}" data-i="${i}" id="sv-${i}" role="option" aria-selected="${on}"><span class="sv-ln">${m.line}</span><span class="sv-pv">${safe(pv.slice(0, m.pcol))}<mark>${safe(pv.slice(m.pcol, m.pcol + m.len))}</mark>${safe(pv.slice(m.pcol + m.len))}</span></div>`;
+        html += `<div class="sv-row${on ? " sel" : ""}" data-i="${i}" id="sv-${i}" role="option" aria-selected="${on}"><span class="sv-ln">${m.line}</span><span class="sv-pv">${safeText(pv.slice(0, m.pcol))}<mark>${safeText(pv.slice(m.pcol, m.pcol + m.len))}</mark>${safeText(pv.slice(m.pcol + m.len))}</span></div>`;
       }
     });
     const n = d ? d.matches : total;

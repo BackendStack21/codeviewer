@@ -1,6 +1,6 @@
 import { api } from "./api.ts";
 import { fileIcon, icons } from "./icons.ts";
-import { esc, h } from "./util.ts";
+import { esc, h, showHidden } from "./util.ts";
 
 export interface Command {
   id: string;
@@ -333,9 +333,10 @@ export class Palette {
 }
 
 function highlight(s: string, pos: number[]): string {
-  if (!pos.length) return esc(s);
+  // Names are untrusted: controls and bidi overrides show as escapes (positions index the raw string).
+  if (!pos.length) return esc(showHidden(s));
   const set = new Set(pos);
   let out = "";
-  for (let i = 0; i < s.length; i++) out += set.has(i) ? `<b>${esc(s[i]!)}</b>` : esc(s[i]!);
+  for (let i = 0; i < s.length; i++) out += set.has(i) ? `<b>${esc(showHidden(s[i]!))}</b>` : esc(showHidden(s[i]!));
   return out;
 }

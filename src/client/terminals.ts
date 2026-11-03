@@ -1,7 +1,7 @@
 import { TerminalView } from "./term/view.ts";
 import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
-import { esc, h, local, MOD } from "./util.ts";
+import { esc, h, local, MOD, showHidden } from "./util.ts";
 import { wsUrl } from "./auth.ts";
 
 interface Session {
@@ -265,7 +265,7 @@ export class TerminalPanel {
   private renderTabs() {
     for (const [i, s] of this.sessions.entries()) {
       s.tabEl.className = `term-tab${s === this.active ? " active" : ""}${s.exited ? " exited" : ""}`;
-      s.tabEl.innerHTML = `<span class="term-dot"></span><span class="tab-name">${esc(s.title || `Terminal ${i + 1}`)}</span><button class="tab-close" title="Kill terminal">${icons.close}</button>`;
+      s.tabEl.innerHTML = `<span class="term-dot"></span><span class="tab-name">${esc(showHidden(s.title || `Terminal ${i + 1}`))}</span><button class="tab-close" title="Kill terminal">${icons.close}</button>`;
       s.tabEl.title = s.title;
       s.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();

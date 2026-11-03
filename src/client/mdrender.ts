@@ -1,5 +1,5 @@
 import { languageFor, lexLine, type Span } from "./highlight.ts";
-import { showHidden } from "./util.ts";
+import { showHiddenText } from "./util.ts";
 import { classifyImage, MAX_IMAGES } from "./mdimage.ts";
 import {
   resolveRepoPath,
@@ -29,7 +29,7 @@ function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
     lines.length > MAX_FENCE_LINES ||
     value.length > MAX_FENCE_CHARS
   ) {
-    code.textContent = lines.map(showHidden).join("\n");
+    code.textContent = lines.map((l) => showHiddenText(l)).join("\n");
     b.take(2);
     return pre;
   }
@@ -43,14 +43,14 @@ function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
     let at = 0;
     for (const [s, e, t] of spans) {
       if (s < at || e <= s) continue;
-      if (s > at) code.append(showHidden(line.slice(at, s)));
+      if (s > at) code.append(showHiddenText(line.slice(at, s)));
       const sp = document.createElement("span");
       sp.className = "tok-" + t;
-      sp.textContent = showHidden(line.slice(s, e));
+      sp.textContent = showHiddenText(line.slice(s, e));
       code.append(sp);
       at = e;
     }
-    if (at < line.length) code.append(showHidden(line.slice(at)));
+    if (at < line.length) code.append(showHiddenText(line.slice(at)));
     if (!b.take(spans.length + 1)) break;
   }
   return pre;
@@ -113,7 +113,7 @@ function link(
       } else a = null;
     }
   }
-  if (a && n.title) a.setAttribute("title", showHidden(n.title));
+  if (a && n.title) a.setAttribute("title", showHiddenText(n.title));
   if (a) parent.append(a);
   inline(a ?? parent, n.children, b);
 }
@@ -165,7 +165,7 @@ function inline(parent: HTMLElement, nodes: Inline[], b: Budget) {
       }
       case "codespan": {
         const el = document.createElement("code");
-        el.textContent = showHidden(n.value);
+        el.textContent = showHiddenText(n.value);
         parent.append(el);
         break;
       }

@@ -294,6 +294,8 @@ export class PtyManager {
     } catch {
       return;
     }
+    // `null`, `1`, `"x"` parse fine: reading `.t` off null would throw, and a throw here exits the server.
+    if (!ctl || typeof ctl !== "object") return;
     if (ctl.t === "resize" && ctl.cols && ctl.rows) {
       ws.data.cols = Math.min(1000, Math.max(2, ctl.cols | 0));
       ws.data.rows = Math.min(500, Math.max(1, ctl.rows | 0));

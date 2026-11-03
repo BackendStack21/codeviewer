@@ -122,7 +122,8 @@ test("parseSums accepts binary-mode '*' names and ignores junk lines", () => {
 
 test("check: HTTP errors throw; bad/draft/prerelease tags report no update", async () => {
   await expect((await cli({ status: 503 })).u.check(true)).rejects.toThrow("503");
-  for (const r of [{ tag: "nightly" }, { draft: true }, { prerelease: true }] as Rel[]) {
+  // A tag that only starts like a version (it becomes part of a staging file name) is refused too.
+  for (const r of [{ tag: "nightly" }, { tag: "v9.9.9/../../evil" }, { tag: "v9.9.9 x" }, { draft: true }, { prerelease: true }] as Rel[]) {
     const info = await (await cli(r)).u.check(true);
     expect(info).toMatchObject({ latest: null, available: false, canInstall: false });
   }

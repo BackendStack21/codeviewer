@@ -18,6 +18,10 @@ import { looksBinary, openRegular } from "./files.ts";
  * - fsmonitor off, signature verification off, no textconv, submodules ignored (their
  *   configs are untrusted too), no external diff, no pager, no prompts.
  * - GIT_OPTIONAL_LOCKS=0: never writes the index or takes locks.
+ * - No transport at all (GIT_ALLOW_PROTOCOL empty, GIT_NO_LAZY_FETCH): a partial clone fetches
+ *   missing blobs from its promisor remote on demand, and the remote's config names programs
+ *   (remote.*.uploadpack, core.sshCommand). The environment variable wins over any
+ *   protocol.*.allow a hostile config sets.
  * Every argument is passed as an array (no shell).
  */
 
@@ -113,6 +117,8 @@ const ENV = {
   GIT_TERMINAL_PROMPT: "0",
   GIT_PAGER: "cat",
   LC_ALL: "C",
+  GIT_ALLOW_PROTOCOL: "",
+  GIT_NO_LAZY_FETCH: "1",
 };
 
 const HARDEN = [
@@ -127,6 +133,8 @@ const HARDEN = [
   // A mailmap file is read whole by log/blame: a hostile config can point it at /dev/zero.
   "-c", "mailmap.file=/dev/null",
   "-c", "mailmap.blob=",
+  // Read by blame: a missing file makes every blame fail, /dev/zero makes it read forever.
+  "-c", "blame.ignoreRevsFile=",
   "-c", "log.mailmap=false",
   // Also read whole; `log --follow` ignores `-O`, so the order file is overridden as config too.
   "-c", "diff.orderFile=/dev/null",
@@ -172,7 +180,8 @@ export class Git {
     const [top, gitDir, common, format] = new TextDecoder().decode(r.out).trim().split("\n");
     if (!top || !gitDir) return null;
     const rel = path.relative(top, root);
-    if (rel.startsWith("..")) return null;
+    // Outside the work tree ("..", "../x"); a folder merely named "..x" is inside it.
+    if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return null;
     const prefix = rel ? rel.split(path.sep).join("/") + "/" : "";
     const commonDir = common ? path.resolve(root, common) : gitDir;
     const emptyTree = EMPTY_TREE[format ?? "sha1"] ?? EMPTY_TREE.sha1!;

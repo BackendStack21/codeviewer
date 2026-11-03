@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile, mkdir, realpath, chmod } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, realpath, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { FileIndex, HEAVY_DIRS } from "../src/server/index.ts";
@@ -161,6 +161,23 @@ test("symlinked directories inside the root are walked; links out of the root an
     // A link out of the root is never a reason to rescan.
     expect(await ix.apply(["out"])).toBe(false);
     expect(await list(ix)).toEqual(files);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("apply(): a new symlink to a file outside the root is not listed (same rule as build())", async () => {
+  const outside = await realpath(await mkdtemp(path.join(tmpdir(), "cv-index-out-")));
+  try {
+    await writeFile(path.join(outside, "secret.txt"), "");
+    const ix = new FileIndex(root);
+    await ix.get();
+    await symlink(path.join(outside, "secret.txt"), path.join(root, "out.txt"));
+    await symlink(path.join(root, "top.txt"), path.join(root, "in.txt"));
+    await ix.apply(["out.txt", "in.txt"]);
+    const files = await list(ix);
+    expect(files).not.toContain("out.txt");
+    expect(files).toContain("in.txt");
   } finally {
     await rm(outside, { recursive: true, force: true });
   }

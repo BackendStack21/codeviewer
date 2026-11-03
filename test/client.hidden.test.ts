@@ -55,3 +55,30 @@ describe("AC-19 shared HIDDEN rule in util.ts", () => {
     );
   });
 });
+
+describe("file contents keep their tabs; names do not", () => {
+  test("showHiddenText leaves tabs but escapes every other HIDDEN character", () => {
+    expect(u.showHiddenText("\tfoo\tbar")).toBe("\tfoo\tbar");
+    expect(u.showHiddenText("a\x01b‮c\r")).toBe("a\\x01b\\u202ec\\x0d");
+    expect(u.showHidden("\tname")).toBe("\\x09name");
+  });
+
+  test("esc escapes both quote characters", () => {
+    expect(u.esc(`<a title='x' b="y">&`)).toBe("&lt;a title=&#39;x&#39; b=&quot;y&quot;&gt;&amp;");
+  });
+
+  test("diff lines show tabs as tabs", async () => {
+    const d = await import("../src/client/diffview.ts");
+    expect(d.spansHtml("\tx = 1", [])).toBe("\tx = 1");
+  });
+
+  test("the code view isolates bidi controls in place (Trojan Source) without changing the text", async () => {
+    const c = await import("../src/client/codeview.ts");
+    const html = c.markBidi("/*‮ } ⁦if (isAdmin)⁩ */");
+    expect(html).toBe(
+      '/*<span class="bidi" title="U+202E">‮</span> } <span class="bidi" title="U+2066">⁦</span>if (isAdmin)<span class="bidi" title="U+2069">⁩</span> */',
+    );
+    expect(html.replace(/<[^>]+>/g, "")).toBe("/*‮ } ⁦if (isAdmin)⁩ */");
+    expect(c.markBidi("plain &amp; text")).toBe("plain &amp; text");
+  });
+});

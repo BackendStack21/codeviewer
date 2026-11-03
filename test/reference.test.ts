@@ -40,6 +40,10 @@ describe("parseTarget (terminal ⌘-click and codeviewer open)", () => {
     expect(parseTarget("src/a.ts:12:5")).toEqual({ path: "src/a.ts", line: 12 });
     expect(parseTarget(reference("src/a.ts", { from: 12, to: 40 }))).toEqual({ path: "src/a.ts", line: 12 });
   });
+  test("a line or paragraph separator in the target (OSC 8 links carry them) does not throw", () => {
+    expect(parseTarget("a\u2028b.ts:7")).toEqual({ path: "a\u2028b.ts", line: 7 });
+    expect(parseTarget("a\u2029b.ts")).toEqual({ path: "a\u2029b.ts", line: 0 });
+  });
 });
 
 describe("unsafePath", () => {

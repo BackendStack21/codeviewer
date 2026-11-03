@@ -290,8 +290,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const id = url.searchParams.get("id") ?? "";
           if (!/^[\w-]{6,64}$/.test(id)) return fail(400, "bad id");
           // Same bounds as a resize message: an out-of-range size makes the PTY throw after the shell spawned.
-          const cols = Math.min(1000, Math.max(2, Number(url.searchParams.get("cols")) || 80));
-          const rows = Math.min(500, Math.max(1, Number(url.searchParams.get("rows")) || 24));
+          // Whole cells only, like a resize message (`| 0`): a fractional size reaches the PTY as is.
+          const cols = Math.min(1000, Math.max(2, Math.floor(Number(url.searchParams.get("cols"))) || 80));
+          const rows = Math.min(500, Math.max(1, Math.floor(Number(url.searchParams.get("rows"))) || 24));
           return srv.upgrade(req, { data: { kind: "pty", id, cols, rows } }) ? undefined : fail(400, "upgrade failed");
         }
         return fail(404, "not found");

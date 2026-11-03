@@ -37,6 +37,16 @@ export function markRanges(n: number, ranges: readonly MarkRange[]): Uint8Array 
 }
 
 /** New scrollLeft that brings 0-based column `col` into view, or `scrollLeft` when it already is. */
+/**
+ * Trojan Source: each bidi override/isolate is wrapped in a zero-width inline-block (`.bidi`, drawn
+ * as a bar, the code point in its title). An atomic inline reorders nothing around it, so the line
+ * displays in logical order, while the character stays in the DOM: selection offsets and copy are
+ * unchanged. Runs on already-escaped HTML (esc() leaves these characters alone).
+ */
+export function markBidi(html: string): string {
+  return html.replace(/[\u202a-\u202e\u2066-\u2069]/g, (c) => `<span class="bidi" title="U+${c.charCodeAt(0).toString(16).toUpperCase()}">${c}</span>`);
+}
+
 export function revealCol(scrollLeft: number, clientWidth: number, gutterW: number, charW: number, col: number): number {
   const x = gutterW + Math.min(col, MAX_RENDER_COLS) * charW;
   if (x < scrollLeft + gutterW || x > scrollLeft + clientWidth - 40) return Math.max(0, x - clientWidth / 2);
@@ -509,7 +519,7 @@ export class CodeView {
       removed.length ? `Deleted: ${removed.length} line${removed.length === 1 ? "" : "s"} from HEAD` :
       `Added: ${addedN} new line${addedN === 1 ? "" : "s"}`;
     const body = removed.length
-      ? `<div class="peek-code">${removed.map((l, i) => `<div class="peek-line"><span class="peek-n">${hk.a0 + i + 1}</span><span class="peek-t">${esc(l) || " "}</span></div>`).join("")}</div>`
+      ? `<div class="peek-code">${removed.map((l, i) => `<div class="peek-line"><span class="peek-n">${hk.a0 + i + 1}</span><span class="peek-t">${markBidi(esc(l)) || " "}</span></div>`).join("")}</div>`
       : "";
     const box = h("div", { class: "peek", role: "dialog", "aria-label": title },
       h("div", { class: "peek-head" }, h("span", { class: "peek-badge" }, "HEAD"), h("span", null, title),
@@ -642,7 +652,7 @@ export class CodeView {
     let s = 0;
     for (let p = 1; p <= n; p++) {
       if (p === n || cls[p] !== cls[s] || (mark && mark[p] !== mark[s])) {
-        const seg = esc(text.slice(s, p));
+        const seg = markBidi(esc(text.slice(s, p)));
         const t = cls[s] ? TOKS[cls[s]! - 1] : "";
         const m = mark?.[s];
         let piece = t ? `<span class="t-${t}">${seg}</span>` : seg;

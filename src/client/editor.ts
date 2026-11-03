@@ -8,7 +8,7 @@ import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
 import { decidePreview, tooLargeNote } from "./mdgate.ts";
 import { planView, toggleLabel, toggleMode, viewMode } from "./viewstate.ts";
-import { basename, debounce, dirname, esc, formatBytes, h, MOD } from "./util.ts";
+import { basename, debounce, dirname, esc, formatBytes, h, MOD, showHidden } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { hasSymbols, symbols, type Sym } from "./symbols.ts";
 import { lineSpan, type Span } from "./reference.ts";
@@ -581,8 +581,8 @@ export class Editor {
     if (!this.git?.repo || line < 0 || g?.letter === "U" || g?.letter === "I" || g?.letter === "A") return;
     const b = await api.gitBlame(tab.path, line + 1);
     if (!b || tab.code !== code || code.activeLine !== line) return;
-    const who = b.you ? "You" : esc(b.author);
-    const html = b.uncommitted ? "You · uncommitted change" : `${who}, ${relativeTime(b.time)} · ${esc(b.summary)}`;
+    const who = b.you ? "You" : esc(showHidden(b.author));
+    const html = b.uncommitted ? "You · uncommitted change" : `${who}, ${relativeTime(b.time)} · ${esc(showHidden(b.summary))}`;
     code.setBlame(line, html);
   }
 
@@ -712,7 +712,7 @@ export class Editor {
         ? `${t.path} · ${t.commit.oid.slice(0, 7)} ${t.commit.subject} (${t.commit.author}, ${relativeTime(t.commit.time)})`
         : g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path;
       t.tabEl.setAttribute("aria-selected", String(t === this.active));
-      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(hint(t.path))}</span>` : ""}${t.commit ? `<span class="tab-kind oid">${t.commit.oid.slice(0, 7)}</span>` : t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
+      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(showHidden(basename(t.path)))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(showHidden(hint(t.path)))}</span>` : ""}${t.commit ? `<span class="tab-kind oid">${t.commit.oid.slice(0, 7)}</span>` : t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
       t.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(t);

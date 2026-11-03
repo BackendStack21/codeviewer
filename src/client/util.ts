@@ -25,9 +25,9 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ESC[c]!);
+  return s.replace(/[&<>"']/g, (c) => ESC[c]!);
 }
 
 export function basename(p: string): string {
@@ -181,6 +181,14 @@ export function showHidden(s: string): string {
     const n = c.charCodeAt(0);
     return n < 256 ? `\\x${n.toString(16).padStart(2, "0")}` : `\\u${n.toString(16).padStart(4, "0")}`;
   });
+}
+
+/** HIDDEN minus the tab: file contents (code, diffs, previews) indent with tabs, and `tab-size` lays them out. */
+const HIDDEN_IN_TEXT = /[\x00-\x08\x0a-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g;
+
+/** showHidden for file contents: every HIDDEN character but the tab becomes an escape. Names keep the strict rule. */
+export function showHiddenText(s: string): string {
+  return s.replace(HIDDEN_IN_TEXT, (c) => showHidden(c));
 }
 
 /** True for targets that own Cmd+A / Cmd+C themselves (inputs, textareas such as the terminal's, editable hosts). */
