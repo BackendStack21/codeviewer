@@ -78,7 +78,9 @@ describe("file contents keep their tabs; names do not", () => {
     expect(html).toBe(
       '/*<span class="bidi" title="U+202E">‮</span> } <span class="bidi" title="U+2066">⁦</span>if (isAdmin)<span class="bidi" title="U+2069">⁩</span> */',
     );
-    expect(html.replace(/<[^>]+>/g, "")).toBe("/*‮ } ⁦if (isAdmin)⁩ */");
+    // Removing exactly the wrapper markBidi adds gives the input back: the text is unchanged.
+    const unwrapped = html.split("</span>").join("").split(/<span class="bidi" title="U\+[0-9A-F]{4}">/).join("");
+    expect(unwrapped).toBe("/*‮ } ⁦if (isAdmin)⁩ */");
     expect(c.markBidi("plain &amp; text")).toBe("plain &amp; text");
   });
 });
