@@ -197,11 +197,12 @@ export class Git {
   }
 
   private async computeOverrides(): Promise<Record<string, string | undefined>> {
-    const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\."], 1 << 20, this.env);
+    const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "-z", "--get-regexp", "^(filter|diff|merge)\\."], 1 << 20, this.env);
     const pairs: [string, string][] = [];
     const drivers = new Set<string>();
-    for (const key of new TextDecoder().decode(r.out).split("\n")) {
-      const m = /^(filter|diff|merge)\.(.+)\.[^.]+$/.exec(key.trim());
+    // NUL separated (-z): a key is never split, whatever its subsection holds.
+    for (const key of new TextDecoder().decode(r.out).split("\0")) {
+      const m = /^(filter|diff|merge)\.(.+)\.[^.]+$/s.exec(key);
       if (m) drivers.add(`${m[1]}.${m[2]}`);
     }
     for (const d of drivers) {

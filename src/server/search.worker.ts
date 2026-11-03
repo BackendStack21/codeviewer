@@ -55,7 +55,9 @@ function run({ req, cancel }: WorkerJob): void {
         continue; // gone since it was listed (deleted but still in the index): nothing was skipped
       }
       if (!within(rootReal, real)) throw new Error("skip");
-      fd = openSync(path.join(rootReal, rel), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      // Open the checked real path, not the joined one: a parent swapped for a symlink after the
+      // check cannot redirect the open (O_NOFOLLOW guards only the last component).
+      fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const st = fstatSync(fd);
       if (st.isDirectory()) continue; // submodules and nested repositories are listed as paths, not files
       if (!st.isFile() || st.size > MAX_TEXT_BYTES) throw new Error("skip");
