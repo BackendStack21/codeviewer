@@ -1,7 +1,7 @@
 import { diffLines, type Hunk } from "./diff.ts";
 import { Highlighter, type Tok } from "./highlight.ts";
 import { icons } from "./icons.ts";
-import { basename, dirname, esc, h, showHidden } from "./util.ts";
+import { basename, dirname, esc, h, showHidden, showHiddenText } from "./util.ts";
 import type { Letter } from "./git.ts";
 
 const TOKS: Tok[] = ["k", "s", "c", "n", "f", "t", "p", "o", "v", "m", "h", "a", "x", "b", "i", "l"];
@@ -70,7 +70,7 @@ export function spansHtml(text: string, spans: readonly [number, number, Tok][])
   let s = 0;
   for (let p = 1; p <= n; p++) {
     if (p === n || cls[p] !== cls[s]) {
-      const seg = esc(showHidden(text.slice(s, p)));
+      const seg = esc(showHiddenText(text.slice(s, p)));
       const t = cls[s] ? TOKS[cls[s]! - 1] : "";
       out += t ? `<span class="t-${t}">${seg}</span>` : seg;
       s = p;

@@ -876,19 +876,22 @@ function bareUrl(s: string, i: number): string | null {
   let k = i + m[0].length;
   while (k < lim && s[k]! > " " && s[k] !== "<") k++;
   let end = k;
+  // Parentheses in s[i, end), counted once and kept up to date as the end moves (not recounted per `)`).
+  let open = 0;
+  let close = 0;
+  for (let q = i; q < end; q++) {
+    if (s[q] === "(") open++;
+    else if (s[q] === ")") close++;
+  }
   for (;;) {
     const ch = s[end - 1]!;
     if (end - 1 < i + m[0].length) return null;
     if ("?!.,:*_~'\";".includes(ch)) end--;
     else if (ch === ")") {
-      let open = 0;
-      let close = 0;
-      for (let q = i; q < end; q++) {
-        if (s[q] === "(") open++;
-        else if (s[q] === ")") close++;
-      }
-      if (close > open) end--;
-      else break;
+      if (close > open) {
+        end--;
+        close--;
+      } else break;
     } else break;
   }
   return end > i + m[0].length ? s.slice(i, end) : null;

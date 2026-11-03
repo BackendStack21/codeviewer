@@ -1,5 +1,5 @@
 import { access, chmod, mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
-import { constants, existsSync, realpathSync } from "node:fs";
+import { constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 // The release-signing public key (PEM, Ed25519), compiled into the binary.
 import updateKeyPem from "../../packaging/update-key.pub" with { type: "text" };
@@ -34,27 +34,47 @@ export interface Install {
   asset(version: string): string;
 }
 
-/** Works out how this copy of codeviewer was installed, from the executable's location. */
+/** True in a `bun build --compile` binary: its entry point lives in the embedded file system. */
+export const isCompiledBinary = (): boolean => Bun.main.startsWith("/$bunfs/") || /^[A-Z]:\\~BUN\\/.test(Bun.main);
+
+const readText = (p: string): string | null => {
+  try {
+    return readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Works out how this copy of codeviewer was installed, from the executable's location. What gets
+ * replaced must be unmistakably codeviewer's: an app bundle with our identifier, a package
+ * directory with all of its marker files. A folder that merely has a `chromium/chrome` next to a
+ * slim binary (~/.local/bin) was moved away whole, with every other tool in it.
+ */
 export function detectInstall(
   execPath = process.execPath,
   platform: string = process.platform,
   arch: string = process.arch,
   exists: (p: string) => boolean = existsSync,
+  compiled: boolean = isCompiledBinary(),
+  read: (p: string) => string | null = readText,
 ): Install {
   let exe = execPath;
   try {
     exe = realpathSync(execPath);
   } catch {}
   const a = arch === "arm64" ? "arm64" : "x64";
-  if (/^bun(-debug)?(\.exe)?$/.test(path.basename(exe))) {
+  // Running from source (any bun runtime, whatever its file name): never replace the runtime.
+  if (!compiled || /^bun([-.\d].*)?(\.exe)?$/.test(path.basename(exe))) {
     return { kind: "source", target: "", asset: () => "" };
   }
   const app = /^(.*\.app)\/Contents\/Resources\/codeviewer$/.exec(exe);
-  if (platform === "darwin" && app) {
+  if (platform === "darwin" && app && read(path.join(app[1]!, "Contents", "Info.plist"))?.includes("<string>de.21no.codeviewer</string>")) {
     return { kind: "macos-app", target: app[1]!, asset: (v) => `Codeviewer-${v}-macos-${a}.dmg` };
   }
   const dir = path.dirname(exe);
-  if (platform === "linux" && exists(path.join(dir, "chromium", "chrome"))) {
+  const pkg = ["chromium/chrome", "share/codeviewer.desktop", "install.sh"].every((f) => exists(path.join(dir, ...f.split("/"))));
+  if (platform === "linux" && pkg) {
     return { kind: "linux-app", target: dir, asset: (v) => `codeviewer-${v}-linux-${a}.tar.gz` };
   }
   const os = platform === "darwin" ? "macos" : "linux";
@@ -140,6 +160,42 @@ const MAX_SUMS_BYTES = 1 << 20;
 /** No release asset is anywhere near this; the download stops here before any verification. */
 const MAX_ASSET_BYTES = 1024 * 1024 * 1024;
 
+/** The release description from the API is a few KB; anything near this is not GitHub. */
+const MAX_API_BYTES = 4 << 20;
+
+/** Reads a body, failing as soon as it passes `max` bytes (no content-length needed). */
+async function readCapped(res: Response, max: number, what: string): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (res.body) {
+    const reader = res.body.getReader();
+    for (let r = await reader.read(); !r.done; r = await reader.read()) {
+      size += r.value.length;
+      if (size > max) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`${what} is too large`);
+      }
+      chunks.push(r.value);
+    }
+  }
+  const out = new Uint8Array(size);
+  let o = 0;
+  for (const c of chunks) {
+    out.set(c, o);
+    o += c.length;
+  }
+  return out;
+}
+
+/** The last path segment of an asset URL, short and printable (for error messages). */
+function assetName(url: string): string {
+  let name = url;
+  try {
+    name = decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+  } catch {}
+  return name.replace(/[^\w.+-]/g, "?").slice(0, 100);
+}
+
 /** Parses a SHA256SUMS file into name → hex digest. */
 export function parseSums(text: string): Map<string, string> {
   const out = new Map<string, string>();
@@ -220,9 +276,13 @@ export class Updater {
     };
     const res = await this.fetch(this.api, { headers: { accept: "application/vnd.github+json", "user-agent": `codeviewer/${this.version}` } });
     if (!res.ok) throw new Error(`update check failed: GitHub answered ${res.status}`);
-    const rel = (await res.json()) as { tag_name?: string; html_url?: string; body?: string; draft?: boolean; prerelease?: boolean; assets?: { name: string; browser_download_url: string }[] };
+    // Capped like every other download: res.json() would buffer whatever the server sends.
+    const rel = JSON.parse(new TextDecoder().decode(await readCapped(res, MAX_API_BYTES, "the release description"))) as { tag_name?: string; html_url?: string; body?: string; draft?: boolean; prerelease?: boolean; assets?: { name: string; browser_download_url: string }[] };
     const version = (rel.tag_name ?? "").replace(/^v/, "");
-    if (!/^\d+\.\d+\.\d+/.test(version) || rel.draft || rel.prerelease) {
+    // The whole tag is checked, not a prefix: the version becomes part of a file name in the
+    // staging directory, so "1.2.3/../../x" must never get that far.
+    // Pre-releases are never offered (SECURITY.md), even when the release isn't flagged as one.
+    if (!/^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/.test(version) || rel.draft || rel.prerelease) {
       this.cached = { info: base, release: null };
       return base;
     }
@@ -264,11 +324,10 @@ export class Updater {
 
   private async get(url: string): Promise<Uint8Array> {
     const res = await this.fetch(this.assetUrl(url), { headers: { "user-agent": `codeviewer/${this.version}` } });
-    if (!res.ok) throw new Error(`download failed (${res.status}): ${url}`);
+    // The asset's own file name, not the URL the API answered with (shown in the update dialog).
+    if (!res.ok) throw new Error(`download failed (${res.status}): ${assetName(url)}`);
     if (Number(res.headers.get("content-length")) > MAX_SUMS_BYTES) throw new Error("checksum file is too large");
-    const body = new Uint8Array(await res.arrayBuffer());
-    if (body.length > MAX_SUMS_BYTES) throw new Error("checksum file is too large");
-    return body;
+    return readCapped(res, MAX_SUMS_BYTES, "checksum file");
   }
 
   /**
@@ -280,8 +339,10 @@ export class Updater {
     this.busy = true;
     try {
       const info = await this.check(true);
-      const release = this.cached?.release;
-      if (!info.available || !release) throw new Error("already up to date");
+      // The release that this check found, not whatever this.cached holds by now (a concurrent
+      // check may have replaced it), and it must still be newer than what is running.
+      const release = this.cached?.info === info ? this.cached.release : null;
+      if (!info.available || !release || compareVersions(release.version, this.version) <= 0) throw new Error("already up to date");
       if (!info.canInstall) throw new Error(info.reason ?? "this update can't be installed automatically");
       const inst = this.install;
       const name = inst.asset(release.version);
@@ -297,6 +358,7 @@ export class Updater {
 
       // 2. Download into a staging dir next to the target (same file system → atomic rename).
       const stage = await mkdtemp(path.join(path.dirname(inst.target), ".codeviewer-update-"));
+      let keepStage = false;
       try {
         const file = path.join(stage, name);
         const actual = await this.download(release.assets[name]!, file, (pct) => progress("download", `${pct}%`));
@@ -317,8 +379,15 @@ export class Updater {
         progress("done", release.version);
         this.cached = null;
         return { version: release.version, kind: inst.kind, target: inst.target };
+      } catch (e) {
+        // The old install could not be put back: it lives in the staging dir now, so keep it.
+        if (e instanceof RestoreFailed) {
+          keepStage = true;
+          throw new Error(`${e.message}; the previous version is in ${stage}`);
+        }
+        throw e;
       } finally {
-        await rm(stage, { recursive: true, force: true }).catch(() => {});
+        if (!keepStage) await rm(stage, { recursive: true, force: true }).catch(() => {});
       }
     } finally {
       this.busy = false;
@@ -331,7 +400,6 @@ export class Updater {
     if (!res.ok || !res.body) throw new Error(`download failed (${res.status})`);
     const total = Number(res.headers.get("content-length")) || 0;
     if (total > MAX_ASSET_BYTES) throw new Error("release asset is too large");
-    const hash = new Bun.CryptoHasher("sha256");
     const sink = Bun.file(dest).writer();
     let got = 0;
     let last = -1;
@@ -342,8 +410,8 @@ export class Updater {
         await reader.cancel().catch(() => {});
         throw new Error("release asset is too large");
       }
-      hash.update(r.value);
-      sink.write(r.value);
+      // Awaited: a failed write (disk full) rejects here instead of going unnoticed.
+      await sink.write(r.value);
       const p = total ? Math.floor((got / total) * 100) : 0;
       if (p !== last) {
         last = p;
@@ -351,6 +419,14 @@ export class Updater {
       }
     }
     await sink.end();
+    // Hash what is on disk, not what arrived: a short write must fail the checksum.
+    const hash = new Bun.CryptoHasher("sha256");
+    let onDisk = 0;
+    for await (const chunk of Bun.file(dest).stream()) {
+      onDisk += chunk.length;
+      hash.update(chunk);
+    }
+    if (onDisk !== got) throw new Error(`download was not written completely (${onDisk} of ${got} bytes)`);
     return hash.digest("hex");
   }
 }
@@ -398,7 +474,14 @@ async function swap(target: string, staged: string, stage: string) {
   try {
     await rename(staged, target);
   } catch (e) {
-    await rename(old, target).catch(() => {});
+    try {
+      await rename(old, target);
+    } catch {
+      throw new RestoreFailed(`installing failed (${(e as Error).message}) and the previous version could not be restored`);
+    }
     throw e;
   }
 }
+
+/** swap() could not put the old install back: the staging dir holds the only copy. */
+class RestoreFailed extends Error {}

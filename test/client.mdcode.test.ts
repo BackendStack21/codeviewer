@@ -154,32 +154,32 @@ describe("AC-18 highlighted fences", () => {
 
 describe("AC-19 Trojan Source escapes in rendered code", () => {
   test("code spans show controls and bidi overrides as visible escapes", () => {
-    const el = render("see `a‮b\u0001c` here");
+    const el = render("see `a\u202eb\u0001c` here");
     const code = q(el, "code")[0]!;
     expect(code.textContent).toBe("a\\u202eb\\x01c");
   });
 
   test("fenced code blocks (plain) show escapes, no raw characters remain", () => {
-    const el = render(fence("", "x‮y\u0085z⁦"));
+    const el = render(fence("", "x\u202ey\u0085z\u2066"));
     const t = blockCode(el).textContent;
     expect(t).toBe("x\\u202ey\\x85z\\u2066");
-    expect(t).not.toMatch(/[‮\u0085⁦]/);
+    expect(t).not.toMatch(/[\u202e\u0085\u2066]/);
   });
 
   test("highlighted fences show escapes too", () => {
-    const el = render(fence("js", "let a = '‮'; // ⁧\u0001"));
+    const el = render(fence("js", "let a = '\u202e'; // \u2067\u0001"));
     const t = blockCode(el).textContent;
     expect(t).toBe("let a = '\\u202e'; // \\u2067\\x01");
     expect(spans(el).length).toBeGreaterThan(0);
   });
 
   test("indented code blocks show escapes", () => {
-    const el = render("    a‮b");
+    const el = render("    a\u202eb");
     expect(blockCode(el).textContent).toBe("a\\u202eb");
   });
 
   test("link titles show escapes", () => {
-    const el = render('[a](https://x.y/ "t‮e\u0001")');
+    const el = render('[a](https://x.y/ "t\u202ee\u0001")');
     const a = q(el, "a")[0]!;
     expect(a.attrs.get("title")).toBe("t\\u202ee\\x01");
   });

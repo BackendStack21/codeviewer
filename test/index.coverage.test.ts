@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile, mkdir, realpath, chmod } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, realpath, chmod, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { FileIndex, HEAVY_DIRS } from "../src/server/index.ts";
@@ -164,4 +164,38 @@ test("symlinked directories inside the root are walked; links out of the root an
   } finally {
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test("apply(): a new symlink to a file outside the root is not listed (same rule as build())", async () => {
+  const outside = await realpath(await mkdtemp(path.join(tmpdir(), "cv-index-out-")));
+  try {
+    await writeFile(path.join(outside, "secret.txt"), "");
+    const ix = new FileIndex(root);
+    await ix.get();
+    await symlink(path.join(outside, "secret.txt"), path.join(root, "out.txt"));
+    await symlink(path.join(root, "top.txt"), path.join(root, "in.txt"));
+    await ix.apply(["out.txt", "in.txt"]);
+    const files = await list(ix);
+    expect(files).not.toContain("out.txt");
+    expect(files).toContain("in.txt");
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("apply(): deleting many files is not quadratic (each one used to rescan the whole set)", async () => {
+  const many = path.join(root, "many");
+  await mkdir(many);
+  const names = Array.from({ length: 3000 }, (_, i) => `many/f${i}.txt`);
+  await Promise.all(names.map((n) => writeFile(path.join(root, n), "")));
+  const ix = new FileIndex(root);
+  await ix.get();
+  await rm(many, { recursive: true });
+  const gone = names.slice(0, 1999);
+  const t0 = performance.now();
+  expect(await ix.apply(gone)).toBe(true);
+  expect(performance.now() - t0).toBeLessThan(1000);
+  // The deleted directory itself drops everything below it.
+  await ix.apply(["many"]);
+  expect((await list(ix)).some((f) => f.startsWith("many/"))).toBe(false);
 });

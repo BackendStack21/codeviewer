@@ -204,10 +204,16 @@ const enum S {
 
 export const MAX_SCROLLBACK = 10_000;
 
+/** Most UTF-16 units one cell's cluster holds (the longest emoji ZWJ sequences are about 35). */
+const MAX_CLUSTER = 64;
+/** Longest OSC 8 target kept as a link. */
+const MAX_LINK_URI = 2048;
+
 /**
  * Headless VT/xterm emulator: parser + screen model. Rendering lives in renderer.ts.
  * Coordinates are 0-based internally.
  */
+
 export class Terminal {
   cols: number;
   rows: number;
@@ -224,6 +230,8 @@ export class Terminal {
   modes!: Modes;
   title = "";
   links: string[] = [""];
+  /** uri → id: a lookup per OSC 8 (a scan of `links` made 65 000 links take 81 s). */
+  private linkIds = new Map<string, number>();
   private linkId = 0;
   /** Rows changed since the renderer last painted. */
   dirty: Uint8Array;
@@ -585,7 +593,9 @@ export class Terminal {
       const line = this.lines[cur.y]!;
       let x = cur.wrapPending ? cur.x : cur.x - 1;
       if (x >= 0 && line.text[x] === "" && x > 0) x--;
-      if (x >= 0) {
+      // A cluster is a few code points: past MAX_CLUSTER, marks are dropped (a megabyte of U+0301,
+      // or ZWJ + REP, grew one cell without bound until the tab died).
+      if (x >= 0 && line.text[x]!.length < MAX_CLUSTER) {
         line.text[x] += ch;
         this.lastChar += ch; // so a following emoji can join a ZWJ sequence
         this.markDirty(cur.y);
@@ -598,7 +608,7 @@ export class Terminal {
       const line = this.lines[cur.y]!;
       let x = cur.wrapPending ? cur.x : cur.x - 1;
       if (x > 0 && line.text[x] === "") x--;
-      if (x >= 0) {
+      if (x >= 0 && line.text[x]!.length < MAX_CLUSTER) {
         line.text[x] += ch;
         this.lastChar = ch;
         this.markDirty(cur.y);
@@ -661,7 +671,7 @@ export class Terminal {
     const cur = this.cur;
     switch (c) {
       case 0x07:
-        this.host.bell?.();
+        if (!this.silent) this.host.bell?.(); // never for replayed history
         break;
       case 0x08: // BS (xterm: pending wrap is dropped and the cursor still moves left)
         cur.wrapPending = false;
@@ -997,6 +1007,7 @@ export class Terminal {
     this.savedPrimaryCursor = null;
     this.decoder = new TextDecoder("utf-8");
     this.links = [""];
+    this.linkIds.clear();
     this.linkId = 0;
     this.scrolledOff = 0;
     this.lastChar = "";
@@ -1141,11 +1152,19 @@ export class Terminal {
         return;
       }
       case "b": {
-        // REP: repeat the preceding graphic character.
-        const ch = this.lastChar;
-        if (!ch) return;
-        const cp = ch.codePointAt(0)!;
-        for (let i = Math.min(this.p(0, 1), 65535); i > 0; i--) this.print(cp, ch);
+        // REP: repeat the preceding graphic character: its base code point only, never a whole
+        // cluster (one ending in ZWJ would join every repeat into one cell). More repeats than
+        // the screen holds only overwrite it again: 8 KB of REP used to scroll for 12 s.
+        if (!this.lastChar) return;
+        const cp = this.lastChar.codePointAt(0)!;
+        const ch = String.fromCodePoint(cp);
+        this.lastChar = ch;
+        // Past a screenful the output repeats with the period of one row (half a row of wide
+        // characters): the remainder keeps the cursor where the full count would leave it.
+        const n = Math.min(this.p(0, 1), 65535);
+        const cap = this.cols * this.rows;
+        const period = charWidth(cp) === 2 ? Math.max(1, Math.floor(this.cols / 2)) : this.cols;
+        for (let i = n > cap ? cap + ((n - cap) % period) : n; i > 0; i--) this.print(cp, ch);
         return;
       }
       case "c":
@@ -1234,7 +1253,9 @@ export class Terminal {
       return;
     }
     if (inter === "$" && f === "p") {
-      // DECRQM: report mode state. 1 = set, 2 = reset, 0 = unknown.
+      // DECRQM: report mode state. 1 = set, 2 = reset, 0 = unknown. Only for the two real forms:
+      // the reply echoes the prefix, and `>>>…` came back verbatim into the shell's input.
+      if (pre !== "" && pre !== "?") return;
       const m = this.p(0, 0);
       const v = pre === "?" ? this.privateModeState(m) : m === 4 ? (this.modes.insert ? 1 : 2) : 0;
       this.respond(`\x1b[${pre}${m};${v}$y`);
@@ -1423,15 +1444,17 @@ export class Terminal {
       case "8": {
         // OSC 8 ; params ; URI
         const uri = arg.slice(arg.indexOf(";") + 1);
-        if (!uri) {
+        // Over-long targets, and new ones once the table is full, print as plain text: ids are
+        // never reused, since re-pointing one would turn an earlier, trusted link into this one.
+        let id = uri && uri.length <= MAX_LINK_URI ? this.linkIds.get(uri) ?? 0 : 0;
+        if (!id && uri && uri.length <= MAX_LINK_URI && this.linkId < 0xfffe) {
+          id = ++this.linkId;
+          this.links[id] = uri;
+          this.linkIds.set(uri, id);
+        }
+        if (!id) {
           this.cur.fl &= 0xffff;
           return;
-        }
-        let id = this.links.lastIndexOf(uri);
-        if (id <= 0) {
-          this.linkId = (this.linkId % 0xfffe) + 1;
-          id = this.linkId;
-          this.links[id] = uri;
         }
         this.cur.fl = (this.cur.fl & 0xffff) | (id << 16);
         return;
@@ -1449,8 +1472,10 @@ export class Terminal {
       case "4": {
         const parts = arg.split(";");
         const c = this.host.colors?.();
-        for (let i = 0; i + 1 < parts.length; i += 2) {
-          if (parts[i + 1] === "?" && c) {
+        // At most 256 answers per sequence (one per palette entry): a megabyte of `;1;?` used to
+        // send 200 000 replies into the shell's input.
+        for (let i = 0, n = 0; i + 1 < parts.length && n < 256; i += 2) {
+          if (parts[i + 1] === "?" && c && ++n) {
             const n = Number(parts[i]);
             const hex = c.palette[n];
             if (hex) this.respond(`\x1b]4;${n};${xrgb(hex)}\x1b\\`);

@@ -13,10 +13,15 @@ beforeAll(async () => {
 afterAll(() => uninstallDom());
 
 const run = (src: string) => R.renderMarkdown(M.parseMarkdown(src));
-/** Best of three, so one scheduler hiccup cannot fail a bound. */
+/**
+ * Best of five, each after a full collection: one scheduler hiccup cannot fail a bound, and neither
+ * can a collection of garbage other test files left in this process (all run in one; the ratio
+ * test below failed once on a macOS runner that way, at 3.0x for a parser that grows 2.1x).
+ */
 function time(fn: () => void): number {
   let best = Infinity;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 5; i++) {
+    Bun.gc(true);
     const t0 = performance.now();
     fn();
     best = Math.min(best, performance.now() - t0);

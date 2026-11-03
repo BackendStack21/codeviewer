@@ -1,3 +1,5 @@
+import { imageRefusal } from "./imagecheck.ts";
+
 export interface Entry {
   name: string;
   type: "dir" | "file" | "link-broken";
@@ -122,6 +124,16 @@ async function check(res: Response): Promise<Response> {
 
 const check_ = (res: Response) => check(res);
 
+/** The native Mac window (WKWebView with the app's message handler). */
+const IN_MAC_APP = !!(globalThis as unknown as { webkit?: { messageHandlers?: { native?: unknown } } }).webkit?.messageHandlers?.native;
+
+/** Base64 of bytes, in chunks (String.fromCharCode with one huge spread overflows the stack). */
+export function base64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 export const api = {
   info: async (): Promise<Info> => (await check(await fetch("/api/info"))).json(),
   list: async (path: string): Promise<Entry[]> => (await check(await fetch(`/api/list?path=${q(path)}`))).json(),
@@ -153,8 +165,9 @@ export const api = {
   },
   /** Changed files vs HEAD or vs the base branch (see src/server/git.ts Changes). */
   gitChanges: async (scope: "head" | "branch"): Promise<ChangesData> => (await check(await fetch(`/api/git/changes?scope=${scope}`))).json(),
-  gitBlame: async (path: string, line: number) => {
-    const r = await fetch(`/api/git/blame?path=${q(path)}&line=${line}`);
+  gitBlame: async (path: string, line: number, signal?: AbortSignal) => {
+    const r = await fetch(`/api/git/blame?path=${q(path)}&line=${line}`, { signal }).catch(() => null);
+    if (!r) return null; // aborted (the cursor moved on) or offline
     return r.ok
       ? ((await r.json()) as { hash: string; author: string; time: number; summary: string; you: boolean; uncommitted: boolean })
       : null;
@@ -175,8 +188,17 @@ export const api = {
    * Raw file as a blob: URL (images can't send the auth header themselves). Caller revokes it.
    * With `max`, a file larger than that many bytes is refused by the server (413) instead.
    */
-  rawBlobUrl: async (path: string, max?: number): Promise<string> =>
-    URL.createObjectURL(await (await check(await fetch(`/api/raw?path=${q(path)}${max ? `&max=${max}` : ""}`))).blob()),
+  rawBlobUrl: async (path: string, max?: number): Promise<string> => {
+    const blob = await (await check(await fetch(`/api/raw?path=${q(path)}${max ? `&max=${max}` : ""}`))).blob();
+    // Decompression and <use> bombs are refused before the browser decodes anything.
+    const refusal = imageRefusal(new Uint8Array(await blob.arrayBuffer()), blob.type);
+    if (refusal) throw new Error(refusal);
+    // An SVG is a document: opened from a blob: URL ("Open image in new tab") its script runs in
+    // this page's origin. A data: URL draws the same, and a data: document has an opaque origin.
+    // The Mac window cancels blob: navigations already, and its content rules admit only blob:.
+    if (blob.type === "image/svg+xml" && !IN_MAC_APP) return `data:image/svg+xml;base64,${base64(new Uint8Array(await blob.arrayBuffer()))}`;
+    return URL.createObjectURL(blob);
+  },
   /** Streams search events; ends quietly on abort, throws the server's error message on failure. */
   async *search(params: SearchParams, signal?: AbortSignal): AsyncGenerator<SearchEvent> {
     const sp = new URLSearchParams({ q: params.q });

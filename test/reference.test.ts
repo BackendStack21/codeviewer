@@ -40,6 +40,10 @@ describe("parseTarget (terminal ⌘-click and codeviewer open)", () => {
     expect(parseTarget("src/a.ts:12:5")).toEqual({ path: "src/a.ts", line: 12 });
     expect(parseTarget(reference("src/a.ts", { from: 12, to: 40 }))).toEqual({ path: "src/a.ts", line: 12 });
   });
+  test("a line or paragraph separator in the target (OSC 8 links carry them) does not throw", () => {
+    expect(parseTarget("a\u2028b.ts:7")).toEqual({ path: "a\u2028b.ts", line: 7 });
+    expect(parseTarget("a\u2029b.ts")).toEqual({ path: "a\u2029b.ts", line: 0 });
+  });
 });
 
 describe("unsafePath", () => {
@@ -48,8 +52,13 @@ describe("unsafePath", () => {
     expect(unsafePath("src/a b.ts")).toBe(false);
     expect(unsafePath("src/ünï.ts")).toBe(false);
     expect(unsafePath("x\nrm -rf ~")).toBe(true);
+    // Command substitution would run if the pasted reference were executed at a shell prompt.
+    expect(unsafePath("x$(touch pwned).md")).toBe(true);
+    expect(unsafePath("x`id`.md")).toBe(true);
+    expect(unsafePath("app/routes/$param.tsx")).toBe(false);
+    expect(unsafePath("src/[id]/page (copy).tsx")).toBe(false);
     expect(unsafePath("x\x1b[201~")).toBe(true);
     expect(unsafePath("x\u0085y")).toBe(true);
-    expect(unsafePath("evil‮txt.sh")).toBe(true);
+    expect(unsafePath("evil\u202etxt.sh")).toBe(true);
   });
 });

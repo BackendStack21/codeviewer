@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { realpath, stat } from "node:fs/promises";
-import { listDir, readForView, resolveSafe, imageMime, toRel, looksBinary, openRegular, MAX_TEXT_BYTES } from "./files.ts";
+import { listDir, readForView, resolveSafe, imageMime, toRel, looksBinary, openRegular, MAX_TEXT_BYTES, SEP_RE } from "./files.ts";
 import { FileIndex } from "./index.ts";
 import { watchTree } from "./watch.ts";
 import { PtyManager, type PtySocketData } from "./pty.ts";
@@ -33,6 +33,8 @@ export interface ServeOptions {
   searchScanner?: import("./search.ts").Scanner;
   /** Injected for tests: overrides SEARCH_DEADLINE_MS. */
   searchDeadlineMs?: number;
+  /** Called once, when the first page connects its events socket (the launch page has loaded). */
+  onFirstClient?: () => void;
 }
 
 type EventsSocketData = { kind: "events" };
@@ -63,6 +65,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     return updater.check().catch(() => null);
   })();
   const events = new Set<ServerWebSocket<SocketData>>();
+  let firstClient = false;
   let origin = "";
   let port = 0;
   const loopback = ["127.0.0.1", "localhost", "::1"].includes(opts.host);
@@ -140,11 +143,14 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     h.set("x-content-type-options", "nosniff");
     h.set("referrer-policy", "no-referrer");
     h.set("x-frame-options", "DENY");
+    // Other sites cannot load anything from here (an <img> of the favicon told them we run, and on which port).
+    h.set("cross-origin-resource-policy", "same-origin");
     return h;
   };
 
+  // no-store: in --browser mode the user's real profile cached /api/info (the root path), listings and status.
   const json = (data: unknown, status = 200) =>
-    new Response(JSON.stringify(data), { status, headers: securityHeaders(new Headers({ "content-type": "application/json" })) });
+    new Response(JSON.stringify(data), { status, headers: securityHeaders(new Headers({ "content-type": "application/json", "cache-control": "no-store" })) });
   const fail = (status: number, message: string) => json({ error: message }, status);
 
   const serveAsset = (req: Request, a: Asset) => {
@@ -251,17 +257,27 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
   const relParam = (url: URL) => url.searchParams.get("path") ?? "";
   /** A well-formed root-relative path (for blobs read from history, which need not exist on disk). */
   const relOk = (rel: string) =>
-    !!rel && !rel.includes("\0") && !path.isAbsolute(rel) && !/^[a-zA-Z]:/.test(rel) && !rel.split(/[\\/]+/).some((p) => p === "..");
+    !!rel && !rel.includes("\0") && !path.isAbsolute(rel) && !/^[a-zA-Z]:/.test(rel) && !rel.split(SEP_RE).some((p) => p === "..");
 
   const server = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.host,
     idleTimeout: 0,
+    // Never Bun's development error page: it shows source, paths and the cwd to anyone who can
+    // make a handler throw (a `Host: [` header did, before any auth).
+    development: false,
+    error() {
+      return fail(500, "internal error");
+    },
     async fetch(req, srv) {
-      const url = new URL(req.url);
-      const p = url.pathname;
-
       if (!hostOk(req)) return fail(421, "unexpected host");
+      let url: URL;
+      try {
+        url = new URL(req.url);
+      } catch {
+        return fail(400, "bad request");
+      }
+      const p = url.pathname;
 
       // The app shell (HTML/JS/CSS/fonts) is public and contains no secrets.
       const asset = assets[p === "/" ? "/index.html" : p];
@@ -290,8 +306,9 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const id = url.searchParams.get("id") ?? "";
           if (!/^[\w-]{6,64}$/.test(id)) return fail(400, "bad id");
           // Same bounds as a resize message: an out-of-range size makes the PTY throw after the shell spawned.
-          const cols = Math.min(1000, Math.max(2, Number(url.searchParams.get("cols")) || 80));
-          const rows = Math.min(500, Math.max(1, Number(url.searchParams.get("rows")) || 24));
+          // Whole cells only, like a resize message (`| 0`): a fractional size reaches the PTY as is.
+          const cols = Math.min(1000, Math.max(2, Math.floor(Number(url.searchParams.get("cols"))) || 80));
+          const rows = Math.min(500, Math.max(1, Math.floor(Number(url.searchParams.get("rows"))) || 24));
           return srv.upgrade(req, { data: { kind: "pty", id, cols, rows } }) ? undefined : fail(400, "upgrade failed");
         }
         return fail(404, "not found");
@@ -329,7 +346,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const abs = await resolveSafe(opts.root, relParam(url));
           if (!abs) return fail(404, "not found");
           try {
-            const { meta, body } = await readForView(abs, url.searchParams.has("text"));
+            const { meta, body } = await readForView(abs, url.searchParams.has("text"), opts.root);
             const h = securityHeaders(
               new Headers({
                 "content-type": "text/plain; charset=utf-8",
@@ -351,14 +368,15 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const rel = relParam(url);
           const abs = await resolveSafe(opts.root, rel);
           if (!abs) return fail(404, "not found");
-          const type = imageMime(rel) ?? MIME[rel.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
+          const ext = rel.split(".").pop()?.toLowerCase() ?? "";
+          const type = imageMime(rel) ?? (Object.hasOwn(MIME, ext) ? MIME[ext] : undefined) ?? "application/octet-stream";
           const h = securityHeaders(new Headers({ "content-type": type, "cache-control": "no-store" }));
           // Even if an SVG is opened directly, it must not run script.
           h.set("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
           // Read through a verified regular-file handle (no FIFOs/devices, no symlink swaps).
           let opened;
           try {
-            opened = await openRegular(abs);
+            opened = await openRegular(abs, opts.root);
           } catch (e) {
             return fail(400, (e as Error).message);
           }
@@ -368,7 +386,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
             await opened.fh.close();
             return fail(413, "too large");
           }
-          const limit = Number(url.searchParams.get("limit"));
+          const limit = Math.floor(Number(url.searchParams.get("limit")));
           const total = limit > 0 ? Math.min(limit, opened.st.size) : opened.st.size;
           const fh = opened.fh;
           // One `bytes=a-b` / `bytes=a-` / `bytes=-n` range, so media elements can seek.
@@ -457,7 +475,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const rel = relParam(url);
           const line = Number(url.searchParams.get("line"));
           if (!g || !Number.isInteger(line) || line < 1 || !(await resolveSafe(opts.root, rel))) return fail(404, "no blame");
-          const b = await g.blame(rel, line);
+          const b = await g.blame(rel, line, req.signal); // killed when the page moves on
           return b ? json(b) : fail(404, "no blame");
         }
 
@@ -505,11 +523,13 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
 
         case "/api/settings": {
           if (req.method === "GET") return json(await settings.read());
-          if (req.method !== "PUT") return fail(405, "GET or PUT");
+          if (req.method !== "PUT" && req.method !== "PATCH") return fail(405, "GET, PUT or PATCH");
           const text = await req.text();
           if (text.length > 256 * 1024) return fail(413, "settings too large");
           try {
-            await settings.write(JSON.parse(text));
+            // PATCH: only the keys a window changed (null removes one), merged with what is on disk.
+            const body = JSON.parse(text);
+            await (req.method === "PATCH" ? settings.patch(body) : settings.write(body));
           } catch {
             return fail(400, "invalid settings");
           }
@@ -539,7 +559,10 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           const given = body.path;
           const abs = path.isAbsolute(given) ? path.join(await realpath(path.dirname(given)).catch(() => path.dirname(given)), path.basename(given)) : null;
           const rel = abs !== null ? toRel(opts.root, abs) : given;
-          if (rel === null || !(await resolveSafe(opts.root, rel))) return fail(404, "path is outside the viewed directory");
+          const target = rel === null ? null : await resolveSafe(opts.root, rel);
+          if (rel === null || !target) return fail(404, "path is outside the viewed directory");
+          // Files only: the root itself, folders and FIFOs have nothing to open.
+          if (!(await stat(target).catch(() => null))?.isFile()) return fail(404, "not a file");
           broadcast({ t: "open", path: rel, line: Number.isInteger(body.line) && body.line! > 0 ? body.line : 0 });
           return json({ ok: true, clients: events.size });
         }
@@ -551,7 +574,13 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       maxPayloadLength: 16 * 1024 * 1024,
       perMessageDeflate: false,
       open(ws) {
-        if (ws.data.kind === "events") events.add(ws);
+        if (ws.data.kind === "events") {
+          events.add(ws);
+          if (!firstClient) {
+            firstClient = true;
+            opts.onFirstClient?.();
+          }
+        }
         else ptys.open(ws as ServerWebSocket<PtySocketData>);
       },
       message(ws, msg) {

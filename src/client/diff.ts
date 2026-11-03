@@ -11,6 +11,8 @@ export interface Hunk {
 }
 
 const MAX_D = 2000;
+/** Lines of changed middle section past which the diff is one replaced hunk without interning. */
+export const MAX_DIFF_LINES = 200_000;
 
 export function diffLines(a: string[], b: string[]): Hunk[] {
   let s = 0;
@@ -21,6 +23,9 @@ export function diffLines(a: string[], b: string[]): Hunk[] {
     ea--;
     eb--;
   }
+  // A huge rewritten middle (a 6 MB file of distinct lines took 2.4 s just to intern) could not
+  // come out as anything but one replaced hunk within MAX_D anyway: say so directly.
+  if (ea - s + (eb - s) > MAX_DIFF_LINES) return [{ a0: s, a1: ea, b0: s, b1: eb }];
   const ids = new Map<string, number>();
   const id = (x: string) => {
     let v = ids.get(x);

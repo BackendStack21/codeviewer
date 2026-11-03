@@ -93,7 +93,7 @@ describe("spansHtml", () => {
   test("wraps tokens, escapes HTML and shows hidden characters", () => {
     expect(D.spansHtml("let x = <a>", [[0, 3, "k"], [8, 11, "o"]])).toBe('<span class="t-k">let</span> x = <span class="t-o">&lt;a&gt;</span>');
     expect(D.spansHtml("", [])).toBe("");
-    expect(D.spansHtml("a‮b", [])).toBe("a\\u202eb");
+    expect(D.spansHtml("a\u202eb", [])).toBe("a\\u202eb");
     expect(D.spansHtml("x".repeat(5000), [[0, 5000, "s"]]).length).toBeLessThan(4100);
   });
 });

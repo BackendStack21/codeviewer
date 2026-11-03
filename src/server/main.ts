@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { startServer, VERSION } from "./http.ts";
-import { closeAppWindow, findAppBrowser, findMacApp, openDefault, openPrivately, pickFolder, runAppWindow } from "./browser.ts";
+import { closeAppWindow, findAppBrowser, findMacApp, isLocalViewerUrl, openDefault, openPrivately, pickFolder, removeBootPages, removeWindowFiles, runAppWindow } from "./browser.ts";
 
 const HELP = `codeviewer ${VERSION}: a fast, read-only code viewer with a built-in terminal
 
@@ -32,10 +32,14 @@ async function openCommand(target: string | undefined) {
   const url = process.env.CODEVIEWER_URL;
   const token = process.env.CODEVIEWER_TOKEN;
   if (!url || !token) die("not inside a codeviewer terminal (CODEVIEWER_URL is not set)");
-  const m = /^(.*?)(?::(\d+)(?:-\d+)?)?(?::\d+)?$/.exec(target)!;
+  // The variables can be overridden (direnv, a stale tmux environment): the token and the path go
+  // only to a codeviewer on this machine, and never follow a redirect elsewhere.
+  if (!isLocalViewerUrl(url)) die(`CODEVIEWER_URL is not a codeviewer on this machine: ${url}`);
+  const m = /^(.*?)(?::(\d+)(?:-\d+)?)?(?::\d+)?$/s.exec(target)!;
   const file = path.resolve(m[1]!);
   const res = await fetch(`${url}/api/open`, {
     method: "POST",
+    redirect: "error",
     headers: { "content-type": "application/json", "x-cv-token": token },
     body: JSON.stringify({ path: file, line: Number(m[2] ?? 0) }),
   }).catch((e: Error) => die(`cannot reach viewer: ${e.message}`));
@@ -49,7 +53,8 @@ async function main() {
   let dir: string | null = null;
   let port = 0;
   let host = "127.0.0.1";
-  let shell = process.env.SHELL || (existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash");
+  const defaultShell = process.env.SHELL || (existsSync("/bin/zsh") ? "/bin/zsh" : "/bin/bash");
+  let shell = defaultShell;
   let open = true;
   let appWindow = true;
   let machine = false;
@@ -103,15 +108,21 @@ async function main() {
   const relaunch = {
     available: () => windowed,
     run() {
-      Bun.spawn([process.execPath, root], { stdio: ["ignore", "ignore", "ignore"], detached: true } as Parameters<typeof Bun.spawn>[1]).unref();
+      // The same interface and shell as this run (not --port: this process still holds it).
+      const keep = [...(host !== "127.0.0.1" ? ["--host", host] : []), ...(shell !== defaultShell ? ["--shell", shell] : [])];
+      Bun.spawn([process.execPath, root, ...keep], { stdio: ["ignore", "ignore", "ignore"], detached: true } as Parameters<typeof Bun.spawn>[1]).unref();
       closeAppWindow();
       quit();
     },
   };
-  const app = startServer({ root, port, host, shell, token, openExternal: (u) => void openDefault(u), relaunch });
+  const app = startServer({ root, port, host, shell, token, openExternal: (u) => void openDefault(u), relaunch, onFirstClient: removeBootPages });
 
   const quit = () => {
     app.stop();
+    // process.exit skips runAppWindow's finally: close the window and delete its profile and boot
+    // page here (both hold the session token: Chromium records the launch URL).
+    closeAppWindow();
+    removeWindowFiles();
     process.exit(0);
   };
   process.on("SIGINT", quit);
@@ -130,7 +141,10 @@ async function main() {
   const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
   console.log(`\n  \x1b[1;38;2;125;170;255m◆ codeviewer\x1b[0m ${dim(VERSION)}\n`);
   console.log(`  ${dim("root")}  ${root}`);
-  console.log(`  ${dim("url ")}  ${app.url}\n`);
+  // The URL carries the session token. Printed for a person at a terminal (or --no-open, where it
+  // is the only way in); a desktop launch's stdout goes to the system journal, so not there.
+  const showToken = process.stdout.isTTY || !open;
+  console.log(`  ${dim("url ")}  ${showToken ? app.url : app.url.replace(/#.*$/, "")}\n`);
   if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") {
     console.log(`  \x1b[33m⚠ Listening on ${host}: anyone with the URL gets a shell on this machine.\x1b[0m\n`);
   }

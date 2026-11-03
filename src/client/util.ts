@@ -25,9 +25,9 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ESC[c]!);
+  return s.replace(/[&<>"']/g, (c) => ESC[c]!);
 }
 
 export function basename(p: string): string {
@@ -53,10 +53,22 @@ export function formatBytes(n: number): string {
 let settings: Record<string, unknown> = {};
 let saveTimer = 0;
 
+/** Keys changed since the last save. Only these are sent (and merged by the server). */
+let dirty = new Set<string>();
+
 function saveSettings(keepalive = false) {
   clearTimeout(saveTimer);
-  void fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings), keepalive }).catch(() => {});
+  if (!dirty.size) return;
+  // Just the changed keys: whole snapshots from two windows overwrote each other, and a large
+  // snapshot exceeded the 64 KB a keepalive request (the save on close) may carry.
+  const changes: Record<string, unknown> = {};
+  for (const k of dirty) changes[k] = k in settings ? settings[k] : null;
+  dirty = new Set();
+  void fetch("/api/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(changes), keepalive }).catch(() => {});
 }
+
+/** Runs before the save on close: pending debounced writes (layout) flush into the store. */
+const beforeSave: (() => void)[] = [];
 
 /**
  * Settings persisted by the server (~/.config/codeviewer), so they survive relaunches of the
@@ -69,13 +81,21 @@ export const store = {
     } catch {
       settings = {};
     }
-    window.addEventListener("pagehide", () => saveSettings(true));
+    window.addEventListener("pagehide", () => {
+      for (const f of beforeSave) f();
+      saveSettings(true);
+    });
+  },
+  /** Registers a flush run just before the save on close (a debounced store.set would be lost). */
+  beforeSave(f: () => void) {
+    beforeSave.push(f);
   },
   get<T>(key: string, def: T): T {
     return key in settings ? (settings[key] as T) : def;
   },
   set(key: string, v: unknown) {
     settings[key] = v;
+    dirty.add(key);
     clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => saveSettings(), 300);
   },
@@ -181,6 +201,14 @@ export function showHidden(s: string): string {
     const n = c.charCodeAt(0);
     return n < 256 ? `\\x${n.toString(16).padStart(2, "0")}` : `\\u${n.toString(16).padStart(4, "0")}`;
   });
+}
+
+/** HIDDEN minus the tab: file contents (code, diffs, previews) indent with tabs, and `tab-size` lays them out. */
+const HIDDEN_IN_TEXT = /[\x00-\x08\x0a-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g;
+
+/** showHidden for file contents: every HIDDEN character but the tab becomes an escape. Names keep the strict rule. */
+export function showHiddenText(s: string): string {
+  return s.replace(HIDDEN_IN_TEXT, (c) => showHidden(c));
 }
 
 /** True for targets that own Cmd+A / Cmd+C themselves (inputs, textareas such as the terminal's, editable hosts). */

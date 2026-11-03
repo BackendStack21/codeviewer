@@ -10,7 +10,7 @@ import { icons } from "./icons.ts";
 import { nativeThemeMessage, setDocumentTheme, type ThemeName } from "./theme.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
-import { basename, debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, store } from "./util.ts";
+import { basename, debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, showHidden, store } from "./util.ts";
 import { Help } from "./help.ts";
 import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
@@ -104,6 +104,8 @@ class App {
 
   async start() {
     await store.init();
+    // A layout change in the last 200 ms before closing would miss the save on close otherwise.
+    store.beforeSave(() => store.set("layout", { ...this.L, v: LAYOUT_VERSION }));
     const saved = store.get<Partial<Layout> & { v?: number }>("layout", {});
     // Older layouts carried pre-panel font sizes; let the new defaults apply.
     if (saved.v !== LAYOUT_VERSION) {
@@ -518,7 +520,7 @@ class App {
     if (!list?.length) return this.notify(`No history for ${basename(path)}`);
     const items: PickItem[] = list.map((c) => ({
       label: c.subject || "(no subject)",
-      detail: `${c.oid.slice(0, 7)} · ${c.author} · ${relativeTime(c.time)}${c.oldPath && c.oldPath !== c.path ? ` · from ${c.oldPath}` : ""}`,
+      detail: `${c.oid.slice(0, 7)} · ${showHidden(c.author)} · ${relativeTime(c.time)}${c.oldPath && c.oldPath !== c.path ? ` · from ${showHidden(c.oldPath)}` : ""}`,
       icon: `<span class="gbadge git-${c.status}">${c.status}</span>`,
       run: () => void this.editor.openCommitDiff(c, { focus: true }),
     }));
@@ -528,7 +530,7 @@ class App {
   private copyReference(withCode: boolean) {
     const r = this.editor.referenceTarget();
     if (typeof r === "string") return this.notify(r);
-    if (unsafePath(r.path)) return this.notify("This file name has control characters: no reference copied");
+    if (unsafePath(r.path)) return this.notify("This file name has control or shell command characters: no reference copied");
     const text = withCode && r.span && r.lines ? referenceWithCode(r.path, r.span, r.lines) : reference(r.path, r.span);
     void navigator.clipboard.writeText(text);
     this.notify(`Copied ${reference(r.path, r.span)}${withCode && r.span ? " with code" : ""}`);
@@ -538,7 +540,7 @@ class App {
   private referenceToTerminal() {
     const r = this.editor.referenceTarget();
     if (typeof r === "string") return this.notify(r);
-    if (unsafePath(r.path)) return this.notify("This file name has control characters: nothing inserted");
+    if (unsafePath(r.path)) return this.notify("This file name has control or shell command characters: nothing inserted");
     const term = this.terms.active;
     if (!term || this.terms.activeExited) return this.notify("No running terminal to insert into");
     if (!this.L.panel) this.togglePanel(true);
@@ -688,7 +690,7 @@ class App {
     this.lastStatus = s;
     // The text sits in its own span so a long path gets an ellipsis (flex items don't ellipsize bare text).
     const item = (text: string, title = "") => h("span", { class: "st-item", title }, h("span", { class: "st-text" }, text));
-    const left: HTMLElement[] = [h("span", { class: "st-item st-root", title: this.info.root }, h("span", { class: "st-dot live" }), this.info.name)];
+    const left: HTMLElement[] = [h("span", { class: "st-item st-root", title: showHidden(this.info.root) }, h("span", { class: "st-dot live" }), showHidden(this.info.name))];
     const g = this.git.status;
     if (g.repo) {
       const name = g.branch ?? (g.oid ? g.oid.slice(0, 7) : "no commits");
@@ -698,8 +700,8 @@ class App {
         g.head ? `last commit: ${g.head.subject} (${g.head.author}, ${relativeTime(g.head.time)})` : "",
       ].filter(Boolean).join("\n");
       const dirty = this.git.counts.changed + this.git.counts.untracked + this.git.counts.conflicts > 0;
-      const branch = h("button", { class: "st-item st-git", title: tip, onclick: () => this.showChanges() });
-      branch.innerHTML = `${icons.branch}<span>${esc(name)}${dirty ? "*" : ""}</span>`;
+      const branch = h("button", { class: "st-item st-git", title: tip.split("\n").map(showHidden).join("\n"), onclick: () => this.showChanges() });
+      branch.innerHTML = `${icons.branch}<span>${esc(showHidden(name))}${dirty ? "*" : ""}</span>`;
       if (g.behind || g.ahead) {
         branch.insertAdjacentHTML("beforeend", `<span class="st-ab">${g.behind ? `↓${g.behind}` : ""}${g.ahead ? `↑${g.ahead}` : ""}</span>`);
       }
@@ -744,7 +746,7 @@ class App {
     const u = this.updates.info;
     if (u?.available) {
       const b = h("button", { class: "st-item st-update", title: `Codeviewer ${u.latest} is available (you have ${u.current})`, onclick: () => this.updates.open() });
-      b.innerHTML = `<span class="st-up">↑</span>Update ${u.latest}`;
+      b.innerHTML = `<span class="st-up">↑</span>Update ${esc(u.latest ?? "")}`; // validated by the server too
       right.push(b);
     }
     right.push(h("span", { class: "st-item muted" }, "Read-only"));
@@ -782,7 +784,7 @@ class App {
         else if (mod && e.shiftKey && k === "e") {
           if (!this.L.sidebar) this.toggleSidebar(true);
           this.tree.focus();
-        } else if (mod && k === "b" && !inTerm) this.toggleSidebar();
+        } else if (mod && k === "b" && appKey) this.toggleSidebar();
         else if (mod && !e.shiftKey && k === "f" && !inTerm) this.editor.openFind();
         else if (e.ctrlKey && k === "g" && !inTerm) this.palette.open(":");
         else if (mod && k === "w" && !inTerm) this.editor.close();
@@ -807,7 +809,7 @@ class App {
         else if (mod && (k === "=" || k === "+") && appKey) this.zoom(1);
         else if (mod && k === "-" && appKey) this.zoom(-1);
         else if (mod && k === "0" && appKey) this.zoom(0);
-        else if (mod && k === "j" && !inTerm) this.togglePanel();
+        else if (mod && k === "j" && appKey) this.togglePanel();
         else if (helpKey(e, { isMac: IS_MAC }) && appKey) this.help.open();
         else if (e.key === "Escape" && this.help.isOpen) this.help.close();
         else if (e.key === "Escape" && this.palette.isOpen) this.palette.close();
@@ -827,7 +829,16 @@ class App {
       const ws = new WebSocket(wsUrl("/ws/events"));
       ws.onopen = () => {
         retry = 500;
-        if (document.body.classList.contains("offline")) this.notify("Reconnected to codeviewer");
+        if (document.body.classList.contains("offline")) {
+          this.notify("Reconnected to codeviewer");
+          // Events sent while disconnected are gone: refresh everything they would have touched.
+          void api.gitStatus().then((s) => this.git.set(s), () => {});
+          this.palette.invalidate();
+          this.search.markStale([], true);
+          void this.tree.reloadAll();
+          this.editor.onChanged(this.editor.tabs.map((t) => t.path));
+          this.changes.onGitChanged();
+        }
         document.body.classList.remove("offline");
       };
       ws.onmessage = (ev) => {
@@ -837,6 +848,9 @@ class App {
         if (msg.t === "changed" && msg.paths) {
           if (msg.structural) this.palette.invalidate();
           this.search.markStale(msg.paths, msg.many);
+          // A second edit to an already modified file changes no status, so no git event follows:
+          // the Changes counts would stay stale (it debounces its own refresh).
+          this.changes.onGitChanged();
           if (msg.many) {
             void this.tree.reloadAll();
             this.editor.onChanged(this.editor.tabs.map((t) => t.path));

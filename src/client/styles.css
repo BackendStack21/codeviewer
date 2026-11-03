@@ -1234,6 +1234,15 @@ svg {
     background: transparent;
   }
 }
+/* A bidi control in code (Trojan Source): zero width, so columns stay put; the bar makes it visible. */
+.bidi {
+  display: inline-block;
+  width: 0;
+  height: 1.1em;
+  vertical-align: text-bottom;
+  overflow: visible;
+  box-shadow: 0 0 0 1px var(--danger);
+}
 .trunc {
   -webkit-user-select: none;
   user-select: none;

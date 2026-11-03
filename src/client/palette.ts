@@ -1,6 +1,6 @@
 import { api } from "./api.ts";
 import { fileIcon, icons } from "./icons.ts";
-import { esc, h } from "./util.ts";
+import { esc, h, showHidden } from "./util.ts";
 
 export interface Command {
   id: string;
@@ -153,6 +153,8 @@ export class Palette {
     });
     this.input.addEventListener("input", () => this.update());
     this.input.addEventListener("keydown", (e) => {
+      // Enter or Escape that confirms or cancels an IME composition belongs to the IME.
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) this.move(1);
       else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) this.move(-1);
       else if (e.key === "Enter") this.accept(this.sel);
@@ -333,9 +335,10 @@ export class Palette {
 }
 
 function highlight(s: string, pos: number[]): string {
-  if (!pos.length) return esc(s);
+  // Names are untrusted: controls and bidi overrides show as escapes (positions index the raw string).
+  if (!pos.length) return esc(showHidden(s));
   const set = new Set(pos);
   let out = "";
-  for (let i = 0; i < s.length; i++) out += set.has(i) ? `<b>${esc(s[i]!)}</b>` : esc(s[i]!);
+  for (let i = 0; i < s.length; i++) out += set.has(i) ? `<b>${esc(showHidden(s[i]!))}</b>` : esc(showHidden(s[i]!));
   return out;
 }

@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { HEAVY_DIRS } from "./index.ts";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, openRegular } from "./files.ts";
 
@@ -18,6 +18,10 @@ import { looksBinary, openRegular } from "./files.ts";
  * - fsmonitor off, signature verification off, no textconv, submodules ignored (their
  *   configs are untrusted too), no external diff, no pager, no prompts.
  * - GIT_OPTIONAL_LOCKS=0: never writes the index or takes locks.
+ * - No transport at all (GIT_ALLOW_PROTOCOL empty, GIT_NO_LAZY_FETCH): a partial clone fetches
+ *   missing blobs from its promisor remote on demand, and the remote's config names programs
+ *   (remote.*.uploadpack, core.sshCommand). The environment variable wins over any
+ *   protocol.*.allow a hostile config sets.
  * Every argument is passed as an array (no shell).
  */
 
@@ -107,12 +111,20 @@ export function isOid(s: string): boolean {
   return OID.test(s);
 }
 
+/**
+ * Variables that would point git at another repository than the one under the viewed folder (set
+ * when codeviewer is started from a git hook, or by the user's shell): discovery is by the folder only.
+ */
+const LOCATORS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE", "GIT_REPLACE_REF_BASE"];
+
 const ENV = {
-  ...process.env,
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !LOCATORS.includes(k))),
   GIT_OPTIONAL_LOCKS: "0",
   GIT_TERMINAL_PROMPT: "0",
   GIT_PAGER: "cat",
   LC_ALL: "C",
+  GIT_ALLOW_PROTOCOL: "",
+  GIT_NO_LAZY_FETCH: "1",
 };
 
 const HARDEN = [
@@ -132,6 +144,20 @@ const HARDEN = [
   "-c", "diff.orderFile=/dev/null",
   // Counts must not silently turn into "binary" because a config set the threshold to 1.
   "-c", "core.bigFileThreshold=512m",
+  // A submodule is a repository with its own (untrusted) config, which the overrides below never
+  // read: git must not look inside one (diff ran `git status` in it, and its filters).
+  "-c", "diff.ignoreSubmodules=all",
+  // Unlimited rename detection (renameLimit=0) took 52 s on 15 000 renames, past the run timeout,
+  // so Changes and status came back empty.
+  "-c", "diff.renameLimit=1000",
+  "-c", "status.renameLimit=1000",
+  // Commit text in UTF-8, whatever the repository asks for (UTF-16 broke every parser).
+  "-c", "i18n.logOutputEncoding=UTF-8",
+  // `git diff` rewrites the index to refresh stat info (it ignores GIT_OPTIONAL_LOCKS), and
+  // writing the index runs the repository's own post-index-change hook: an extracted tarball with
+  // touched files ran it from the Changes view. No refresh (diffFiles copes), and no hooks at all.
+  "-c", "diff.autoRefreshIndex=false",
+  "-c", "core.hooksPath=/dev/null",
 ];
 
 /** Wall clock for one git run; a hostile config can make git read /dev/zero forever. */
@@ -167,12 +193,15 @@ export class Git {
   static async open(root: string): Promise<Git | null> {
     const bin = Bun.which("git");
     if (!bin) return null;
+    // Even rev-parse reads .git/config, HEAD and commondir to their end: check them first.
+    if (!preflight(root)) return null;
     const r = await run(bin, root, [...HARDEN, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir", "--show-object-format"]);
     if (r.code !== 0) return null;
     const [top, gitDir, common, format] = new TextDecoder().decode(r.out).trim().split("\n");
     if (!top || !gitDir) return null;
     const rel = path.relative(top, root);
-    if (rel.startsWith("..")) return null;
+    // Outside the work tree ("..", "../x"); a folder merely named "..x" is inside it.
+    if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return null;
     const prefix = rel ? rel.split(path.sep).join("/") + "/" : "";
     const commonDir = common ? path.resolve(root, common) : gitDir;
     const emptyTree = EMPTY_TREE[format ?? "sha1"] ?? EMPTY_TREE.sha1!;
@@ -180,19 +209,35 @@ export class Git {
     return new Git(bin, root, prefix, [...new Set([gitDir, commonDir])], env, emptyTree);
   }
 
-  private overrides: Promise<Record<string, string | undefined>> | null = null;
+  private overrides: Promise<Record<string, string | undefined> | null> | null = null;
 
-  /** The run environment, with every filter/diff/merge driver any config defines blanked (cached until config changes). */
-  private neutralize(): Promise<Record<string, string | undefined>> {
+  /**
+   * The run environment, with every filter/diff/merge driver any config defines blanked; null when
+   * the drivers could not be listed, and then no git call runs. Shared by the calls of one
+   * operation and recomputed for the next (fresh()): a config can include files the watcher does
+   * not see (a tracked file via include.path, ~/.gitconfig), and a driver added there must not run.
+   */
+  private neutralize(): Promise<Record<string, string | undefined> | null> {
     return (this.overrides ??= this.computeOverrides());
   }
 
-  private async computeOverrides(): Promise<Record<string, string | undefined>> {
-    const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\."], 1 << 20, this.env);
+  /** Starts an operation: the overrides are listed again before its first git call. */
+  private fresh() {
+    this.overrides = null;
+  }
+
+  private async computeOverrides(): Promise<Record<string, string | undefined> | null> {
+    // Re-checked for every operation: the repository can change while it is open.
+    if (!this.gitDirs.every(gitDirFilesOk)) return null;
+    const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "-z", "--get-regexp", "^(filter|diff|merge)\\."], 16 << 20, this.env);
+    // Fail closed: a cut-off or failed listing would leave every driver after the cut armed.
+    // (Exit code 1 means no driver is defined.)
+    if (r.truncated || (r.code !== 0 && r.code !== 1)) return null;
     const pairs: [string, string][] = [];
     const drivers = new Set<string>();
-    for (const key of new TextDecoder().decode(r.out).split("\n")) {
-      const m = /^(filter|diff|merge)\.(.+)\.[^.]+$/.exec(key.trim());
+    // NUL separated (-z): a key is never split, whatever its subsection holds.
+    for (const key of new TextDecoder().decode(r.out).split("\0")) {
+      const m = /^(filter|diff|merge)\.(.+)\.[^.]+$/s.exec(key);
       if (m) drivers.add(`${m[1]}.${m[2]}`);
     }
     for (const d of drivers) {
@@ -211,8 +256,10 @@ export class Git {
     return env;
   }
 
-  private async git(args: string[], maxBytes = MAX_OUT) {
-    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, await this.neutralize());
+  private async git(args: string[], maxBytes = MAX_OUT, signal?: AbortSignal) {
+    const env = await this.neutralize();
+    if (!env) return { code: 1, out: new Uint8Array(0), truncated: false };
+    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, env, signal);
   }
 
   /**
@@ -220,6 +267,7 @@ export class Git {
    * from `git ls-files -z --cached --others --exclude-standard --deduplicate -- .`; null on failure.
    */
   async listFiles(): Promise<string[] | null> {
+    this.fresh();
     const r = await this.git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate", "--", "."]);
     if (r.code !== 0) return null;
     return new TextDecoder().decode(r.out).split("\0").filter((f) => f && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
@@ -238,6 +286,7 @@ export class Git {
   }
 
   private async compute(): Promise<GitStatus> {
+    this.fresh();
     const [st, stash, head] = await Promise.all([
       this.git(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal", "--ignored=traditional", "--ignore-submodules=all", "--", "."]),
       this.git(["rev-list", "--walk-reflogs", "--count", "refs/stash"]),
@@ -314,6 +363,7 @@ export class Git {
    * `rev` (a full object id) reads the file as of that commit instead.
    */
   async base(rel: string, maxBytes: number, rev = "HEAD"): Promise<Uint8Array | null> {
+    this.fresh();
     if (rev !== "HEAD" && !isOid(rev)) return null;
     const r = await this.git(["cat-file", "blob", `${rev}:./${rel}`], maxBytes);
     return r.code === 0 && !r.truncated ? r.out : null;
@@ -371,6 +421,7 @@ export class Git {
   }
 
   private async computeChanges(scope: "head" | "branch"): Promise<Changes> {
+    this.fresh();
     const headOid = await this.rev("HEAD^{commit}");
     const base = headOid ? await this.detectBase(headOid) : null;
     const branch = scope === "branch" && !!base && !base.same;
@@ -409,10 +460,12 @@ export class Git {
    */
   private async diffFiles(rev: string): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
     const r = await this.git([
-      "diff", "--raw", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "-O/dev/null", rev, "--", ".",
+      "diff", "--raw", "--numstat", "-z", "-M", "--no-abbrev", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=all", "-O/dev/null", rev, "--", ".",
     ]);
-    if (r.code !== 0) return { files: [], truncated: false };
+    // A run cut by the timeout or the size cap is an incomplete list, not a clean tree.
+    if (r.code !== 0) return { files: [], truncated: r.truncated };
     const recs = new TextDecoder().decode(r.out).split("\0");
+    const statOnly = new Map<ChangeEntry, string>();
     const byPath = new Map<string, ChangeEntry>();
     let truncated = false;
     const strip = (p: string) => (p.startsWith(this.prefix) ? p.slice(this.prefix.length) : null);
@@ -435,6 +488,8 @@ export class Git {
         }
         const status = (/^[MADRCTUX]$/.test(st) ? st : "M") as ChangeEntry["status"];
         const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false };
+        // Kept for the stat-only check below (not part of the entry sent to the client).
+        if (status === "M" && parts[0] === parts[1]) statOnly.set(e, parts[2] ?? "");
         if (two) {
           const o = strip(oldP);
           // A rename from outside the viewed folder: show it as new, never a path above the root.
@@ -460,6 +515,23 @@ export class Git {
         e.removed = Number(m[2]);
       }
     }
+    // Without an index refresh, files whose stat info changed but whose content did not are listed
+    // as modified: a text file then has no numstat line, a binary one "-\t-". Drop the first, and
+    // hash the second (hash-object reads, never writes) to compare with the blob it came from.
+    const binaries: ChangeEntry[] = [];
+    for (const [e, oid] of statOnly) {
+      if (e.added === null && !e.binary) byPath.delete(e.path);
+      else if (e.binary && isOid(oid)) binaries.push(e);
+    }
+    for (let i = 0; i < binaries.length && i < 400; i += 100) {
+      const chunk = binaries.slice(i, i + 100);
+      const h = await this.git(["hash-object", "--no-filters", "--", ...chunk.map((e) => e.path)], 1 << 16);
+      if (h.code !== 0) continue;
+      const oids = new TextDecoder().decode(h.out).trim().split("\n");
+      chunk.forEach((e, n) => {
+        if (oids[n] === statOnly.get(e)) byPath.delete(e.path);
+      });
+    }
     return { files: [...byPath.values()], truncated };
   }
 
@@ -478,7 +550,8 @@ export class Git {
   /** Untracked, not ignored files under the root, with line counts for the first few text files. */
   private async untracked(): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
     const r = await this.git(["ls-files", "-z", "--others", "--exclude-standard", "--", "."]);
-    if (r.code !== 0) return { files: [], truncated: false };
+    // A run cut by the timeout or the size cap is an incomplete list, not a clean tree.
+    if (r.code !== 0) return { files: [], truncated: r.truncated };
     // A nested repository is listed as "dir/": not a file, nothing to count or diff.
     const all = new TextDecoder()
       .decode(r.out)
@@ -496,7 +569,7 @@ export class Git {
 
   private async countLines(e: ChangeEntry) {
     try {
-      const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")));
+      const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")), this.root);
       try {
         if (st.size > COUNT_MAX_BYTES) return;
         const buf = new Uint8Array(64 * 1024);
@@ -523,8 +596,12 @@ export class Git {
     } catch {}
   }
 
-  async blame(rel: string, line: number): Promise<BlameLine | null> {
-    const r = await this.git(["blame", "--porcelain", "--no-textconv", "-L", `${line},${line}`, "--", rel], 1 << 20);
+  async blame(rel: string, line: number, signal?: AbortSignal): Promise<BlameLine | null> {
+    this.fresh();
+    // --no-ignore-revs-file: blame.ignoreRevsFile from a hostile config (a missing file fails every
+    // blame, /dev/zero reads forever). `-c blame.ignoreRevsFile=` does not reset it: the empty value
+    // sorts first among the configured ones. A repository's real ignore list is not applied either.
+    const r = await this.git(["blame", "--porcelain", "--no-textconv", "--no-ignore-revs-file", "-L", `${line},${line}`, "--", rel], 1 << 20, signal);
     if (r.code !== 0) return null;
     const out = new TextDecoder().decode(r.out).split("\n");
     const hash = out[0]?.split(" ")[0] ?? "";
@@ -549,7 +626,9 @@ export class Git {
    * the file was renamed into the root from outside it ends at that rename (shown as added).
    */
   async history(rel: string): Promise<HistoryEntry[] | null> {
-    const args = ["--literal-pathspecs", "log", "--follow", "-z", "-M", "--no-color", "--no-decorate", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-relative",
+    this.fresh();
+    // --root: the commit that added the file is listed even under log.showRoot=false.
+    const args = ["--literal-pathspecs", "log", "--follow", "--root", "-z", "-M", "--no-color", "--no-decorate", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-relative",
       "--name-status", "--format=%H%x00%P%x00%an%x00%at%x00%s", `-n${MAX_HISTORY}`];
     // --diff-merges needs git 2.31; older ones list merges without files (they are skipped then).
     let r = await this.git([...args, "--diff-merges=first-parent", "--", rel], 4 << 20);
@@ -585,13 +664,16 @@ export class Git {
   /** Duration of the last `git status`, to back off on huge or stat-dirty repositories. */
   private lastMs = 0;
 
-  /** Schedules a debounced status refresh (at least 2× the last run's duration apart). */
+  /** Schedules a status refresh, throttled (at least 2× the last run's duration apart). */
   poke() {
-    if (this.timer) clearTimeout(this.timer);
+    // Already scheduled: keep that time. Restarting the wait on every poke meant a file written
+    // more often than every 200 ms (a log) held the status back for as long as it was written.
+    if (this.timer) return;
     this.timer = setTimeout(async () => {
       this.timer = null;
       const t0 = performance.now();
-      const s = await this.status();
+      const s = await this.status().catch(() => null);
+      if (!s) return;
       this.lastMs = performance.now() - t0;
       if (this.again) {
         this.again = false;
@@ -651,6 +733,63 @@ export function parseHistory(out: string, prefix = ""): HistoryEntry[] {
   return res;
 }
 
+/**
+ * Files git reads whole, and the most each may hold. A symlink to /dev/zero or a FIFO in their
+ * place made git allocate until memory ran out (or block for the 30 s run timeout), and no config
+ * key prevents those reads: each must be a regular file of a sane size, or git is not used at all.
+ */
+const GIT_FILES: [string, number][] = [
+  ["HEAD", 1 << 20], ["commondir", 1 << 16], ["gitdir", 1 << 16], ["shallow", 64 << 20], ["config", 16 << 20],
+  ["config.worktree", 16 << 20], ["info/attributes", 16 << 20], ["info/exclude", 16 << 20], ["info/grafts", 16 << 20],
+  ["info/sparse-checkout", 16 << 20], ["objects/info/alternates", 1 << 20], ["objects/info/commit-graphs/commit-graph-chain", 1 << 20],
+  ["packed-refs", 2 ** 30], ["index", 4 * 2 ** 30], ["sharedindex", 4 * 2 ** 30], // not `4 << 30`: that overflows to 0
+];
+
+/** True when every file of GIT_FILES that exists in `dir` is a regular file within its size. */
+export function gitDirFilesOk(dir: string): boolean {
+  for (const [name, max] of GIT_FILES) {
+    let st;
+    try {
+      st = lstatSync(path.join(dir, ...name.split("/")));
+    } catch {
+      continue; // absent: fine
+    }
+    if (!st.isFile() || st.size > max) return false;
+  }
+  return true;
+}
+
+/**
+ * Before git runs at all: the `.git` it will find for `root` (walking up; a `gitdir:` file followed),
+ * its common dir, and their files must all be safe to read. False refuses git for this folder.
+ */
+function preflight(root: string): boolean {
+  for (let d = root; ; d = path.dirname(d)) {
+    const dotgit = path.join(d, ".git");
+    let st;
+    try {
+      st = lstatSync(dotgit);
+    } catch {
+      if (path.dirname(d) === d) return true; // no repository: nothing for git to read
+      continue;
+    }
+    let gitDir = dotgit;
+    if (!st.isDirectory()) {
+      // A worktree's `.git` file: small and regular (a FIFO or /dev/zero in its place is refused).
+      if (!st.isFile() || st.size > 4096) return false;
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotgit, "utf8"));
+      if (!m) return true; // not a repository git recognises; it will say so itself
+      gitDir = path.resolve(d, m[1]!);
+    }
+    if (!gitDirFilesOk(gitDir)) return false;
+    let common = "";
+    try {
+      common = readFileSync(path.join(gitDir, "commondir"), "utf8").trim(); // checked above: small, regular
+    } catch {}
+    return !common || gitDirFilesOk(path.resolve(gitDir, common));
+  }
+}
+
 /** n-th space-separated field to the end of the record (paths may contain spaces). */
 function field(rec: string, n: number): string {
   let idx = 0;
@@ -658,8 +797,16 @@ function field(rec: string, n: number): string {
   return rec.slice(idx);
 }
 
-async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT, env: Record<string, string | undefined> = ENV) {
-  const p = Bun.spawn([bin, ...args], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT, env: Record<string, string | undefined> = ENV, signal?: AbortSignal) {
+  if (signal?.aborted) return { code: 1, out: new Uint8Array(0), truncated: false };
+  let p: ReturnType<typeof Bun.spawn>;
+  try {
+    p = Bun.spawn([bin, ...args], { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  } catch {
+    // The viewed folder was deleted (spawn fails on a missing cwd), or git was removed: a failed
+    // run, never a throw (from a status refresh timer it was an unhandled rejection: exit 1).
+    return { code: 1, out: new Uint8Array(0), truncated: false };
+  }
   const chunks: Uint8Array[] = [];
   let size = 0;
   let truncated = false;
@@ -667,6 +814,9 @@ async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT,
     truncated = true;
     p.kill();
   }, RUN_TIMEOUT_MS);
+  // The request that wanted this answer is gone (the cursor moved on): stop the process now.
+  const onAbort = () => p.kill();
+  signal?.addEventListener("abort", onAbort, { once: true });
   const reader = (p.stdout as ReadableStream<Uint8Array>).getReader();
   for (let r = await reader.read(); !r.done; r = await reader.read()) {
     if (size + r.value.length > maxBytes) {
@@ -679,6 +829,7 @@ async function run(bin: string, cwd: string, args: string[], maxBytes = MAX_OUT,
   }
   const code = await p.exited;
   clearTimeout(timer);
+  signal?.removeEventListener("abort", onAbort);
   const out = new Uint8Array(size);
   let o = 0;
   for (const c of chunks) {

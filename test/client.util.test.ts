@@ -72,7 +72,7 @@ describe("store", () => {
   let restore = () => {};
   afterEach(() => restore());
 
-  test("init loads settings from the server, get falls back to default, set debounces a PUT", async () => {
+  test("init loads settings from the server, get falls back to default, set debounces a PATCH of the changed keys", async () => {
     const m = mockFetch((url) => (url === "/api/settings" ? Response.json({ theme: "dark" }) : new Response("{}")));
     restore = m.restore;
     await u.store.init();
@@ -86,8 +86,9 @@ describe("store", () => {
     expect(m.calls.length).toBe(2);
     const put = m.calls[1]!;
     expect(put.url).toBe("/api/settings");
-    expect(put.init?.method).toBe("PUT");
-    expect(JSON.parse(put.init!.body as string)).toEqual({ theme: "dark", a: 1, b: 2 });
+    expect(put.init?.method).toBe("PATCH");
+    // Only what this window changed: another window's keys (theme here) are not sent back.
+    expect(JSON.parse(put.init!.body as string)).toEqual({ a: 1, b: 2 });
     expect(u.store.get("a", 0)).toBe(1);
   });
 
@@ -101,6 +102,9 @@ describe("store", () => {
     expect(m.calls.length).toBe(2);
     expect(m.calls[1]!.init?.keepalive).toBe(true);
     await new Promise((r) => setTimeout(r, 400));
+    expect(m.calls.length).toBe(2);
+    // Nothing changed since: no request at all.
+    dom.window.dispatchEvent(new FakeEvent("pagehide") as unknown as Event);
     expect(m.calls.length).toBe(2);
   });
 

@@ -1,7 +1,7 @@
 import { TerminalView } from "./term/view.ts";
 import type { Theme } from "./term/renderer.ts";
 import { icons } from "./icons.ts";
-import { esc, h, local, MOD } from "./util.ts";
+import { esc, h, local, MOD, showHidden } from "./util.ts";
 import { wsUrl } from "./auth.ts";
 
 interface Session {
@@ -31,6 +31,7 @@ function newId() {
 
 /** Terminal panel: tabs of PTY sessions that survive page reloads. */
 export class TerminalPanel {
+  private tabsQueued = false;
   readonly el: HTMLElement;
   private tabsEl: HTMLElement;
   private body: HTMLElement;
@@ -119,7 +120,13 @@ export class TerminalPanel {
       },
       onTitle: (t) => {
         s.title = t || this.shellName;
-        this.renderTabs();
+        // One tab-bar render per batch of output (30 000 title changes took over a second).
+        if (this.tabsQueued) return;
+        this.tabsQueued = true;
+        queueMicrotask(() => {
+          this.tabsQueued = false;
+          this.renderTabs();
+        });
       },
       onOpenPath: this.onOpenPath,
       onOpenUrl: this.onOpenUrl,
@@ -265,8 +272,8 @@ export class TerminalPanel {
   private renderTabs() {
     for (const [i, s] of this.sessions.entries()) {
       s.tabEl.className = `term-tab${s === this.active ? " active" : ""}${s.exited ? " exited" : ""}`;
-      s.tabEl.innerHTML = `<span class="term-dot"></span><span class="tab-name">${esc(s.title || `Terminal ${i + 1}`)}</span><button class="tab-close" title="Kill terminal">${icons.close}</button>`;
-      s.tabEl.title = s.title;
+      s.tabEl.innerHTML = `<span class="term-dot"></span><span class="tab-name">${esc(showHidden(s.title || `Terminal ${i + 1}`))}</span><button class="tab-close" title="Kill terminal">${icons.close}</button>`;
+      s.tabEl.title = showHidden(s.title);
       s.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(s);

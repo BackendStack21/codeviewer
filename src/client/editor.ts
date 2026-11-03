@@ -8,7 +8,7 @@ import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
 import { decidePreview, tooLargeNote } from "./mdgate.ts";
 import { planView, toggleLabel, toggleMode, viewMode } from "./viewstate.ts";
-import { basename, debounce, dirname, esc, formatBytes, h, MOD } from "./util.ts";
+import { basename, debounce, dirname, esc, formatBytes, h, MOD, showHidden } from "./util.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { hasSymbols, symbols, type Sym } from "./symbols.ts";
 import { lineSpan, type Span } from "./reference.ts";
@@ -133,18 +133,21 @@ export class Editor {
         const i = this.active ? this.tabs.indexOf(this.active) + 1 : this.tabs.length;
         this.tabs.splice(i, 0, tab);
       }
+      // load() applies the line. Set before the await: a second open() of the same file while this
+      // one loads (another search result) replaces it, and must not be undone when this resumes.
+      if (opts.line) tab.goto = { line: opts.line, col: opts.col, len: opts.len };
       this.activate(tab);
       await this.load(tab);
     } else {
       if (opts.pin) tab.pinned = true;
       this.activate(tab);
       if (opts.line && tab.md) await this.toSource(tab);
+      if (opts.line && tab.code) {
+        if (opts.col !== undefined && opts.len) tab.code.showRange(opts.line - 1, opts.col, opts.col + opts.len);
+        else tab.code.revealLine(opts.line - 1);
+      } else if (opts.line && !tab.md && !tab.image) tab.goto = { line: opts.line, col: opts.col, len: opts.len }; // still loading
     }
-    if (opts.line && tab.code) {
-      if (opts.col !== undefined && opts.len) tab.code.showRange(opts.line - 1, opts.col, opts.col + opts.len);
-      else tab.code.revealLine(opts.line - 1);
-    } else if (opts.line && !tab.md && !tab.image) tab.goto = { line: opts.line, col: opts.col, len: opts.len }; // still loading
-    if (opts.focus !== false) tab.code?.focus();
+    if (opts.focus !== false && this.active === tab) tab.code?.focus();
     this.render();
   }
 
@@ -352,6 +355,7 @@ export class Editor {
         tab.md = undefined;
       }
       if (!plan.code) this.dropCode(tab);
+      if (f.kind !== "image") this.dropImage(tab); // an image reload keeps its view (and zoom)
       if (f.kind === "text") {
         tab.eol = /\r\n/.test(f.text.slice(0, 10000)) ? "CRLF" : "LF";
         if (plan.view === "md") {
@@ -400,6 +404,7 @@ export class Editor {
         if (tab.image && reload) tab.image.reload(tab.mtime);
         else {
           this.dropCode(tab);
+          this.dropImage(tab);
           tab.image = new ImageView(tab.path, tab.mtime, f.size, () => this.status());
           tab.el.replaceChildren(tab.image.el);
           if (tab.path.toLowerCase().endsWith(".svg")) tab.el.prepend(this.viewToggle(tab, "View source", icons.code));
@@ -447,7 +452,7 @@ export class Editor {
       tab.forcePreview = next.forcePreview; // an explicit request overrides the size gate
     } else tab.asSource = !tab.asSource; // SVG: image or source
     this.dropCode(tab);
-    tab.image = undefined;
+    this.dropImage(tab);
     tab.md?.dispose();
     tab.md = undefined;
     void this.load(tab);
@@ -523,9 +528,16 @@ export class Editor {
     tab.code = undefined;
   }
 
+  /** Releases an image view (its blob: URL holds the file's bytes until revoked). */
+  private dropImage(tab: Tab) {
+    tab.image?.dispose();
+    tab.image = undefined;
+  }
+
   private disposeTab(tab: Tab) {
     tab.gen++; // a load still in flight must not build a view for a closed tab
     tab.code?.dispose();
+    tab.image?.dispose();
     tab.diff?.dispose();
     tab.md?.dispose();
     tab.el.remove();
@@ -570,19 +582,31 @@ export class Editor {
     else if (g?.xy[0] === "A") code.setGit("", false); // staged new file: HEAD has nothing
     else {
       const base = await api.gitBase(tab.path);
-      if (gen !== tab.gen || tab.code !== code) return;
+      if (gen !== tab.gen || tab.code !== code) {
+        // Discarded (a reload overtook it): forget the key, or the reload's own refresh skips
+        // and the gutter keeps the old HEAD base.
+        if (tab.gitKey === key) tab.gitKey = "";
+        return;
+      }
       code.setGit(base, false);
     }
     if (tab === this.active) this.status();
   }
 
+  private blameAbort: AbortController | null = null;
+
   private async loadBlame(tab: Tab, code: CodeView, line: number) {
     const g = this.git?.repo ? this.git.file(tab.path) : null;
     if (!this.git?.repo || line < 0 || g?.letter === "U" || g?.letter === "I" || g?.letter === "A") return;
-    const b = await api.gitBlame(tab.path, line + 1);
+    // One blame at a time: the previous request is aborted, which kills its git process (a git
+    // blame on a deep history takes seconds, and every cursor move used to start another).
+    this.blameAbort?.abort();
+    const ac = (this.blameAbort = new AbortController());
+    const b = await api.gitBlame(tab.path, line + 1, ac.signal);
+    if (this.blameAbort === ac) this.blameAbort = null;
     if (!b || tab.code !== code || code.activeLine !== line) return;
-    const who = b.you ? "You" : esc(b.author);
-    const html = b.uncommitted ? "You · uncommitted change" : `${who}, ${relativeTime(b.time)} · ${esc(b.summary)}`;
+    const who = b.you ? "You" : esc(showHidden(b.author));
+    const html = b.uncommitted ? "You · uncommitted change" : `${who}, ${relativeTime(b.time)} · ${esc(showHidden(b.summary))}`;
     code.setBlame(line, html);
   }
 
@@ -708,11 +732,11 @@ export class Editor {
       const g = t.isDiff && t.file ? { letter: letterOf(t.file.status), label: labelOf(t.file) } : this.git?.repo ? this.git.file(t.path) : null;
       if (g) cls.push(`git-${g.letter}`);
       t.tabEl.className = cls.join(" ");
-      t.tabEl.title = t.commit
+      t.tabEl.title = showHidden(t.commit
         ? `${t.path} · ${t.commit.oid.slice(0, 7)} ${t.commit.subject} (${t.commit.author}, ${relativeTime(t.commit.time)})`
-        : g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path;
+        : g ? `${t.path} · ${g.label}${t.isDiff ? ` · diff ${this.diffContext.vs}` : ""}` : t.path);
       t.tabEl.setAttribute("aria-selected", String(t === this.active));
-      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(basename(t.path))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(hint(t.path))}</span>` : ""}${t.commit ? `<span class="tab-kind oid">${t.commit.oid.slice(0, 7)}</span>` : t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
+      t.tabEl.innerHTML = `${fileIcon(t.path)}<span class="tab-name">${esc(showHidden(basename(t.path)))}</span>${hint(t.path) ? `<span class="tab-dir">${esc(showHidden(hint(t.path)))}</span>` : ""}${t.commit ? `<span class="tab-kind oid">${t.commit.oid.slice(0, 7)}</span>` : t.isDiff ? '<span class="tab-kind">diff</span>' : ""}<button class="tab-close" title="Close (${MOD}W)">${icons.close}</button>`;
       t.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(t);
@@ -727,12 +751,12 @@ export class Editor {
         const full = parts.slice(0, i + 1).join("/");
         const isLast = i === parts.length - 1;
         this.crumbs.append(
-          h("button", { class: `crumb${isLast ? " last" : ""}`, onclick: () => this.onReveal(full), title: full }, p),
+          h("button", { class: `crumb${isLast ? " last" : ""}`, onclick: () => this.onReveal(full), title: showHidden(full) }, showHidden(p)),
         );
         if (!isLast) this.crumbs.append(h("span", { class: "crumb-sep" }, "›"));
       });
       const c = this.active.commit;
-      if (c) this.crumbs.append(h("span", { class: "pill", title: `${c.oid}\n${c.author}, ${relativeTime(c.time)}` }, `${c.oid.slice(0, 7)} · ${c.subject}`));
+      if (c) this.crumbs.append(h("span", { class: "pill", title: `${c.oid}\n${showHidden(c.author)}, ${relativeTime(c.time)}` }, `${c.oid.slice(0, 7)} · ${showHidden(c.subject)}`));
       else if (this.active.isDiff) this.crumbs.append(h("span", { class: "pill" }, `diff ${this.diffContext.vs}`));
       if (this.active.truncated) this.crumbs.append(h("span", { class: "pill warn" }, `showing first ${formatBytes(8 * 1024 * 1024)}`));
       if (this.active.deleted) this.crumbs.append(h("span", { class: "pill warn" }, "deleted on disk"));
@@ -786,29 +810,43 @@ class ImageView {
       },
       { passive: false },
     );
-    new ResizeObserver(() => this.mode === "fit" && this.apply()).observe(this.stage);
+    this.ro = new ResizeObserver(() => this.mode === "fit" && this.apply());
+    this.ro.observe(this.stage);
     this.reload(mtime);
+  }
+
+  private ro: ResizeObserver;
+  private disposed = false;
+
+  /** Releases the image's bytes (the blob: URL holds them until revoked) and the observer. */
+  dispose() {
+    this.disposed = true;
+    this.ro.disconnect();
+    if (this.blobUrl) URL.revokeObjectURL(this.blobUrl);
+    this.blobUrl = "";
   }
 
   private blobUrl = "";
   private failed = false;
 
   /** The window cannot decode the file (damaged, or TIFF/HEIC outside WebKit): show its bytes. */
-  private async undecodable() {
+  private async undecodable(reason?: string) {
     if (this.failed) return;
     this.failed = true;
-    const note = h("div", { class: "notice error" }, "This image could not be displayed: the file is damaged, or this window cannot decode its format. Its first bytes:");
+    const note = h("div", { class: "notice error" }, `${reason ?? "This image could not be displayed: the file is damaged, or this window cannot decode its format."} Its first bytes:`);
     this.el.replaceChildren(note, await binaryView(this.path, this.size));
   }
 
   reload(_mtime: number) {
     void api.rawBlobUrl(this.path).then(
       (u) => {
+        // Closed while it loaded: nothing will show it.
+        if (this.disposed) return URL.revokeObjectURL(u);
         if (this.blobUrl) URL.revokeObjectURL(this.blobUrl);
         this.blobUrl = u;
         this.img.src = u;
       },
-      () => void this.undecodable(),
+      (e: unknown) => void this.undecodable(e instanceof Error && /too large|too many times/.test(e.message) ? e.message : undefined),
     );
   }
 

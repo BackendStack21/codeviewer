@@ -264,6 +264,9 @@ const NAMES: Record<string, string> = {
   "cmakelists.txt": "make", gemfile: "rb", rakefile: "rb", ".editorconfig": "toml", ".npmrc": "toml",
 };
 
+/** Every language id lexLine knows (tests run each against pathological input). */
+export const LANG_IDS: readonly string[] = Object.keys(LANGS);
+
 export function languageFor(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
   if (NAMES[base]) return NAMES[base]!;
@@ -296,6 +299,8 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
 
   const n = text.length;
   let i = 0;
+  /** CSS: the line's last ";" and "{" (computed once, for property detection). */
+  let cssLast: { semi: number; brace: number } | null = null;
 
   // Continue a construct from the previous line.
   if (state > 0 && state < 100 && L.block) {
@@ -321,7 +326,10 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
   }
 
   if (L.special === "yaml") {
-    const m = /^(\s*-?\s*)([^\s#:'"][^#:]*?|"[^"]*"|'[^']*')(\s*:)(?=\s|$)/.exec(text.slice(i));
+    // The key may not end in whitespace (`[^#:]*[^#:\s]`), so `\s*:` never competes with it for the
+    // same spaces, and the indent is `\s*(?:-\s*)?` (not `\s*-?\s*`): a line of spaces was quadratic
+    // (171 ms for 10 000).
+    const m = /^(\s*(?:-\s*)?)([^\s#:'"](?:[^#:]*[^#:\s])?|"[^"]*"|'[^']*')(\s*:)(?=\s|$)/.exec(text.slice(i));
     if (m && i === 0) {
       out.push([m[1]!.length, m[1]!.length + m[2]!.length, "p"]);
       i = m[0].length;
@@ -436,17 +444,24 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
       const r = CSS_IDENT.exec(text);
       if (r) {
         const end = i + r[0].length;
-        const after = text.slice(end).trimStart();
-        // property: value; (but not a pseudo-class like a:hover {)
-        if (after.startsWith(":") && /;|^\s*:[^{]*$/.test(after)) out.push([i, end, "p"]);
+        // The next non-space character, found without copying the rest of the line: slicing and
+        // regex-testing that rest for every identifier was quadratic (`a::a::…`, 64 KB: 650 ms).
+        let k = end;
+        while (k < n && /\s/.test(text[k]!)) k++;
+        // property: value; (but not a pseudo-class like a:hover {): a ";" somewhere after the
+        // colon, or no "{" after it. The line's last ";" and "{" answer both.
+        cssLast ??= { semi: text.lastIndexOf(";"), brace: text.lastIndexOf("{") };
+        if (text[k] === ":" && (cssLast.semi > k || cssLast.brace < k)) out.push([i, end, "p"]);
         else if (r[0].startsWith("--")) out.push([i, end, "v"]);
-        else if (after.startsWith("(")) out.push([i, end, "f"]);
+        else if (text[k] === "(") out.push([i, end, "f"]);
         i = end;
         continue;
       }
     }
     if (L.dollarVars && c === 36 /* $ */) {
-      const m = /\$(?:\{[^}]*\}|\(|[\w@#?*!$-]+)/y;
+      // `${…}` stops at the next "{" and after 256 characters: scanning to the line's end for
+      // every unclosed `${` was quadratic.
+      const m = /\$(?:\{[^{}]{0,256}\}|\(|[\w@#?*!$-]+)/y;
       m.lastIndex = i;
       const r = m.exec(text);
       if (r) {
@@ -506,6 +521,9 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
   return 0;
 }
 
+/** Longest JS regex literal recognised as one (longer ones lex as operators and text). */
+const MAX_REGEX_LITERAL = 512;
+
 const REGEX_AFTER_WORD = new Set(["return", "typeof", "case", "do", "else", "in", "of", "new", "delete", "void", "throw", "yield", "await", "instanceof"]);
 
 /**
@@ -515,14 +533,24 @@ const REGEX_AFTER_WORD = new Set(["return", "typeof", "case", "do", "else", "in"
 function regexLiteralEnd(text: string, i: number): number {
   const next = text[i + 1];
   if (next === "/" || next === "*") return 0;
-  const before = text.slice(0, i).trimEnd();
-  const last = before[before.length - 1];
+  // Scanned backwards from `i`, never by slicing the prefix: a regex anchored at `$` over the whole
+  // prefix, per "/", made one long line take seconds (cubic in the line length).
+  let k = i - 1;
+  while (k >= 0 && /\s/.test(text[k]!)) k--;
+  const last = k >= 0 ? text[k] : undefined;
   if (last !== undefined && !"(,=:[!&|?{};+-*%<>~^".includes(last)) {
-    const word = /[A-Za-z_$][\w$]*$/.exec(before)?.[0];
+    // The word before it ([A-Za-z_$][\w$]*); no keyword in REGEX_AFTER_WORD is longer than 10.
+    let w = k;
+    while (w >= 0 && k - w <= 11 && /[\w$]/.test(text[w]!)) w--;
+    if (w >= 0 && k - w > 11 && /[\w$]/.test(text[w]!)) return 0; // a long identifier: division
+    let word = text.slice(w + 1, k + 1);
+    word = word.replace(/^\d+/, "");
     if (!word || !REGEX_AFTER_WORD.has(word)) return 0; // division: a / b, x) / 2, arr[i] / n
   }
   let inClass = false;
-  for (let j = i + 1; j < text.length; j++) {
+  // A regex literal ends within a few hundred characters; scanning to the end of the line for
+  // every unterminated "/" was quadratic.
+  for (let j = i + 1, stop = Math.min(text.length, i + 1 + MAX_REGEX_LITERAL); j < stop; j++) {
     const ch = text[j];
     if (ch === "\\") j++;
     else if (ch === "[") inClass = true;
@@ -657,6 +685,15 @@ function lexMarkdown(text: string, state: number, out: Span[]): number {
  * Per-document highlighter: caches the lexer state at each line start and lazily
  * advances it, so the cost of highlighting line N is paid once.
  */
+/**
+ * Columns of a line that are lexed: views colour at most 1000 (codeview HIGHLIGHT_COLS) or 4000,
+ * and some scans are quadratic in the line (an unterminated regex per "/", `${`, `[`): lexing a
+ * 10 000-character line in full took seconds for 100 crafted lines. A construct that opens past
+ * this column (a block comment in a minified line) does not carry to the next line.
+ */
+export const LEX_COLS = 2000;
+const lexed = (text: string) => (text.length > LEX_COLS ? text.slice(0, LEX_COLS) : text);
+
 export class Highlighter {
   private states: Int32Array;
   private known = 1; // states[0..known) are valid
@@ -677,7 +714,7 @@ export class Highlighter {
       const scratch: Span[] = [];
       for (let i = this.known - 1; i < idx; i++) {
         scratch.length = 0;
-        this.states[i + 1] = lines[i]!.length > 10_000 ? 0 : lexLine(this.lang, lines[i]!, this.states[i]!, scratch);
+        this.states[i + 1] = lines[i]!.length > 10_000 ? 0 : lexLine(this.lang, lexed(lines[i]!), this.states[i]!, scratch);
       }
       this.known = idx + 1;
     }
@@ -685,7 +722,7 @@ export class Highlighter {
     out.length = 0;
     const text = lines[idx]!;
     if (text.length > 10_000) return [];
-    lexLine(this.lang, text, this.states[idx]!, out);
+    lexLine(this.lang, lexed(text), this.states[idx]!, out);
     return out.slice().sort((a, b) => a[0] - b[0]);
   }
 }

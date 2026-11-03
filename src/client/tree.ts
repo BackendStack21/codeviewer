@@ -1,6 +1,6 @@
 import { api, type Entry } from "./api.ts";
 import { chevron, fileIcon, folderIcon } from "./icons.ts";
-import { dirname, esc, h, IS_MAC } from "./util.ts";
+import { dirname, esc, h, IS_MAC, showHidden } from "./util.ts";
 import { showContextMenu } from "./menu.ts";
 import type { GitState } from "./git.ts";
 
@@ -187,7 +187,7 @@ export class FileTree {
         (isDir ? ` aria-expanded="${n.expanded}"` : "") +
         `>` +
         (n.note ? `<span class="twisty"></span>` : isDir ? `<span class="twisty${n.expanded ? " open" : ""}">${chevron}</span>${folderIcon(n.expanded)}` : `<span class="twisty"></span>${fileIcon(n.name)}`) +
-        `<span class="name">${esc(n.name)}</span>` +
+        `<span class="name">${esc(showHidden(n.name))}</span>` +
         (n.link ? `<span class="badge" title="symlink">↗</span>` : "") +
         (changed ? `<span class="dot" title="Changed on disk"></span>` : "") +
         gitBadge +
