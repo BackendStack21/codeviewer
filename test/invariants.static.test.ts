@@ -224,3 +224,11 @@ describe("Process boundaries", () => {
     expect(src).toMatch(/if \(!isLocalViewerUrl\(url\)\)/);
   });
 });
+
+describe("Source hygiene", () => {
+  test("no source or test file holds raw bidi controls (write them as \\u escapes)", () => {
+    const raw = /[\u202a-\u202e\u2066-\u2069]/;
+    for (const f of [...SERVER, ...CLIENT, ...files("test"), ...files("scripts")]) if (raw.test(read(f))) throw new Error(`${f} contains a raw bidi control`);
+  });
+});
+

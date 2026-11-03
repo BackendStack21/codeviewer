@@ -30,7 +30,7 @@ const TOKENS = [
   "javascript:", "JaVaScRiPt:", "java\tscript:", "vbscript:", "data:text/html,x", "file:///etc/passwd", "blob:x", "//evil.test/x",
   "https://a.example/b.png", "http://a.b/c", "mailto:a@b.co", "<https://x.y>", "img/a.png", "../a.png", "../../a.png", ".env",
   "/api/raw?path=.env", "x.md#sec", "#frag", "#", "|", "|---|:-:|", "---", "===", "- ", "* ", "1. ", "- [x] ", "- [ ] ", "> ",
-  "\n", "\n\n", " ", "    ", "\t", "\\", "\u0001", "‮", "​", "name=", "id=", "style=", "onclick=", "on", "\"", "'", "alt", "title",
+  "\n", "\n\n", " ", "    ", "\t", "\\", "\u0001", "\u202e", "​", "name=", "id=", "style=", "onclick=", "on", "\"", "'", "alt", "title",
 ];
 
 function gen(rnd: () => number): string {

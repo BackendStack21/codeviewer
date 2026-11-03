@@ -125,7 +125,7 @@ describe("ChangesView", () => {
   });
 
   test("paths are escaped and control characters made visible", async () => {
-    const t = make(() => data([f("<b>x</b>‮.ts", "M")]));
+    const t = make(() => data([f("<b>x</b>\u202e.ts", "M")]));
     t.v.setRepo(true);
     await t.v.refresh();
     expect(t.list.innerHTML).not.toContain("<b>x</b>");

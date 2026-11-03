@@ -59,6 +59,6 @@ describe("unsafePath", () => {
     expect(unsafePath("src/[id]/page (copy).tsx")).toBe(false);
     expect(unsafePath("x\x1b[201~")).toBe(true);
     expect(unsafePath("x\u0085y")).toBe(true);
-    expect(unsafePath("evil‮txt.sh")).toBe(true);
+    expect(unsafePath("evil\u202etxt.sh")).toBe(true);
   });
 });

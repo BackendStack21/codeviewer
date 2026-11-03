@@ -552,10 +552,10 @@ describe("SearchView", () => {
   });
 
   test("control characters and bidi overrides are shown as visible escapes", async () => {
-    const bidi = "‮⁦⁩‪";
+    const bidi = "\u202e\u2066\u2069\u202a";
     const t = make(
       quick(
-        file(`dir‮fdp.ts`, [m(1, `a\u0001b\u001bc\u009fd${bidi}e`, 0, 1)]),
+        file(`dir\u202efdp.ts`, [m(1, `a\u0001b\u001bc\u009fd${bidi}e`, 0, 1)]),
         done({ files: 1, matches: 1 }),
       ),
     );
@@ -563,7 +563,7 @@ describe("SearchView", () => {
     t.enter();
     await t.flush();
     const html = t.results.innerHTML;
-    for (const raw of ["\u0001", "\u001b", "\u009f", "‮", "⁦", "⁩", "‪"]) expect(html).not.toContain(raw);
+    for (const raw of ["\u0001", "\u001b", "\u009f", "\u202e", "\u2066", "\u2069", "\u202a"]) expect(html).not.toContain(raw);
     expect(html).toContain("\\x01");
     expect(html).toContain("\\x1b");
     expect(html).toContain("\\x9f");
