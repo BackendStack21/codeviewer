@@ -15,6 +15,9 @@ import { Candidates, compileQuery, globsOk, createWorkerScanner, type SearchEven
 
 import pkg from "../../package.json" with { type: "json" };
 
+/** How long /api/raw waits before failing a body whose file shrank: see the comment there. */
+const RAW_ABORT_DELAY_MS = 50;
+
 export const VERSION: string = pkg.version;
 
 export interface ServeOptions {
@@ -416,8 +419,12 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
               const { bytesRead } = chunk.length ? await fh.read(chunk, 0, chunk.length, pos) : { bytesRead: 0 };
               if (bytesRead === 0) {
                 await fh.close();
+                if (pos >= stop) return ctl.close();
                 // The file shrank after fstat: fail the body rather than send fewer bytes than promised.
-                return pos < stop ? ctl.error(new Error("file changed while reading")) : ctl.close();
+                // Bun 1.4.4 can drop an error raised right after a chunk and leave the connection open
+                // with no end of body (one in four, and idleTimeout is 0); waiting inside pull closes it.
+                await Bun.sleep(RAW_ABORT_DELAY_MS);
+                return ctl.error(new Error("file changed while reading"));
               }
               pos += bytesRead;
               ctl.enqueue(chunk.subarray(0, bytesRead));

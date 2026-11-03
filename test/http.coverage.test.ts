@@ -511,24 +511,37 @@ test("/api/raw honours a single byte range (206/416) so media can seek, also und
 });
 
 test("/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks", async () => {
-  const p = path.join(dir, "shrink.bin");
-  await writeFile(p, new Uint8Array(2 * 1024 * 1024));
-  const r = await get("/api/raw?path=shrink.bin");
-  expect(r.status).toBe(200);
-  const reader = r.body!.getReader();
-  const first = await reader.read();
-  expect(first.done).toBe(false);
-  await truncate(p, 10);
-  // The transfer fails (the stream is errored): never a quiet success with a truncated body.
-  let failed = false;
-  try {
-    for (let c = await reader.read(); !c.done; c = await reader.read());
-  } catch {
-    failed = true;
+  // Repeated: Bun can lose the error and leave the connection open, about one run in four. The file
+  // is large (and sparse) so that the transfer is still running when it shrinks.
+  const size = 256 * 1024 * 1024;
+  const outcomes: string[] = [];
+  for (let i = 0; i < 25; i++) {
+    const p = path.join(dir, "shrink.bin");
+    await writeFile(p, "");
+    await truncate(p, size);
+    const r = await get("/api/raw?path=shrink.bin");
+    expect(r.status).toBe(200);
+    const reader = r.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    let bytes = first.value!.length;
+    await truncate(p, 10);
+    const drain = async () => {
+      try {
+        for (let c = await reader.read(); !c.done; c = await reader.read()) bytes += c.value.length;
+        return bytes === size ? "complete" : `short by ${size - bytes}`;
+      } catch {
+        return "failed";
+      }
+    };
+    outcomes.push(await Promise.race([drain(), Bun.sleep(1500).then(() => "hang")]));
   }
-  expect(failed).toBe(true);
+  // Never a hang and never a quiet success with a truncated body. "complete" means every byte had
+  // already been sent before the file shrank, which is a correct transfer.
+  expect(outcomes.filter((o) => o !== "failed" && o !== "complete")).toEqual([]);
+  expect(outcomes).toContain("failed");
   expect((await get("/api/info")).status).toBe(200);
-});
+}, 45_000);
 
 test("round 15: no Bun error page, own-key MIME lookups, whole-byte limits, files-only open", async () => {
   // A Host header that makes the URL unparseable: a JSON 400/421, never an HTML page with paths.
