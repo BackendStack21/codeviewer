@@ -510,12 +510,12 @@ test("/api/raw honours a single byte range (206/416) so media can seek, also und
   expect((await get("/api/info")).status).toBe(200);
 });
 
-for (const mb of [2, 2]) test(`/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks ${mb}`, async () => {
+test("/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks", async () => {
   // Repeated: Bun can lose the error and leave the connection open, about one run in four. The file
   // is large (and sparse) so that the transfer is still running when it shrinks.
-  const size = mb * 1024 * 1024;
+  const size = 256 * 1024 * 1024;
   const outcomes: string[] = [];
-  for (let i = 0; i < 600; i++) {
+  for (let i = 0; i < 25; i++) {
     const p = path.join(dir, "shrink.bin");
     await writeFile(p, "");
     await truncate(p, size);
@@ -536,12 +536,12 @@ for (const mb of [2, 2]) test(`/api/raw fails the body instead of sending fewer 
     };
     outcomes.push(await Promise.race([drain(), Bun.sleep(1500).then(() => "hang")]));
   }
-  console.log("SHRINK", mb, JSON.stringify(outcomes.reduce<Record<string, number>>((m, o) => ((m[o] = (m[o] ?? 0) + 1), m), {})));
   // Never a hang and never a quiet success with a truncated body. "complete" means every byte had
   // already been sent before the file shrank, which is a correct transfer.
   expect(outcomes.filter((o) => o !== "failed" && o !== "complete")).toEqual([]);
+  expect(outcomes).toContain("failed");
   expect((await get("/api/info")).status).toBe(200);
-}, 120_000);
+}, 45_000);
 
 test("round 15: no Bun error page, own-key MIME lookups, whole-byte limits, files-only open", async () => {
   // A Host header that makes the URL unparseable: a JSON 400/421, never an HTML page with paths.
