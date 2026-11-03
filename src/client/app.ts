@@ -10,7 +10,7 @@ import { icons } from "./icons.ts";
 import { nativeThemeMessage, setDocumentTheme, type ThemeName } from "./theme.ts";
 import { GitState, relativeTime } from "./git.ts";
 import { Updates } from "./updates.ts";
-import { basename, debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, store } from "./util.ts";
+import { basename, debounce, dragSplitter, esc, formatBytes, h, IS_MAC, key, MOD, showHidden, store } from "./util.ts";
 import { Help } from "./help.ts";
 import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
@@ -518,7 +518,7 @@ class App {
     if (!list?.length) return this.notify(`No history for ${basename(path)}`);
     const items: PickItem[] = list.map((c) => ({
       label: c.subject || "(no subject)",
-      detail: `${c.oid.slice(0, 7)} · ${c.author} · ${relativeTime(c.time)}${c.oldPath && c.oldPath !== c.path ? ` · from ${c.oldPath}` : ""}`,
+      detail: `${c.oid.slice(0, 7)} · ${showHidden(c.author)} · ${relativeTime(c.time)}${c.oldPath && c.oldPath !== c.path ? ` · from ${showHidden(c.oldPath)}` : ""}`,
       icon: `<span class="gbadge git-${c.status}">${c.status}</span>`,
       run: () => void this.editor.openCommitDiff(c, { focus: true }),
     }));
@@ -688,7 +688,7 @@ class App {
     this.lastStatus = s;
     // The text sits in its own span so a long path gets an ellipsis (flex items don't ellipsize bare text).
     const item = (text: string, title = "") => h("span", { class: "st-item", title }, h("span", { class: "st-text" }, text));
-    const left: HTMLElement[] = [h("span", { class: "st-item st-root", title: this.info.root }, h("span", { class: "st-dot live" }), this.info.name)];
+    const left: HTMLElement[] = [h("span", { class: "st-item st-root", title: this.info.root }, h("span", { class: "st-dot live" }), showHidden(this.info.name))];
     const g = this.git.status;
     if (g.repo) {
       const name = g.branch ?? (g.oid ? g.oid.slice(0, 7) : "no commits");
@@ -699,7 +699,7 @@ class App {
       ].filter(Boolean).join("\n");
       const dirty = this.git.counts.changed + this.git.counts.untracked + this.git.counts.conflicts > 0;
       const branch = h("button", { class: "st-item st-git", title: tip, onclick: () => this.showChanges() });
-      branch.innerHTML = `${icons.branch}<span>${esc(name)}${dirty ? "*" : ""}</span>`;
+      branch.innerHTML = `${icons.branch}<span>${esc(showHidden(name))}${dirty ? "*" : ""}</span>`;
       if (g.behind || g.ahead) {
         branch.insertAdjacentHTML("beforeend", `<span class="st-ab">${g.behind ? `↓${g.behind}` : ""}${g.ahead ? `↑${g.ahead}` : ""}</span>`);
       }

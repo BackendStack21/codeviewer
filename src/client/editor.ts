@@ -727,12 +727,12 @@ export class Editor {
         const full = parts.slice(0, i + 1).join("/");
         const isLast = i === parts.length - 1;
         this.crumbs.append(
-          h("button", { class: `crumb${isLast ? " last" : ""}`, onclick: () => this.onReveal(full), title: full }, p),
+          h("button", { class: `crumb${isLast ? " last" : ""}`, onclick: () => this.onReveal(full), title: showHidden(full) }, showHidden(p)),
         );
         if (!isLast) this.crumbs.append(h("span", { class: "crumb-sep" }, "›"));
       });
       const c = this.active.commit;
-      if (c) this.crumbs.append(h("span", { class: "pill", title: `${c.oid}\n${c.author}, ${relativeTime(c.time)}` }, `${c.oid.slice(0, 7)} · ${c.subject}`));
+      if (c) this.crumbs.append(h("span", { class: "pill", title: `${c.oid}\n${showHidden(c.author)}, ${relativeTime(c.time)}` }, `${c.oid.slice(0, 7)} · ${showHidden(c.subject)}`));
       else if (this.active.isDiff) this.crumbs.append(h("span", { class: "pill" }, `diff ${this.diffContext.vs}`));
       if (this.active.truncated) this.crumbs.append(h("span", { class: "pill warn" }, `showing first ${formatBytes(8 * 1024 * 1024)}`));
       if (this.active.deleted) this.crumbs.append(h("span", { class: "pill warn" }, "deleted on disk"));

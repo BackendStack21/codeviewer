@@ -133,8 +133,6 @@ const HARDEN = [
   // A mailmap file is read whole by log/blame: a hostile config can point it at /dev/zero.
   "-c", "mailmap.file=/dev/null",
   "-c", "mailmap.blob=",
-  // Read by blame: a missing file makes every blame fail, /dev/zero makes it read forever.
-  "-c", "blame.ignoreRevsFile=",
   "-c", "log.mailmap=false",
   // Also read whole; `log --follow` ignores `-O`, so the order file is overridden as config too.
   "-c", "diff.orderFile=/dev/null",
@@ -534,7 +532,10 @@ export class Git {
   }
 
   async blame(rel: string, line: number): Promise<BlameLine | null> {
-    const r = await this.git(["blame", "--porcelain", "--no-textconv", "-L", `${line},${line}`, "--", rel], 1 << 20);
+    // --no-ignore-revs-file: blame.ignoreRevsFile from a hostile config (a missing file fails every
+    // blame, /dev/zero reads forever). `-c blame.ignoreRevsFile=` does not reset it: the empty value
+    // sorts first among the configured ones. A repository's real ignore list is not applied either.
+    const r = await this.git(["blame", "--porcelain", "--no-textconv", "--no-ignore-revs-file", "-L", `${line},${line}`, "--", rel], 1 << 20);
     if (r.code !== 0) return null;
     const out = new TextDecoder().decode(r.out).split("\n");
     const hash = out[0]?.split(" ")[0] ?? "";

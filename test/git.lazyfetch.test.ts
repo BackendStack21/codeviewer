@@ -65,3 +65,18 @@ test("a viewed folder whose name starts with '..' is still inside the repository
   expect(g).not.toBeNull();
   g?.stop();
 });
+
+test("a hostile blame.ignoreRevsFile neither breaks nor hangs blame", async () => {
+  // The full repository: blame in the blobless clone would need a parent blob it never fetches.
+  const src = path.join(dir, "src");
+  for (const file of [path.join(dir, "missing"), "/dev/zero"]) {
+    Bun.spawnSync(["git", "config", "blame.ignoreRevsFile", file], { cwd: src });
+    const g = (await Git.open(src))!;
+    const t0 = performance.now();
+    const b = await g.blame("a.txt", 1);
+    g.stop();
+    expect(b?.hash).toMatch(/^[0-9a-f]{40}$/);
+    expect(performance.now() - t0).toBeLessThan(5000);
+  }
+  Bun.spawnSync(["git", "config", "--unset", "blame.ignoreRevsFile"], { cwd: src });
+});
