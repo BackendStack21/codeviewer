@@ -54,3 +54,22 @@ test("OSC 4 answers at most 256 queries per sequence", () => {
   t.write("\x1b]4" + ";1;?".repeat(10_000) + "\x07");
   expect(n).toBe(256);
 });
+
+test("a capped REP leaves the cursor where the full count would", () => {
+  const full = (n: number) => {
+    // Reference: REP printed one character at a time, no cap.
+    const t = new Terminal(80, 24, { reply: () => {} });
+    t.write("x" + "x".repeat(n));
+    return [t.cur.x, t.cur.y, t.cur.wrapPending];
+  };
+  for (const n of [1925, 3000, 1920 * 2 + 7]) {
+    const t = new Terminal(80, 24, { reply: () => {} });
+    t.write(`x\x1b[${n}b`);
+    expect([t.cur.x, t.cur.y, t.cur.wrapPending]).toEqual(full(n));
+  }
+  const t = new Terminal(80, 24, { reply: () => {} });
+  t.write("\x1b[5;10Hx\x1b[3000b|");
+  const r = new Terminal(80, 24, { reply: () => {} });
+  r.write("\x1b[5;10Hx" + "x".repeat(3000) + "|");
+  expect(t.lines.map((l) => l.toString())).toEqual(r.lines.map((l) => l.toString()));
+});

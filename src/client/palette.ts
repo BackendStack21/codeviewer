@@ -153,6 +153,8 @@ export class Palette {
     });
     this.input.addEventListener("input", () => this.update());
     this.input.addEventListener("keydown", (e) => {
+      // Enter or Escape that confirms or cancels an IME composition belongs to the IME.
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) this.move(1);
       else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) this.move(-1);
       else if (e.key === "Enter") this.accept(this.sel);

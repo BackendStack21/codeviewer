@@ -204,14 +204,15 @@ const enum S {
 
 export const MAX_SCROLLBACK = 10_000;
 
-/**
- * Headless VT/xterm emulator: parser + screen model. Rendering lives in renderer.ts.
- * Coordinates are 0-based internally.
- */
 /** Most UTF-16 units one cell's cluster holds (the longest emoji ZWJ sequences are about 35). */
 const MAX_CLUSTER = 64;
 /** Longest OSC 8 target kept as a link. */
 const MAX_LINK_URI = 2048;
+
+/**
+ * Headless VT/xterm emulator: parser + screen model. Rendering lives in renderer.ts.
+ * Coordinates are 0-based internally.
+ */
 
 export class Terminal {
   cols: number;
@@ -1158,7 +1159,12 @@ export class Terminal {
         const cp = this.lastChar.codePointAt(0)!;
         const ch = String.fromCodePoint(cp);
         this.lastChar = ch;
-        for (let i = Math.min(this.p(0, 1), 65535, this.cols * this.rows); i > 0; i--) this.print(cp, ch);
+        // Past a screenful the output repeats with the period of one row (half a row of wide
+        // characters): the remainder keeps the cursor where the full count would leave it.
+        const n = Math.min(this.p(0, 1), 65535);
+        const cap = this.cols * this.rows;
+        const period = charWidth(cp) === 2 ? Math.max(1, Math.floor(this.cols / 2)) : this.cols;
+        for (let i = n > cap ? cap + ((n - cap) % period) : n; i > 0; i--) this.print(cp, ch);
         return;
       }
       case "c":

@@ -36,7 +36,6 @@ export function markRanges(n: number, ranges: readonly MarkRange[]): Uint8Array 
   return out;
 }
 
-/** New scrollLeft that brings 0-based column `col` into view, or `scrollLeft` when it already is. */
 /**
  * Trojan Source: each bidi override/isolate is wrapped in a zero-width inline-block (`.bidi`, drawn
  * as a bar, the code point in its title). An atomic inline reorders nothing around it, so the line
@@ -47,6 +46,7 @@ export function markBidi(html: string): string {
   return html.replace(/[\u202a-\u202e\u2066-\u2069]/g, (c) => `<span class="bidi" title="U+${c.charCodeAt(0).toString(16).toUpperCase()}">${c}</span>`);
 }
 
+/** New scrollLeft that brings 0-based column `col` into view, or `scrollLeft` when it already is. */
 export function revealCol(scrollLeft: number, clientWidth: number, gutterW: number, charW: number, col: number): number {
   const x = gutterW + Math.min(col, MAX_RENDER_COLS) * charW;
   if (x < scrollLeft + gutterW || x > scrollLeft + clientWidth - 40) return Math.max(0, x - clientWidth / 2);
@@ -149,6 +149,7 @@ export class CodeView {
     new ResizeObserver(() => this.schedule()).observe(this.scroller);
     this.findInput.addEventListener("input", () => this.runFind());
     this.findInput.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229) return; // the IME's own Enter / Escape
       if (e.key === "Enter") {
         e.preventDefault();
         this.nextMatch(e.shiftKey ? -1 : 1);

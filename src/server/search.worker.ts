@@ -33,6 +33,7 @@ function run({ req, cancel }: WorkerJob): void {
     /* unreadable root: every open below fails and counts as skipped */
   }
   const seen = new Set<string>();
+  let listed: Set<string> | null = null;
   let files = 0;
   let matches = 0;
   let skipped = 0;
@@ -55,6 +56,10 @@ function run({ req, cancel }: WorkerJob): void {
         continue; // gone since it was listed (deleted but still in the index): nothing was skipped
       }
       if (!within(rootReal, real)) throw new Error("skip");
+      // A symlink to a file that is itself a candidate: the match is reported under the real path
+      // (the one git and the editor know), whichever of the two is listed first.
+      const realRel = path.relative(rootReal, real).split(path.sep).join("/");
+      if (realRel !== rel && (listed ??= new Set(req.files)).has(realRel)) continue;
       // Open the checked real path, not the joined one: a parent swapped for a symlink after the
       // check cannot redirect the open (O_NOFOLLOW guards only the last component).
       fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);

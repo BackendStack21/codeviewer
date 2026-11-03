@@ -138,6 +138,15 @@ const HARDEN = [
   "-c", "diff.orderFile=/dev/null",
   // Counts must not silently turn into "binary" because a config set the threshold to 1.
   "-c", "core.bigFileThreshold=512m",
+  // A submodule is a repository with its own (untrusted) config, which the overrides below never
+  // read: git must not look inside one (diff ran `git status` in it, and its filters).
+  "-c", "diff.ignoreSubmodules=all",
+  // Unlimited rename detection (renameLimit=0) took 52 s on 15 000 renames, past the run timeout,
+  // so Changes and status came back empty.
+  "-c", "diff.renameLimit=1000",
+  "-c", "status.renameLimit=1000",
+  // Commit text in UTF-8, whatever the repository asks for (UTF-16 broke every parser).
+  "-c", "i18n.logOutputEncoding=UTF-8",
 ];
 
 /** Wall clock for one git run; a hostile config can make git read /dev/zero forever. */
@@ -187,15 +196,28 @@ export class Git {
     return new Git(bin, root, prefix, [...new Set([gitDir, commonDir])], env, emptyTree);
   }
 
-  private overrides: Promise<Record<string, string | undefined>> | null = null;
+  private overrides: Promise<Record<string, string | undefined> | null> | null = null;
 
-  /** The run environment, with every filter/diff/merge driver any config defines blanked (cached until config changes). */
-  private neutralize(): Promise<Record<string, string | undefined>> {
+  /**
+   * The run environment, with every filter/diff/merge driver any config defines blanked; null when
+   * the drivers could not be listed, and then no git call runs. Shared by the calls of one
+   * operation and recomputed for the next (fresh()): a config can include files the watcher does
+   * not see (a tracked file via include.path, ~/.gitconfig), and a driver added there must not run.
+   */
+  private neutralize(): Promise<Record<string, string | undefined> | null> {
     return (this.overrides ??= this.computeOverrides());
   }
 
+  /** Starts an operation: the overrides are listed again before its first git call. */
+  private fresh() {
+    this.overrides = null;
+  }
+
   private async computeOverrides(): Promise<Record<string, string | undefined>> {
-    const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "-z", "--get-regexp", "^(filter|diff|merge)\\."], 1 << 20, this.env);
+    const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "-z", "--get-regexp", "^(filter|diff|merge)\\."], 16 << 20, this.env);
+    // Fail closed: a cut-off or failed listing would leave every driver after the cut armed.
+    // (Exit code 1 means no driver is defined.)
+    if (r.truncated || (r.code !== 0 && r.code !== 1)) return null;
     const pairs: [string, string][] = [];
     const drivers = new Set<string>();
     // NUL separated (-z): a key is never split, whatever its subsection holds.
@@ -220,7 +242,9 @@ export class Git {
   }
 
   private async git(args: string[], maxBytes = MAX_OUT) {
-    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, await this.neutralize());
+    const env = await this.neutralize();
+    if (!env) return { code: 1, out: new Uint8Array(0), truncated: false };
+    return run(this.bin, this.root, [...HARDEN, ...args], maxBytes, env);
   }
 
   /**
@@ -228,6 +252,7 @@ export class Git {
    * from `git ls-files -z --cached --others --exclude-standard --deduplicate -- .`; null on failure.
    */
   async listFiles(): Promise<string[] | null> {
+    this.fresh();
     const r = await this.git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate", "--", "."]);
     if (r.code !== 0) return null;
     return new TextDecoder().decode(r.out).split("\0").filter((f) => f && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
@@ -246,6 +271,7 @@ export class Git {
   }
 
   private async compute(): Promise<GitStatus> {
+    this.fresh();
     const [st, stash, head] = await Promise.all([
       this.git(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal", "--ignored=traditional", "--ignore-submodules=all", "--", "."]),
       this.git(["rev-list", "--walk-reflogs", "--count", "refs/stash"]),
@@ -322,6 +348,7 @@ export class Git {
    * `rev` (a full object id) reads the file as of that commit instead.
    */
   async base(rel: string, maxBytes: number, rev = "HEAD"): Promise<Uint8Array | null> {
+    this.fresh();
     if (rev !== "HEAD" && !isOid(rev)) return null;
     const r = await this.git(["cat-file", "blob", `${rev}:./${rel}`], maxBytes);
     return r.code === 0 && !r.truncated ? r.out : null;
@@ -379,6 +406,7 @@ export class Git {
   }
 
   private async computeChanges(scope: "head" | "branch"): Promise<Changes> {
+    this.fresh();
     const headOid = await this.rev("HEAD^{commit}");
     const base = headOid ? await this.detectBase(headOid) : null;
     const branch = scope === "branch" && !!base && !base.same;
@@ -417,9 +445,10 @@ export class Git {
    */
   private async diffFiles(rev: string): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
     const r = await this.git([
-      "diff", "--raw", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "-O/dev/null", rev, "--", ".",
+      "diff", "--raw", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=all", "-O/dev/null", rev, "--", ".",
     ]);
-    if (r.code !== 0) return { files: [], truncated: false };
+    // A run cut by the timeout or the size cap is an incomplete list, not a clean tree.
+    if (r.code !== 0) return { files: [], truncated: r.truncated };
     const recs = new TextDecoder().decode(r.out).split("\0");
     const byPath = new Map<string, ChangeEntry>();
     let truncated = false;
@@ -486,7 +515,8 @@ export class Git {
   /** Untracked, not ignored files under the root, with line counts for the first few text files. */
   private async untracked(): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
     const r = await this.git(["ls-files", "-z", "--others", "--exclude-standard", "--", "."]);
-    if (r.code !== 0) return { files: [], truncated: false };
+    // A run cut by the timeout or the size cap is an incomplete list, not a clean tree.
+    if (r.code !== 0) return { files: [], truncated: r.truncated };
     // A nested repository is listed as "dir/": not a file, nothing to count or diff.
     const all = new TextDecoder()
       .decode(r.out)
@@ -532,6 +562,7 @@ export class Git {
   }
 
   async blame(rel: string, line: number): Promise<BlameLine | null> {
+    this.fresh();
     // --no-ignore-revs-file: blame.ignoreRevsFile from a hostile config (a missing file fails every
     // blame, /dev/zero reads forever). `-c blame.ignoreRevsFile=` does not reset it: the empty value
     // sorts first among the configured ones. A repository's real ignore list is not applied either.
@@ -560,7 +591,9 @@ export class Git {
    * the file was renamed into the root from outside it ends at that rename (shown as added).
    */
   async history(rel: string): Promise<HistoryEntry[] | null> {
-    const args = ["--literal-pathspecs", "log", "--follow", "-z", "-M", "--no-color", "--no-decorate", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-relative",
+    this.fresh();
+    // --root: the commit that added the file is listed even under log.showRoot=false.
+    const args = ["--literal-pathspecs", "log", "--follow", "--root", "-z", "-M", "--no-color", "--no-decorate", "--no-show-signature", "--no-ext-diff", "--no-textconv", "--no-relative",
       "--name-status", "--format=%H%x00%P%x00%an%x00%at%x00%s", `-n${MAX_HISTORY}`];
     // --diff-merges needs git 2.31; older ones list merges without files (they are skipped then).
     let r = await this.git([...args, "--diff-merges=first-parent", "--", rel], 4 << 20);
@@ -596,9 +629,11 @@ export class Git {
   /** Duration of the last `git status`, to back off on huge or stat-dirty repositories. */
   private lastMs = 0;
 
-  /** Schedules a debounced status refresh (at least 2× the last run's duration apart). */
+  /** Schedules a status refresh, throttled (at least 2× the last run's duration apart). */
   poke() {
-    if (this.timer) clearTimeout(this.timer);
+    // Already scheduled: keep that time. Restarting the wait on every poke meant a file written
+    // more often than every 200 ms (a log) held the status back for as long as it was written.
+    if (this.timer) return;
     this.timer = setTimeout(async () => {
       this.timer = null;
       const t0 = performance.now();

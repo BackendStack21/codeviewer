@@ -586,3 +586,24 @@ test("round 15: on POSIX a backslash is part of a file name, not a separator", a
   await writeFile(path.join(dir, "sub\\b.ts"), "BACKSLASH");
   expect(await (await get(`/api/file?path=${encodeURIComponent("sub\\b.ts")}`)).text()).toBe("BACKSLASH");
 });
+
+test("PATCH /api/settings merges changed keys, null removes one, and old tabs: roots are pruned", async () => {
+  const patch = (body: unknown) => fetch(`${base}/api/settings`, { method: "PATCH", headers: json, body: JSON.stringify(body) });
+  await fetch(`${base}/api/settings`, { method: "PUT", headers: json, body: JSON.stringify({ theme: "dark", "tabs:/a": { tabs: ["x"] } }) });
+  // Two windows, each sending only its own change: neither loses the other's.
+  expect((await patch({ "tabs:/b": { tabs: ["y"] } })).status).toBe(200);
+  expect((await patch({ theme: "light" })).status).toBe(200);
+  expect(await (await get("/api/settings")).json()).toEqual({ theme: "light", "tabs:/a": { tabs: ["x"] }, "tabs:/b": { tabs: ["y"] } });
+  expect((await patch({ theme: null })).status).toBe(200);
+  expect("theme" in (await (await get("/api/settings")).json())).toBe(false);
+  const many: Record<string, unknown> = {};
+  for (let i = 0; i < 150; i++) many[`tabs:/r${i}`] = { tabs: [] };
+  await patch(many);
+  const after = (await (await get("/api/settings")).json()) as Record<string, unknown>;
+  const roots = Object.keys(after).filter((k) => k.startsWith("tabs:"));
+  expect(roots.length).toBe(100);
+  expect(roots.at(-1)).toBe("tabs:/r149");
+  expect((await patch([1])).status).toBe(400);
+  expect((await patch(JSON.parse(`{"a":${"[".repeat(100)}${"]".repeat(100)}}`))).status).toBe(400);
+  await fetch(`${base}/api/settings`, { method: "PUT", headers: json, body: "{}" });
+});

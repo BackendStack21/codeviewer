@@ -71,8 +71,9 @@ export class FileIndex {
   async apply(paths: string[]): Promise<boolean> {
     const files = this.files;
     if (!files) {
-      // A build in progress may already have walked past these paths.
-      if (this.building) this.invalidate();
+      // A build in progress may already have walked past these paths (heavy dirs it never walks
+      // do not count: a running build would restart on every event under target/ or .venv/).
+      if (this.building && paths.some((p) => !p.split("/").some((seg) => HEAVY_DIRS.has(seg)))) this.invalidate();
       return true;
     }
     if (paths.length > 2000) {
@@ -80,6 +81,8 @@ export class FileIndex {
       return true;
     }
     let changed = false;
+    // Directories as they were before this batch: only a path that was one can have files below it.
+    const dirs = this.knownDirs();
     await Promise.all(
       paths.map(async (p) => {
         if (p.split("/").some((seg) => HEAVY_DIRS.has(seg))) return;
@@ -102,15 +105,19 @@ export class FileIndex {
           changed = true;
         } else if (!st) {
           if (files.delete(p)) changed = true;
-          // A deleted directory: drop everything under it.
-          for (const f of files) if (f.startsWith(p + "/")) {
+          // A deleted directory: drop everything under it. Only for a known directory: scanning
+          // every file for every deleted path froze the server for 20 s on a 1 500-file `rm`.
+          if (dirs.has(p)) for (const f of files) if (f.startsWith(p + "/")) {
             files.delete(f);
             changed = true;
           }
         }
       }),
     );
-    if (changed) this.text = null;
+    if (changed) {
+      this.text = null;
+      this.dirs = null; // a deleted directory recreated later must be walked again
+    }
     return changed;
   }
 

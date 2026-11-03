@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, realpath, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,4 +92,75 @@ test("git calls fail cleanly (no throw) once the viewed folder is deleted", asyn
   expect(s.repo).toBe(true);
   expect(await g.blame("f", 1)).toBeNull();
   g.stop();
+});
+
+describe("round 15, second pass: configs that reach past the overrides", () => {
+  const evil = () => path.join(dir, "evil2.sh");
+  const marker2 = () => path.join(dir, "pwned2");
+  beforeAll(async () => {
+    await writeFile(evil(), `#!/bin/sh\ntouch '${marker2()}'\ncat\n`);
+    Bun.spawnSync(["chmod", "+x", evil()]);
+  });
+
+  test("a submodule's own filter never runs (git does not look inside submodules)", async () => {
+    const sub = path.join(dir, "subsrc");
+    const top = path.join(dir, "withsub");
+    await mkdir(sub);
+    sh(["init", "-q"], sub);
+    await writeFile(path.join(sub, "s.txt"), "x\n");
+    sh(["add", "."], sub);
+    sh(["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "s"], sub);
+    await mkdir(top);
+    sh(["init", "-q"], top);
+    sh(["-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "sm"], top);
+    sh(["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "i"], top);
+    sh(["config", "-f", path.join(top, ".git", "modules", "sm", "config"), "filter.evil.clean", evil()], top);
+    await mkdir(path.join(top, ".git", "modules", "sm", "info"), { recursive: true });
+    await writeFile(path.join(top, ".git", "modules", "sm", "info", "attributes"), "* filter=evil\n");
+    await writeFile(path.join(top, "sm", "s.txt"), "z\n");
+    const g = (await Git.open(top))!;
+    await g.changes("head");
+    await g.status();
+    g.stop();
+    expect(existsSync(marker2())).toBe(false);
+  });
+
+  test("a driver added to an included file after the first call is still blanked", async () => {
+    const r = path.join(dir, "inc");
+    await mkdir(r);
+    sh(["init", "-q"], r);
+    await writeFile(path.join(r, "f.txt"), "hello\n");
+    await writeFile(path.join(r, "inc.cfg"), "");
+    sh(["add", "."], r);
+    sh(["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "i"], r);
+    sh(["config", "include.path", "../inc.cfg"], r);
+    await writeFile(path.join(r, ".git", "info", "attributes"), "f.txt filter=late\n");
+    const g = (await Git.open(r))!;
+    await g.changes("head");
+    await writeFile(path.join(r, "inc.cfg"), `[filter "late"]\n\tclean = ${evil()}\n`);
+    await writeFile(path.join(r, "f.txt"), "hellp\n");
+    await g.changes("head");
+    g.stop();
+    expect(existsSync(marker2())).toBe(false);
+  });
+
+  test("history and blame read UTF-8 whatever i18n.logOutputEncoding says; log.showRoot=false keeps the root", async () => {
+    const r = path.join(dir, "enc");
+    await mkdir(r);
+    sh(["init", "-q"], r);
+    await writeFile(path.join(r, "f"), "1\n");
+    sh(["add", "f"], r);
+    sh(["-c", "user.email=a@b", "-c", "user.name=Zoë", "commit", "-qm", "café"], r);
+    await writeFile(path.join(r, "f"), "2\n");
+    sh(["-c", "user.email=a@b", "-c", "user.name=Zoë", "commit", "-qam", "two"], r);
+    sh(["config", "i18n.logOutputEncoding", "UTF-16"], r);
+    sh(["config", "log.showRoot", "false"], r);
+    const g = (await Git.open(r))!;
+    const h = (await g.history("f"))!;
+    expect(h.map((e) => e.subject)).toEqual(["two", "café"]);
+    expect(h[1]!.status).toBe("A");
+    expect((await g.blame("f", 1))?.author).toBe("Zoë");
+    expect((await g.status()).head?.author).toBe("Zoë");
+    g.stop();
+  });
 });

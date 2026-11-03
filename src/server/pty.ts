@@ -14,6 +14,8 @@ const EXIT_GRACE_MS = 60_000;
  * Claude Code 2.1.316 as no change at all; 120 ms apart they repaint the whole screen (measured).
  */
 const REPAINT_NUDGE_MS = 150;
+/** Live shells per server (each holds a PTY, a process group and a 512 KB replay ring). */
+const MAX_SESSIONS = 64;
 
 /** Private modes that change how input/output must be interpreted; restored on replay. */
 const TRACKED = [1, 25, 1000, 1002, 1003, 1004, 1006, 2004, 47, 1047, 1049];
@@ -306,7 +308,16 @@ export class PtyManager {
     const { id, cols, rows } = ws.data;
     let s = this.sessions.get(id);
     if (!s) {
-      s = new PtySession(id, this.opts, cols, rows, (gone) => this.sessions.delete(gone));
+      // A shell that cannot start (deleted folder, bad --shell, out of fds or processes) is this
+      // terminal's failure, not the server's: a throw from a socket handler exits the process.
+      try {
+        if (this.sessions.size >= MAX_SESSIONS) throw new Error("too many terminals");
+        s = new PtySession(id, this.opts, cols, rows, (gone) => this.sessions.delete(gone));
+      } catch {
+        ws.send(JSON.stringify({ t: "exit", code: -1 }));
+        ws.close(1011, "could not start a shell");
+        return;
+      }
       this.sessions.set(id, s);
     }
     s.attach(ws);

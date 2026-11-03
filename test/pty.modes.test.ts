@@ -91,3 +91,14 @@ test("a trimmed replay includes mode changes in the bytes it skips (a TUI that e
   expect(out.startsWith("$ prompt")).toBe(true); // no stale mode prefix in front of the prompt
   expect(out).not.toContain("\x1b[?1049h");
 });
+
+test("a shell that cannot start ends that terminal, not the server", async () => {
+  dir = await realpath(await mkdtemp(path.join(tmpdir(), "cv-ptymodes-")));
+  m = new PtyManager({ shell: "/bin/sh", cwd: path.join(dir, "deleted"), env: { PATH: process.env.PATH ?? "/usr/bin:/bin" } });
+  const a = fakeWs("no-shell");
+  let closed: unknown[] | null = null;
+  (a as unknown as { close: (...x: unknown[]) => void }).close = (...x: unknown[]) => (closed = x);
+  expect(() => m!.open(asWs(a))).not.toThrow();
+  expect(a.texts).toEqual([JSON.stringify({ t: "exit", code: -1 })]);
+  expect(closed).toEqual([1011, "could not start a shell"]);
+});

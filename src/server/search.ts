@@ -277,6 +277,8 @@ export class Candidates {
     if (!o.ignored) {
       this.cached ??= this.git.then((g) => g?.listFiles() ?? null).catch(() => null);
       list = await this.cached;
+      // Nothing listed (the viewed folder is itself git-ignored): search the file index instead.
+      if (list && !list.length) list = null;
     }
     list ??= (await this.index.get()).split("\n").filter(Boolean);
     return filterByGlobs(list, parseGlobs(o.include), parseGlobs(o.exclude));

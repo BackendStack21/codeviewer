@@ -182,3 +182,20 @@ test("apply(): a new symlink to a file outside the root is not listed (same rule
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("apply(): deleting many files is not quadratic (each one used to rescan the whole set)", async () => {
+  const many = path.join(root, "many");
+  await mkdir(many);
+  const names = Array.from({ length: 3000 }, (_, i) => `many/f${i}.txt`);
+  await Promise.all(names.map((n) => writeFile(path.join(root, n), "")));
+  const ix = new FileIndex(root);
+  await ix.get();
+  await rm(many, { recursive: true });
+  const gone = names.slice(0, 1999);
+  const t0 = performance.now();
+  expect(await ix.apply(gone)).toBe(true);
+  expect(performance.now() - t0).toBeLessThan(1000);
+  // The deleted directory itself drops everything below it.
+  await ix.apply(["many"]);
+  expect((await list(ix)).some((f) => f.startsWith("many/"))).toBe(false);
+});

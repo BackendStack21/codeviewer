@@ -266,7 +266,7 @@ export class TerminalPanel {
     for (const [i, s] of this.sessions.entries()) {
       s.tabEl.className = `term-tab${s === this.active ? " active" : ""}${s.exited ? " exited" : ""}`;
       s.tabEl.innerHTML = `<span class="term-dot"></span><span class="tab-name">${esc(showHidden(s.title || `Terminal ${i + 1}`))}</span><button class="tab-close" title="Kill terminal">${icons.close}</button>`;
-      s.tabEl.title = s.title;
+      s.tabEl.title = showHidden(s.title);
       s.tabEl.querySelector(".tab-close")!.addEventListener("click", (e) => {
         e.stopPropagation();
         this.close(s);

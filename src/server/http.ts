@@ -517,11 +517,13 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
 
         case "/api/settings": {
           if (req.method === "GET") return json(await settings.read());
-          if (req.method !== "PUT") return fail(405, "GET or PUT");
+          if (req.method !== "PUT" && req.method !== "PATCH") return fail(405, "GET, PUT or PATCH");
           const text = await req.text();
           if (text.length > 256 * 1024) return fail(413, "settings too large");
           try {
-            await settings.write(JSON.parse(text));
+            // PATCH: only the keys a window changed (null removes one), merged with what is on disk.
+            const body = JSON.parse(text);
+            await (req.method === "PATCH" ? settings.patch(body) : settings.write(body));
           } catch {
             return fail(400, "invalid settings");
           }

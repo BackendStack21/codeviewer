@@ -26,25 +26,68 @@ export class Settings {
     }
   }
 
+  /** Replaces every setting. */
   write(data: unknown): Promise<void> {
-    if (!data || typeof data !== "object" || Array.isArray(data)) return Promise.reject(new Error("object expected"));
-    // Indented output grows with the square of the nesting depth (40 KB of `[` became an 800 MB
-    // file): settings are shallow, so deep values are refused and the written size is capped.
-    if (depth(data) > MAX_DEPTH) return Promise.reject(new Error("settings nested too deeply"));
-    const text = JSON.stringify(data, null, 2);
-    if (text.length > MAX_BYTES) return Promise.reject(new Error("settings too large"));
-    // Serialize writes and replace atomically so a crash never leaves a torn file.
-    // A failed write must not poison every later one.
-    this.queue = this.queue.catch(() => {}).then(async () => {
-      await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-      const tmp = `${this.file}.${process.pid}.tmp`;
-      await writeFile(tmp, text, { mode: 0o600 });
-      await rename(tmp, this.file);
+    let text: string;
+    try {
+      text = serialize(data);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+    return this.enqueue(() => this.persist(text));
+  }
+
+  /**
+   * Sets the given keys and keeps every other one as it is on disk. Each window sends only what it
+   * changed: whole snapshots from two windows (or two folders) overwrote each other's keys.
+   * A key that is set moves to the end, so the per-folder `tabs:` entries are in recency order and
+   * only the newest MAX_TAB_ROOTS are kept.
+   */
+  patch(changes: unknown): Promise<void> {
+    if (!changes || typeof changes !== "object" || Array.isArray(changes)) return Promise.reject(new Error("object expected"));
+    if (depth(changes) > MAX_DEPTH) return Promise.reject(new Error("settings nested too deeply"));
+    return this.enqueue(async () => {
+      const cur = await this.read();
+      for (const [k, v] of Object.entries(changes)) {
+        if (k === "__proto__") continue;
+        delete cur[k];
+        if (v !== null) cur[k] = v; // null removes the key
+      }
+      const roots = Object.keys(cur).filter((k) => k.startsWith("tabs:"));
+      for (const k of roots.slice(0, Math.max(0, roots.length - MAX_TAB_ROOTS))) delete cur[k];
+      await this.persist(serialize(cur));
     });
+  }
+
+  /** Serialized and atomic (temp file + rename): a crash never leaves a torn file, and a failed write does not poison later ones. */
+  private enqueue(job: () => Promise<void>): Promise<void> {
+    this.queue = this.queue.catch(() => {}).then(job);
     return this.queue;
+  }
+
+  private async persist(text: string) {
+    await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    await writeFile(tmp, text, { mode: 0o600 });
+    await rename(tmp, this.file);
   }
 }
 
+/**
+ * Indented JSON of a settings object. Indented output grows with the square of the nesting depth
+ * (40 KB of `[` became an 800 MB file): settings are shallow, so deep values are refused and the
+ * written size is capped.
+ */
+function serialize(data: unknown): string {
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("object expected");
+  if (depth(data) > MAX_DEPTH) throw new Error("settings nested too deeply");
+  const text = JSON.stringify(data, null, 2);
+  if (text.length > MAX_BYTES) throw new Error("settings too large");
+  return text;
+}
+
+/** Folders whose open tabs are remembered (`tabs:<root>` keys), most recently saved first. */
+const MAX_TAB_ROOTS = 100;
 const MAX_DEPTH = 32;
 const MAX_BYTES = 1024 * 1024;
 
