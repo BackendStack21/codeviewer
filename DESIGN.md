@@ -1050,3 +1050,17 @@ pathological input, by growth rate), `terminal.fuzz.test.ts` (seeded hostile out
 consistent screen, bounded cells, no reply echoing attacker text, nothing while replaying),
 `files.resolve.fuzz.test.ts` (random paths through in/out/loop symlinks never resolve or open
 outside), `git.hostile-config.test.ts` and `pty.tracker.diff.test.ts` (above).
+
+## 25. Round 16: a shrinking file could hang /api/raw
+
+Release v1.10.7 stopped at its test step on a timeout in the `/api/raw` shrinking-file test, which
+had passed on the same commit in `ci`. It was not a slow machine: the same test failed 4 runs in 30
+on v1.10.6 and about one in four alone, because the server sometimes never ended the response.
+
+| Finding | Fix |
+| --- | --- |
+| `ctl.error` right after a chunk could be lost by Bun 1.4.4: the connection stayed open with no end of body, and `idleTimeout: 0` never reclaims it, so a client's `blob()` waited forever | Wait 50 ms inside `pull` before the error. Measured against the real file path: no hang with readers up to 400 ms per chunk or under CPU load. Erroring after `pull` returned, throwing, generator and direct streams, `server.timeout` and padding chunks all still hung |
+| The test ran the race once, so it passed most of the time and blocked a release at random | 25 rounds with a watchdog per round, reported as "hang" |
+
+The delay is measured, not derived: the cause is inside Bun. The looped test is what will notice if
+a Bun upgrade changes this.
