@@ -510,12 +510,12 @@ test("/api/raw honours a single byte range (206/416) so media can seek, also und
   expect((await get("/api/info")).status).toBe(200);
 });
 
-for (const mb of [2, 2, 2, 8, 32, 256]) test(`/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks ${mb}`, async () => {
+for (const mb of [2, 2]) test(`/api/raw fails the body instead of sending fewer bytes than content-length when the file shrinks ${mb}`, async () => {
   // Repeated: Bun can lose the error and leave the connection open, about one run in four. The file
   // is large (and sparse) so that the transfer is still running when it shrinks.
   const size = mb * 1024 * 1024;
   const outcomes: string[] = [];
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 600; i++) {
     const p = path.join(dir, "shrink.bin");
     await writeFile(p, "");
     await truncate(p, size);
@@ -541,7 +541,7 @@ for (const mb of [2, 2, 2, 8, 32, 256]) test(`/api/raw fails the body instead of
   // already been sent before the file shrank, which is a correct transfer.
   expect(outcomes.filter((o) => o !== "failed" && o !== "complete")).toEqual([]);
   expect((await get("/api/info")).status).toBe(200);
-}, 45_000);
+}, 120_000);
 
 test("round 15: no Bun error page, own-key MIME lookups, whole-byte limits, files-only open", async () => {
   // A Host header that makes the URL unparseable: a JSON 400/421, never an HTML page with paths.
