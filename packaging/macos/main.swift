@@ -37,7 +37,9 @@ final class Server {
         ready = done
         process.executableURL = exe
         process.arguments = [folder.path, "--no-open", "--machine", "--exit-with-parent"]
-        process.currentDirectoryURL = folder
+        // Not the viewed folder: nothing the server or its runtime might read from its working
+        // directory (bunfig.toml, .env) may come from the repository being viewed.
+        process.currentDirectoryURL = URL(fileURLWithPath: "/")
         // Apps launched from Finder get launchd's minimal environment.
         var env = ProcessInfo.processInfo.environment
         if env["SHELL"] == nil, let pw = getpwuid(getuid()), let sh = pw.pointee.pw_shell { env["SHELL"] = String(cString: sh) }
@@ -250,7 +252,11 @@ final class ViewerWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUI
             return
         }
         if t == "relaunch" {
-            (NSApp.delegate as? AppDelegate)?.relaunch()
+            // Only once an update has replaced the bundle, and only from the page itself: script in
+            // the page must not be able to restart the app (ending every window's shells) at will.
+            if message.frameInfo.isMainFrame && AppDelegate.bundleWasUpdated() {
+                (NSApp.delegate as? AppDelegate)?.relaunch()
+            }
             return
         }
         if t == "dblclick" {
@@ -448,6 +454,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// True when the bundle on disk is not the version that is running (the updater replaced it).
+    static func bundleWasUpdated() -> Bool {
+        let running = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        let plist = Bundle.main.bundleURL.appendingPathComponent("Contents/Info.plist")
+        let onDisk = (NSDictionary(contentsOf: plist) as? [String: Any])?["CFBundleShortVersionString"] as? String
+        return running != nil && onDisk != nil && running != onDisk
+    }
+
     /// Restarts into the freshly installed bundle (same path), reopening every folder in the same
     /// window layout: tabs of one window stay together, separate windows stay separate.
     func relaunch() {
@@ -504,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let exe = Bundle.main.url(forResource: "codeviewer", withExtension: nil)?.path else { return }
         let target = "/usr/local/bin/codeviewer"
         let quoted = { (s: String) in "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-        let shell = "mkdir -p /usr/local/bin && ln -sf \(quoted(exe)) \(quoted(target))"
+        let shell = "mkdir -p /usr/local/bin && ln -sfh \(quoted(exe)) \(quoted(target))"
         let source = "do shell script \"\(shell.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\" with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)

@@ -90,7 +90,7 @@ test("compareVersions: pre-release ordering and padding", () => {
 
 test("detectInstall: bun is 'source'; unknown linux/mac binaries are 'cli'", () => {
   expect(detectInstall("/usr/bin/bun", "linux", "x64", () => false).kind).toBe("source");
-  expect(detectInstall("/x/codeviewer", "linux", "arm64", () => false).asset("1.0.0")).toBe("codeviewer-1.0.0-linux-arm64");
+  expect(detectInstall("/x/codeviewer", "linux", "arm64", () => false, true).asset("1.0.0")).toBe("codeviewer-1.0.0-linux-arm64");
   // default arguments resolve to something sensible for the running process
   expect(["source", "cli", "macos-app", "linux-app"]).toContain(detectInstall().kind);
 });
@@ -283,4 +283,17 @@ test("compareVersions: pre-release identifiers follow semver (numeric, then alph
   expect(compareVersions("1.0.0-rc.1+build.5", "1.0.0-rc.1+build.9")).toBe(0); // build metadata never orders
   expect(compareVersions("1.0.0+abc", "1.0.0")).toBe(0);
   expect(compareVersions("v1.0.0-rc.2", "1.0.0-rc.2")).toBe(0);
+});
+
+test("API answers and checksum files are read through a cap, with or without content-length", async () => {
+  const huge = () =>
+    new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array(1 << 20).fill(32)); } }));
+  const u = new Updater({ version: "1.0.0", fetch: (async () => huge()) as unknown as typeof fetch, publicKey: keyPem, install: { kind: "cli", target: "/x", asset: () => "a" } });
+  await expect(u.check(true)).rejects.toThrow("too large");
+});
+
+test("a failed download names the asset, not the URL the API answered with", async () => {
+  const { u } = await cli({ failDownload: true });
+  await expect(u.apply()).rejects.toThrow(/download failed \(500\)/);
+  await expect((await cli({ failDownload: true })).u.apply()).rejects.not.toThrow("https://");
 });

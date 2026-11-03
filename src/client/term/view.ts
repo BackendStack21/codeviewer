@@ -99,6 +99,7 @@ export class TerminalView {
   private leftAltDown = false;
   private composing = false;
   private disposed = false;
+  private bellQueued = false;
 
   constructor(private opts: TerminalViewOptions) {
     this.el = document.createElement("div");
@@ -113,10 +114,16 @@ export class TerminalView {
           .then(() => window.dispatchEvent(new CustomEvent("cv-toast", { detail: `A terminal program copied ${t.length.toLocaleString()} characters to your clipboard` })))
           .catch(() => {}),
       colors: () => ({ fg: opts.theme.fg, bg: opts.theme.bg, cursor: opts.theme.cursor, palette: this.renderer.palette }),
+      // One flash per batch of output: each BEL forced a layout, and 200 KB of them froze the page.
       bell: () => {
-        this.el.classList.remove("bell");
-        void this.el.offsetWidth;
-        this.el.classList.add("bell");
+        if (this.bellQueued) return;
+        this.bellQueued = true;
+        queueMicrotask(() => {
+          this.bellQueued = false;
+          this.el.classList.remove("bell");
+          void this.el.offsetWidth;
+          this.el.classList.add("bell");
+        });
       },
       onLine: (text) => {
         this.pendingLines.push(text);
@@ -571,7 +578,9 @@ export class TerminalView {
       this.opts.send(`\x1b[<${button | mods};${x + 1};${y + 1}${press ? "M" : "m"}`);
     } else {
       const b = (press || button >= 64 ? button : 3) | mods;
-      if (x > 222 || y > 222) return;
+      // Legacy reports are single bytes 32..127 here: anything above goes out UTF-8 encoded, and a
+      // stray byte of that reaches the program as a keystroke. Past column/row 94 use SGR (1006).
+      if (32 + b > 127 || 33 + x > 127 || 33 + y > 127) return;
       this.opts.send(`\x1b[M${String.fromCharCode(32 + b, 33 + x, 33 + y)}`);
     }
   }

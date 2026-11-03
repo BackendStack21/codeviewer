@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import os from "node:os";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 /** Per-user config directory (XDG on Linux, Application Support on macOS). */
@@ -68,8 +69,10 @@ export class Settings {
 
   private async persist(text: string) {
     await mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.${process.pid}.tmp`;
-    await writeFile(tmp, text, { mode: 0o600 });
+    // A fresh random name created exclusively ("wx"): a symlink planted at a predictable name
+    // would have made writeFile follow it and overwrite its target.
+    const tmp = `${this.file}.${randomBytes(8).toString("hex")}.tmp`;
+    await writeFile(tmp, text, { mode: 0o600, flag: "wx" });
     await rename(tmp, this.file);
   }
 }

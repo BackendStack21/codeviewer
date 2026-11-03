@@ -86,6 +86,12 @@ bun run build:local               # binaries + the app for this machine (needs X
 - **Terminal input is the user's.** On macOS ⌘-shortcuts belong to the app; on Linux Ctrl+key
   combinations stay with the shell unless the README lists them.
 
+- **These rules are tested.** `test/invariants.static.test.ts` checks the ones above against the
+  source, `test/http.routes.test.ts` applies auth/Host/CSRF/header rules to every route it finds in
+  `http.ts`, and `test/redos.matrix.test.ts` runs every highlighter and symbol language against
+  pathological input. A new innerHTML interpolation must be escaped or added to the reviewed list
+  there with a reason; a new language is covered automatically (`LANG_IDS`, `SYMBOL_LANGS`).
+
 ## Client conventions
 
 - UI scale: `--ui-scale = codeSize / BASE_SIZE`, applied with CSS `zoom` on chrome containers.

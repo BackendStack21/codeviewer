@@ -264,6 +264,9 @@ const NAMES: Record<string, string> = {
   "cmakelists.txt": "make", gemfile: "rb", rakefile: "rb", ".editorconfig": "toml", ".npmrc": "toml",
 };
 
+/** Every language id lexLine knows (tests run each against pathological input). */
+export const LANG_IDS: readonly string[] = Object.keys(LANGS);
+
 export function languageFor(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
   if (NAMES[base]) return NAMES[base]!;
@@ -296,6 +299,8 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
 
   const n = text.length;
   let i = 0;
+  /** CSS: the line's last ";" and "{" (computed once, for property detection). */
+  let cssLast: { semi: number; brace: number } | null = null;
 
   // Continue a construct from the previous line.
   if (state > 0 && state < 100 && L.block) {
@@ -439,11 +444,16 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
       const r = CSS_IDENT.exec(text);
       if (r) {
         const end = i + r[0].length;
-        const after = text.slice(end).trimStart();
-        // property: value; (but not a pseudo-class like a:hover {)
-        if (after.startsWith(":") && /;|^\s*:[^{]*$/.test(after)) out.push([i, end, "p"]);
+        // The next non-space character, found without copying the rest of the line: slicing and
+        // regex-testing that rest for every identifier was quadratic (`a::a::…`, 64 KB: 650 ms).
+        let k = end;
+        while (k < n && /\s/.test(text[k]!)) k++;
+        // property: value; (but not a pseudo-class like a:hover {): a ";" somewhere after the
+        // colon, or no "{" after it. The line's last ";" and "{" answer both.
+        cssLast ??= { semi: text.lastIndexOf(";"), brace: text.lastIndexOf("{") };
+        if (text[k] === ":" && (cssLast.semi > k || cssLast.brace < k)) out.push([i, end, "p"]);
         else if (r[0].startsWith("--")) out.push([i, end, "v"]);
-        else if (after.startsWith("(")) out.push([i, end, "f"]);
+        else if (text[k] === "(") out.push([i, end, "f"]);
         i = end;
         continue;
       }

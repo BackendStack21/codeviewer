@@ -160,3 +160,12 @@ test.skipIf(process.platform === "darwin")("pickFolder uses zenity, then kdialog
   await script("zenity", `exit 1`); // cancel
   expect(await pick()).toBeNull();
 });
+
+test("isLocalViewerUrl: http on loopback or an own interface, nothing else", async () => {
+  const { isLocalViewerUrl } = await import("../src/server/browser.ts");
+  const ifaces = { eth0: [{ address: "192.168.1.5" }] } as never;
+  for (const ok of ["http://127.0.0.1:4573", "http://localhost:4573", "http://[::1]:4573", "http://192.168.1.5:4573"]) expect([ok, isLocalViewerUrl(ok, ifaces)]).toEqual([ok, true]);
+  for (const bad of ["https://127.0.0.1:4573", "http://evil.example:4573", "http://127.0.0.1", "http://u:p@127.0.0.1:4573", "http://10.0.0.9:4573", "file:///x", "not a url", "http://127.0.0.1.evil.example:4573"]) {
+    expect([bad, isLocalViewerUrl(bad, ifaces)]).toEqual([bad, false]);
+  }
+});

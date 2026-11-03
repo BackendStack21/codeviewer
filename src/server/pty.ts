@@ -19,32 +19,210 @@ const MAX_SESSIONS = 64;
 
 /** Private modes that change how input/output must be interpreted; restored on replay. */
 const TRACKED = [1, 25, 1000, 1002, 1003, 1004, 1006, 2004, 47, 1047, 1049];
-const LATIN1 = new TextDecoder("latin1");
-/**
- * DECSET/DECRST: 7-bit CSI, or C1 CSI as UTF-8 (C2 9B: the terminal decodes UTF-8 first, so a bare 9B byte is a continuation byte, not CSI); `;` or `:` separated.
- * The text is decoded as "latin1", which WHATWG maps to windows-1252: byte 9B reads as U+203A.
- */
-const MODE_RE = /(?:\x1b\[|\xc2\u203a)\?([\d;:]+)([hl])/g;
-/** An unfinished sequence carried into the next chunk is at most this long (one with many modes is fine). */
-const MAX_CARRY = 256;
+/** Parser states, as in the client's parser (src/client/term/terminal.ts, `feed`). */
+const enum P {
+  Ground,
+  Esc,
+  EscInter,
+  Csi,
+  CsiIgnore,
+  Osc,
+  OscEsc,
+  Str,
+  StrEsc,
+}
 
-/** Applies every tracked DECSET/DECRST in `text` to `modes`; true when something changed. */
-export function applyModes(modes: Map<number, boolean>, text: string): boolean {
-  let changed = false;
-  MODE_RE.lastIndex = 0;
-  for (let m; (m = MODE_RE.exec(text)); ) {
-    for (const part of m[1]!.split(";")) {
-      const n = Number(part.split(":")[0]);
-      if (!TRACKED.includes(n)) continue;
-      const on = m[2] === "h";
-      if (n === 47 || n === 1047 || n === 1049) {
-        for (const k of [47, 1047, 1049]) if (k !== n && modes.delete(k)) changed = true;
-      }
-      if (modes.get(n) !== on) changed = true;
-      modes.set(n, on);
-    }
+/** A ModeTracker's state at one point of the stream (stored with each replay chunk). */
+export interface TrackerState {
+  modes: [number, boolean][];
+  st: P;
+  prefix: string;
+  inter: string;
+  params: number[];
+  cur: number;
+  sub: boolean;
+}
+
+/**
+ * Follows DECSET/DECRST of the TRACKED modes exactly as the client's parser does: UTF-8 decoded
+ * first, C1 controls only in the ground state, nothing inside OSC/DCS/SOS/PM/APC strings, ESC
+ * restarting a sequence, CAN/SUB aborting one, a prefix after parameters ignoring the sequence,
+ * RIS and DECSTR resetting. A regex over the bytes disagreed with the client (a C1 CSI right after
+ * ESC, or inside a string, switched bracketed paste off in the replay prefix only), so after a
+ * reload a pasted command ran line by line.
+ */
+export class ModeTracker {
+  readonly modes = new Map<number, boolean>();
+  private st = P.Ground;
+  private prefix = "";
+  private inter = "";
+  private params: number[] = [];
+  private cur = -1;
+  private sub = false;
+  private dec = new TextDecoder("utf-8");
+
+  static from(s: TrackerState): ModeTracker {
+    const t = new ModeTracker();
+    for (const [n, on] of s.modes) t.modes.set(n, on);
+    t.st = s.st;
+    t.prefix = s.prefix;
+    t.inter = s.inter;
+    t.params = [...s.params];
+    t.cur = s.cur;
+    t.sub = s.sub;
+    return t;
   }
-  return changed;
+
+  state(): TrackerState {
+    return { modes: [...this.modes], st: this.st, prefix: this.prefix, inter: this.inter, params: [...this.params], cur: this.cur, sub: this.sub };
+  }
+
+  /** Feeds output bytes (UTF-8, split anywhere); true when a tracked mode changed. */
+  write(data: Uint8Array): boolean {
+    return this.text(this.dec.decode(data, { stream: true }));
+  }
+
+  /** Feeds decoded text; true when a tracked mode changed. */
+  text(s: string): boolean {
+    let changed = false;
+    for (let i = 0; i < s.length; i++) if (this.feed(s.charCodeAt(i), s[i]!)) changed = true;
+    return changed;
+  }
+
+  private feed(c: number, ch: string): boolean {
+    if (c === 0x18 || c === 0x1a) {
+      this.st = P.Ground;
+      return false;
+    }
+    if (c < 0x20 && this.st !== P.Osc && this.st !== P.Str) {
+      if (c === 0x1b && this.st !== P.OscEsc && this.st !== P.StrEsc) {
+        this.st = P.Esc;
+        this.inter = "";
+      }
+      return false; // other C0 controls are executed and leave the state alone
+    }
+    switch (this.st) {
+      case P.Ground:
+        if (c === 0x9b) this.csiStart();
+        else if (c === 0x9d) this.st = P.Osc;
+        else if (c === 0x90 || c === 0x98 || c === 0x9e || c === 0x9f) this.st = P.Str;
+        return false;
+      case P.Esc:
+        return this.escape(c, ch);
+      case P.EscInter:
+        if (c >= 0x20 && c <= 0x2f) {
+          this.inter += ch;
+          return false;
+        }
+        this.st = P.Ground;
+        return this.escDispatch(ch);
+      case P.Csi:
+        return this.csiChar(c, ch);
+      case P.CsiIgnore:
+        if (c >= 0x40 && c <= 0x7e) this.st = P.Ground;
+        return false;
+      case P.Osc:
+        if (c === 0x07 || c === 0x9c) this.st = P.Ground;
+        else if (c === 0x1b) this.st = P.OscEsc;
+        return false;
+      case P.Str:
+        if (c === 0x1b) this.st = P.StrEsc;
+        else if (c === 0x07 || c === 0x9c) this.st = P.Ground;
+        return false;
+      case P.OscEsc:
+      case P.StrEsc:
+        if (c === 0x5c) {
+          this.st = P.Ground;
+          return false;
+        }
+        this.st = P.Esc;
+        return this.escape(c, ch);
+    }
+    return false;
+  }
+
+  private escape(c: number, ch: string): boolean {
+    if (c === 0x5b) this.csiStart();
+    else if (c === 0x5d) this.st = P.Osc;
+    else if (c === 0x50 || c === 0x58 || c === 0x5e || c === 0x5f) this.st = P.Str;
+    else if (c >= 0x20 && c <= 0x2f) {
+      this.inter = ch;
+      this.st = P.EscInter;
+    } else {
+      this.st = P.Ground;
+      return this.escDispatch(ch);
+    }
+    return false;
+  }
+
+  /** ESC c (RIS) resets every mode. */
+  private escDispatch(ch: string): boolean {
+    const inter = this.inter;
+    this.inter = "";
+    if (inter || ch !== "c" || !this.modes.size) return false;
+    this.modes.clear();
+    return true;
+  }
+
+  private csiStart() {
+    this.st = P.Csi;
+    this.prefix = "";
+    this.inter = "";
+    this.params = [];
+    this.cur = -1;
+    this.sub = false;
+  }
+
+  private csiChar(c: number, ch: string): boolean {
+    if (c >= 0x30 && c <= 0x39) {
+      if (!this.sub) this.cur = Math.min(0xffff, (this.cur < 0 ? 0 : this.cur) * 10 + (c - 0x30));
+    } else if (c === 0x3b) {
+      this.params.push(this.cur);
+      this.cur = -1;
+      this.sub = false;
+    } else if (c === 0x3a) this.sub = true; // sub-parameters: the mode is the first number
+    else if (c >= 0x3c && c <= 0x3f) {
+      if (this.params.length || this.cur >= 0) this.st = P.CsiIgnore;
+      else this.prefix += ch;
+    } else if (c >= 0x20 && c <= 0x2f) this.inter += ch;
+    else if (c >= 0x40 && c <= 0x7e) {
+      this.params.push(this.cur);
+      this.st = P.Ground;
+      return this.dispatch(ch);
+    } else this.st = P.CsiIgnore;
+    return false;
+  }
+
+  private dispatch(f: string): boolean {
+    let changed = false;
+    if (this.inter === "!" && f === "p" && !this.prefix) {
+      // DECSTR: of the tracked modes, cursor keys and cursor visibility go back to their defaults.
+      for (const n of [1, 25]) if (this.modes.delete(n)) changed = true;
+      return changed;
+    }
+    if (this.inter || this.prefix !== "?" || (f !== "h" && f !== "l")) return false;
+    const on = f === "h";
+    for (const n of this.params) {
+      if (n === 9 || n === 1000 || n === 1002 || n === 1003) {
+        // One mouse mode at a time, like the client: setting one replaces the others, resetting
+        // any of them turns reporting off (9, X10, reports like 1000).
+        const m = n === 9 ? 1000 : n;
+        for (const k of [1000, 1002, 1003]) if ((k !== m || !on) && this.modes.delete(k)) changed = true;
+        if (on && !this.modes.get(m)) {
+          this.modes.set(m, true);
+          changed = true;
+        }
+        continue;
+      }
+      if (!TRACKED.includes(n)) continue;
+      if (n === 47 || n === 1047 || n === 1049) {
+        for (const k of [47, 1047, 1049]) if (k !== n && this.modes.delete(k)) changed = true;
+      }
+      if (this.modes.get(n) !== on) changed = true;
+      this.modes.set(n, on);
+    }
+    return changed;
+  }
 }
 
 /** The prefix that restores `modes` on a fresh terminal (a hidden cursor is the one "off" that differs from the default). */
@@ -79,15 +257,17 @@ class PtySession {
   private proc: ReturnType<typeof Bun.spawn>;
   private term: { write(d: string | Uint8Array): void; resize(c: number, r: number): void; close(): void };
   /** Replay ring: each chunk remembers the mode-restoring prefix in effect before it. */
-  private chunks: { data: Uint8Array; modes: string }[] = [];
+  /** Replay ring: each chunk remembers the mode tracker's state before it. */
+  private chunks: { data: Uint8Array; state: TrackerState }[] = [];
   private bytes = 0;
   /** The ring has dropped output, so a replay no longer holds everything since the session began. */
   private ringTrimmed = false;
   private size: { cols: number; rows: number };
   private nudge: ReturnType<typeof setTimeout> | null = null;
-  private modes = new Map<number, boolean>();
-  private modesStr = "";
-  private carry = "";
+  private tracker = new ModeTracker();
+  private get modes() {
+    return this.tracker.modes;
+  }
   private pending: Uint8Array[] = [];
   private pendingBytes = 0;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -140,7 +320,7 @@ class PtySession {
 
   private output(data: Uint8Array) {
     const copy = data.slice();
-    this.chunks.push({ data: copy, modes: this.modesStr });
+    this.chunks.push({ data: copy, state: this.tracker.state() });
     this.bytes += copy.length;
     while (this.bytes > REPLAY_BYTES && this.chunks.length > 1) {
       this.bytes -= this.chunks.shift()!.data.length;
@@ -159,10 +339,7 @@ class PtySession {
    * escape is carried into the next one (re-applying a complete one there is harmless: same order).
    */
   private trackModes(data: Uint8Array) {
-    const text = this.carry + LATIN1.decode(data);
-    const esc = Math.max(text.lastIndexOf("\x1b"), text.lastIndexOf("\xc2"));
-    this.carry = esc >= 0 && text.length - esc <= MAX_CARRY ? text.slice(esc) : "";
-    if (applyModes(this.modes, text)) this.modesStr = modesPrefix(this.modes);
+    this.tracker.write(data);
   }
 
   private flush() {
@@ -214,18 +391,17 @@ class PtySession {
     if (!this.chunks.length) return;
     const first = this.chunks[0]!;
     let head = first.data;
-    let prefix = first.modes;
+    const t = ModeTracker.from(first.state);
     if (this.ringTrimmed) {
       // History was trimmed: the first chunk may start mid-escape or mid-UTF-8.
       const nl = head.indexOf(0x0a);
       if (nl >= 0) {
         // The skipped bytes may change modes (a TUI exiting): the prefix must include them.
-        const modes = new Map<number, boolean>();
-        applyModes(modes, first.modes);
-        if (applyModes(modes, LATIN1.decode(head.subarray(0, nl + 1)))) prefix = modesPrefix(modes);
+        t.write(head.subarray(0, nl + 1));
         head = head.subarray(nl + 1);
       }
     }
+    const prefix = modesPrefix(t.modes);
     const parts = [new TextEncoder().encode(prefix), head, ...this.chunks.slice(1).map((c) => c.data)];
     ws.send(JSON.stringify({ t: "replay" }));
     ws.sendBinary(new Uint8Array(Bun.concatArrayBuffers(parts)));

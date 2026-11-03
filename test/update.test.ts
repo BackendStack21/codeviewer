@@ -73,21 +73,37 @@ describe("versions and install detection", () => {
   });
 
   test("detectInstall maps executables to the right release asset", () => {
-    const mac = detectInstall("/Applications/Codeviewer.app/Contents/Resources/codeviewer", "darwin", "arm64", () => false);
+    const plist = (p: string) => (p === "/Applications/Codeviewer.app/Contents/Info.plist" ? "<key>CFBundleIdentifier</key><string>de.21no.codeviewer</string>" : null);
+    const mac = detectInstall("/Applications/Codeviewer.app/Contents/Resources/codeviewer", "darwin", "arm64", () => false, true, plist);
     expect(mac.kind).toBe("macos-app");
     expect(mac.target).toBe("/Applications/Codeviewer.app");
     expect(mac.asset("1.2.0")).toBe("Codeviewer-1.2.0-macos-arm64.dmg");
 
-    const linux = detectInstall("/opt/codeviewer/codeviewer", "linux", "x64", (p) => p === "/opt/codeviewer/chromium/chrome");
+    const pkg = new Set(["/opt/codeviewer/chromium/chrome", "/opt/codeviewer/share/codeviewer.desktop", "/opt/codeviewer/install.sh"]);
+    const linux = detectInstall("/opt/codeviewer/codeviewer", "linux", "x64", (p) => pkg.has(p), true);
     expect(linux.kind).toBe("linux-app");
     expect(linux.target).toBe("/opt/codeviewer");
     expect(linux.asset("1.2.0")).toBe("codeviewer-1.2.0-linux-x64.tar.gz");
 
-    const cli = detectInstall("/usr/local/bin/codeviewer", "linux", "x64", (p) => p === "/lib/ld-musl-x86_64.so.1");
+    const cli = detectInstall("/usr/local/bin/codeviewer", "linux", "x64", (p) => p === "/lib/ld-musl-x86_64.so.1", true);
     expect(cli.kind).toBe("cli");
     expect(cli.asset("1.2.0")).toBe("codeviewer-1.2.0-linux-x64-musl");
 
     expect(detectInstall("/Users/me/.bun/bin/bun", "darwin", "arm64").kind).toBe("source");
+  });
+
+  test("detectInstall never takes someone else's folder or app for codeviewer's", () => {
+    // A slim binary in ~/.local/bin next to an unrelated chromium/: the folder is not the package.
+    const bin = detectInstall("/home/u/.local/bin/codeviewer", "linux", "x64", (p) => p === "/home/u/.local/bin/chromium/chrome", true);
+    expect(bin.kind).toBe("cli");
+    expect(bin.target).toBe("/home/u/.local/bin/codeviewer");
+    // A binary that happens to sit in another app's Resources is not that app.
+    const other = detectInstall("/Applications/Other.app/Contents/Resources/codeviewer", "darwin", "arm64", () => false, true, () => "<string>com.example.other</string>");
+    expect(other.kind).toBe("cli");
+    expect(other.target).toBe("/Applications/Other.app/Contents/Resources/codeviewer");
+    // Any bun runtime, whatever it is called, and anything not compiled: source, never replaced.
+    for (const exe of ["/usr/bin/bun-profile", "/opt/bun1.4", "/x/bun-baseline"]) expect(detectInstall(exe, "linux", "x64", () => false, true).kind).toBe("source");
+    expect(detectInstall("/x/codeviewer", "linux", "x64", () => false, false).kind).toBe("source");
   });
 
   test("signature verification", async () => {

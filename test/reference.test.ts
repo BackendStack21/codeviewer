@@ -52,6 +52,11 @@ describe("unsafePath", () => {
     expect(unsafePath("src/a b.ts")).toBe(false);
     expect(unsafePath("src/ünï.ts")).toBe(false);
     expect(unsafePath("x\nrm -rf ~")).toBe(true);
+    // Command substitution would run if the pasted reference were executed at a shell prompt.
+    expect(unsafePath("x$(touch pwned).md")).toBe(true);
+    expect(unsafePath("x`id`.md")).toBe(true);
+    expect(unsafePath("app/routes/$param.tsx")).toBe(false);
+    expect(unsafePath("src/[id]/page (copy).tsx")).toBe(false);
     expect(unsafePath("x\x1b[201~")).toBe(true);
     expect(unsafePath("x\u0085y")).toBe(true);
     expect(unsafePath("evil‮txt.sh")).toBe(true);

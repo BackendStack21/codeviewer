@@ -108,6 +108,9 @@ function indentOf(s: string): number {
   return w;
 }
 
+/** Languages with Go to Symbol patterns (besides Markdown headings). */
+export const SYMBOL_LANGS: readonly string[] = Object.keys(RULES);
+
 export function hasSymbols(lang: string): boolean {
   return lang === "md" || lang in RULES;
 }
@@ -199,9 +202,39 @@ function mdHeadings(lines: readonly string[]): Sym[] {
 
 /** Heading text as it renders (for the slug): emphasis, code ticks and link targets dropped. */
 export function headingText(src: string): string {
-  return src
-    // `[^\][]`: an unclosed `[` stops at the next one instead of scanning to the end (quadratic).
-    .replace(/!?\[([^\][]*)\]\([^)]*\)/g, "$1")
-    .replace(/[*_`~]/g, "")
-    .trim();
+  return stripLinks(src).replace(/[*_`~]/g, "").trim();
+}
+
+/**
+ * `!?[text](target)` → `text`, exactly like `src.replace(/!?\[([^\][]*)\]\([^)]*\)/g, "$1")` but in
+ * one pass: the regex re-scanned to the end of the string for every link with no closing `)`
+ * (`![a](` repeated: quadratic).
+ */
+export function stripLinks(s: string): string {
+  let out = "";
+  let i = 0; // everything before i is in `out`
+  let at = 0; // where to look for the next "["
+  const n = s.length;
+  for (;;) {
+    const open = s.indexOf("[", at);
+    if (open < 0) break;
+    // The text runs to the first "]" and may not contain "[": at a "[" the search restarts there.
+    let close = open + 1;
+    while (close < n && s[close] !== "]" && s[close] !== "[") close++;
+    if (close >= n) break; // no "]" left: nothing later can match either
+    if (s[close] === "[") {
+      at = close;
+      continue;
+    }
+    if (s[close + 1] !== "(") {
+      at = close + 1;
+      continue;
+    }
+    const end = s.indexOf(")", close + 2);
+    if (end < 0) break; // no ")" left: no later link can close either
+    const start = open > i && s[open - 1] === "!" ? open - 1 : open;
+    out += s.slice(i, start) + s.slice(open + 1, close);
+    i = at = end + 1;
+  }
+  return out + s.slice(i);
 }

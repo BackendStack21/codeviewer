@@ -1,6 +1,6 @@
 // Search worker: scans candidate files with a verified-regular-file handle and posts results.
 // The user's pattern only ever runs here, so the main thread can terminate() it at any time.
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readlinkSync, readSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, MAX_TEXT_BYTES, within } from "./files.ts";
 import { compileQuery, matchText, MAX_TOTAL_MATCHES, type WorkerJob, type WorkerMsg } from "./search.ts";
@@ -17,6 +17,21 @@ function decode(buf: Uint8Array): string {
 
 const post = (m: WorkerMsg) => postMessage(m);
 
+/** The file behind `fd` is inside the root: Linux names it (/proc/self/fd); elsewhere `real` must still resolve inside to the same inode. */
+function openedInside(root: string, real: string, fd: number, st: { dev: number; ino: number }): boolean {
+  try {
+    const named = readlinkSync(`/proc/self/fd/${fd}`);
+    if (path.isAbsolute(named)) return within(root, named);
+  } catch {}
+  try {
+    const again = realpathSync(real);
+    const s = statSync(again);
+    return within(root, again) && s.dev === st.dev && s.ino === st.ino;
+  } catch {
+    return false;
+  }
+}
+
 function run({ req, cancel }: WorkerJob): void {
   const flag = new Int32Array(cancel);
   const c = compileQuery(req.q, req.opts);
@@ -26,12 +41,9 @@ function run({ req, cancel }: WorkerJob): void {
   }
   // Like the find bar (which tests line by line), ^ and $ anchor at line boundaries.
   const re = new RegExp(c.re.source, c.re.flags.includes("m") ? c.re.flags : c.re.flags + "m");
-  let rootReal = req.root;
-  try {
-    rootReal = realpathSync(req.root);
-  } catch {
-    /* unreadable root: every open below fails and counts as skipped */
-  }
+  // Resolved once at startup (main.ts). Resolving it again per search followed a root that was
+  // later replaced by a symlink (mv root root.old; ln -s ~ root), which /api/file never does.
+  const rootReal = req.root;
   const seen = new Set<string>();
   let listed: Set<string> | null = null;
   let files = 0;
@@ -60,12 +72,16 @@ function run({ req, cancel }: WorkerJob): void {
       // (the one git and the editor know), whichever of the two is listed first.
       const realRel = path.relative(rootReal, real).split(path.sep).join("/");
       if (realRel !== rel && (listed ??= new Set(req.files)).has(realRel)) continue;
-      // Open the checked real path, not the joined one: a parent swapped for a symlink after the
-      // check cannot redirect the open (O_NOFOLLOW guards only the last component).
+      // Only regular files are opened: opening a FIFO or a device node can have side effects.
+      const pre = statSync(real);
+      if (pre.isDirectory()) continue; // submodules and nested repositories are listed as paths, not files
+      if (!pre.isFile()) throw new Error("skip");
       fd = openSync(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const st = fstatSync(fd);
-      if (st.isDirectory()) continue; // submodules and nested repositories are listed as paths, not files
       if (!st.isFile() || st.size > MAX_TEXT_BYTES) throw new Error("skip");
+      // O_NOFOLLOW guards only the last component: a parent swapped for a symlink between the
+      // check and the open (259 outside hits in 40 searches) is caught here, on the open file.
+      if (!openedInside(rootReal, real, fd, st)) throw new Error("skip");
       const id = `${st.dev}:${st.ino}`;
       if (seen.has(id)) continue;
       seen.add(id);

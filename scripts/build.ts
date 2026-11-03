@@ -92,7 +92,14 @@ function minifyCss(css: string): string {
 
 async function compile(target: string | null, outfile: string) {
   await mkdir(path.dirname(outfile), { recursive: true });
-  const cmd = ["bun", "build", "--compile", "--minify", "--sourcemap=none", path.join(root, "src/server/main.ts"), path.join(root, "src/server/search.worker.ts"), "--outfile", outfile];
+  // No autoloading from the working directory, which is often the folder being viewed: a
+  // bunfig.toml there could preload its own code into the server, and a .env could set variables
+  // for every shell and git process (LD_PRELOAD, PROMPT_COMMAND).
+  const cmd = [
+    "bun", "build", "--compile", "--minify", "--sourcemap=none",
+    "--no-compile-autoload-bunfig", "--no-compile-autoload-dotenv", "--no-compile-autoload-tsconfig", "--no-compile-autoload-package-json",
+    path.join(root, "src/server/main.ts"), path.join(root, "src/server/search.worker.ts"), "--outfile", outfile,
+  ];
   if (target) cmd.push(`--target=${target}`);
   await sh(cmd);
   log(`binary   ${path.relative(root, outfile)} ${mb((await stat(outfile)).size)}`);

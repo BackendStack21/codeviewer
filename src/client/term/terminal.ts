@@ -671,7 +671,7 @@ export class Terminal {
     const cur = this.cur;
     switch (c) {
       case 0x07:
-        this.host.bell?.();
+        if (!this.silent) this.host.bell?.(); // never for replayed history
         break;
       case 0x08: // BS (xterm: pending wrap is dropped and the cursor still moves left)
         cur.wrapPending = false;
@@ -1253,7 +1253,9 @@ export class Terminal {
       return;
     }
     if (inter === "$" && f === "p") {
-      // DECRQM: report mode state. 1 = set, 2 = reset, 0 = unknown.
+      // DECRQM: report mode state. 1 = set, 2 = reset, 0 = unknown. Only for the two real forms:
+      // the reply echoes the prefix, and `>>>…` came back verbatim into the shell's input.
+      if (pre !== "" && pre !== "?") return;
       const m = this.p(0, 0);
       const v = pre === "?" ? this.privateModeState(m) : m === 4 ? (this.modes.insert ? 1 : 2) : 0;
       this.respond(`\x1b[${pre}${m};${v}$y`);

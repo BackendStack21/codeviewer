@@ -31,6 +31,7 @@ function newId() {
 
 /** Terminal panel: tabs of PTY sessions that survive page reloads. */
 export class TerminalPanel {
+  private tabsQueued = false;
   readonly el: HTMLElement;
   private tabsEl: HTMLElement;
   private body: HTMLElement;
@@ -119,7 +120,13 @@ export class TerminalPanel {
       },
       onTitle: (t) => {
         s.title = t || this.shellName;
-        this.renderTabs();
+        // One tab-bar render per batch of output (30 000 title changes took over a second).
+        if (this.tabsQueued) return;
+        this.tabsQueued = true;
+        queueMicrotask(() => {
+          this.tabsQueued = false;
+          this.renderTabs();
+        });
       },
       onOpenPath: this.onOpenPath,
       onOpenUrl: this.onOpenUrl,

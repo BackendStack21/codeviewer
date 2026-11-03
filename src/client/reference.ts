@@ -28,7 +28,9 @@ export function lineSpan(sel: SelRange | null, activeLine: number): Span | null 
  * what follows it.
  */
 export function unsafePath(path: string): boolean {
-  return /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/.test(path);
+  // Also command substitution (`…` and $(…)): pasted at a shell prompt and run, `x$(rm …).md:3`
+  // would execute it. A plain `$` stays allowed (`$param.tsx` route files expand to nothing).
+  return /[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069`]|\$\(/.test(path);
 }
 
 export function reference(path: string, span: Span | null): string {

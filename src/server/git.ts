@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { HEAVY_DIRS } from "./index.ts";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, openRegular } from "./files.ts";
 
@@ -111,8 +111,14 @@ export function isOid(s: string): boolean {
   return OID.test(s);
 }
 
+/**
+ * Variables that would point git at another repository than the one under the viewed folder (set
+ * when codeviewer is started from a git hook, or by the user's shell): discovery is by the folder only.
+ */
+const LOCATORS = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_CONFIG", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE", "GIT_REPLACE_REF_BASE"];
+
 const ENV = {
-  ...process.env,
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !LOCATORS.includes(k))),
   GIT_OPTIONAL_LOCKS: "0",
   GIT_TERMINAL_PROMPT: "0",
   GIT_PAGER: "cat",
@@ -147,6 +153,11 @@ const HARDEN = [
   "-c", "status.renameLimit=1000",
   // Commit text in UTF-8, whatever the repository asks for (UTF-16 broke every parser).
   "-c", "i18n.logOutputEncoding=UTF-8",
+  // `git diff` rewrites the index to refresh stat info (it ignores GIT_OPTIONAL_LOCKS), and
+  // writing the index runs the repository's own post-index-change hook: an extracted tarball with
+  // touched files ran it from the Changes view. No refresh (diffFiles copes), and no hooks at all.
+  "-c", "diff.autoRefreshIndex=false",
+  "-c", "core.hooksPath=/dev/null",
 ];
 
 /** Wall clock for one git run; a hostile config can make git read /dev/zero forever. */
@@ -182,6 +193,8 @@ export class Git {
   static async open(root: string): Promise<Git | null> {
     const bin = Bun.which("git");
     if (!bin) return null;
+    // Even rev-parse reads .git/config, HEAD and commondir to their end: check them first.
+    if (!preflight(root)) return null;
     const r = await run(bin, root, [...HARDEN, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir", "--show-object-format"]);
     if (r.code !== 0) return null;
     const [top, gitDir, common, format] = new TextDecoder().decode(r.out).trim().split("\n");
@@ -213,7 +226,9 @@ export class Git {
     this.overrides = null;
   }
 
-  private async computeOverrides(): Promise<Record<string, string | undefined>> {
+  private async computeOverrides(): Promise<Record<string, string | undefined> | null> {
+    // Re-checked for every operation: the repository can change while it is open.
+    if (!this.gitDirs.every(gitDirFilesOk)) return null;
     const r = await run(this.bin, this.root, [...HARDEN, "config", "--name-only", "-z", "--get-regexp", "^(filter|diff|merge)\\."], 16 << 20, this.env);
     // Fail closed: a cut-off or failed listing would leave every driver after the cut armed.
     // (Exit code 1 means no driver is defined.)
@@ -445,11 +460,12 @@ export class Git {
    */
   private async diffFiles(rev: string): Promise<{ files: ChangeEntry[]; truncated: boolean }> {
     const r = await this.git([
-      "diff", "--raw", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=all", "-O/dev/null", rev, "--", ".",
+      "diff", "--raw", "--numstat", "-z", "-M", "--no-abbrev", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=all", "-O/dev/null", rev, "--", ".",
     ]);
     // A run cut by the timeout or the size cap is an incomplete list, not a clean tree.
     if (r.code !== 0) return { files: [], truncated: r.truncated };
     const recs = new TextDecoder().decode(r.out).split("\0");
+    const statOnly = new Map<ChangeEntry, string>();
     const byPath = new Map<string, ChangeEntry>();
     let truncated = false;
     const strip = (p: string) => (p.startsWith(this.prefix) ? p.slice(this.prefix.length) : null);
@@ -472,6 +488,8 @@ export class Git {
         }
         const status = (/^[MADRCTUX]$/.test(st) ? st : "M") as ChangeEntry["status"];
         const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false };
+        // Kept for the stat-only check below (not part of the entry sent to the client).
+        if (status === "M" && parts[0] === parts[1]) statOnly.set(e, parts[2] ?? "");
         if (two) {
           const o = strip(oldP);
           // A rename from outside the viewed folder: show it as new, never a path above the root.
@@ -496,6 +514,23 @@ export class Git {
         e.added = Number(m[1]);
         e.removed = Number(m[2]);
       }
+    }
+    // Without an index refresh, files whose stat info changed but whose content did not are listed
+    // as modified: a text file then has no numstat line, a binary one "-\t-". Drop the first, and
+    // hash the second (hash-object reads, never writes) to compare with the blob it came from.
+    const binaries: ChangeEntry[] = [];
+    for (const [e, oid] of statOnly) {
+      if (e.added === null && !e.binary) byPath.delete(e.path);
+      else if (e.binary && isOid(oid)) binaries.push(e);
+    }
+    for (let i = 0; i < binaries.length && i < 400; i += 100) {
+      const chunk = binaries.slice(i, i + 100);
+      const h = await this.git(["hash-object", "--no-filters", "--", ...chunk.map((e) => e.path)], 1 << 16);
+      if (h.code !== 0) continue;
+      const oids = new TextDecoder().decode(h.out).trim().split("\n");
+      chunk.forEach((e, n) => {
+        if (oids[n] === statOnly.get(e)) byPath.delete(e.path);
+      });
     }
     return { files: [...byPath.values()], truncated };
   }
@@ -696,6 +731,63 @@ export function parseHistory(out: string, prefix = ""): HistoryEntry[] {
     if (entry) res.push(entry);
   }
   return res;
+}
+
+/**
+ * Files git reads whole, and the most each may hold. A symlink to /dev/zero or a FIFO in their
+ * place made git allocate until memory ran out (or block for the 30 s run timeout), and no config
+ * key prevents those reads: each must be a regular file of a sane size, or git is not used at all.
+ */
+const GIT_FILES: [string, number][] = [
+  ["HEAD", 1 << 20], ["commondir", 1 << 16], ["gitdir", 1 << 16], ["shallow", 64 << 20], ["config", 16 << 20],
+  ["config.worktree", 16 << 20], ["info/attributes", 16 << 20], ["info/exclude", 16 << 20], ["info/grafts", 16 << 20],
+  ["info/sparse-checkout", 16 << 20], ["objects/info/alternates", 1 << 20], ["objects/info/commit-graphs/commit-graph-chain", 1 << 20],
+  ["packed-refs", 2 ** 30], ["index", 4 * 2 ** 30], ["sharedindex", 4 * 2 ** 30], // not `4 << 30`: that overflows to 0
+];
+
+/** True when every file of GIT_FILES that exists in `dir` is a regular file within its size. */
+export function gitDirFilesOk(dir: string): boolean {
+  for (const [name, max] of GIT_FILES) {
+    let st;
+    try {
+      st = lstatSync(path.join(dir, ...name.split("/")));
+    } catch {
+      continue; // absent: fine
+    }
+    if (!st.isFile() || st.size > max) return false;
+  }
+  return true;
+}
+
+/**
+ * Before git runs at all: the `.git` it will find for `root` (walking up; a `gitdir:` file followed),
+ * its common dir, and their files must all be safe to read. False refuses git for this folder.
+ */
+function preflight(root: string): boolean {
+  for (let d = root; ; d = path.dirname(d)) {
+    const dotgit = path.join(d, ".git");
+    let st;
+    try {
+      st = lstatSync(dotgit);
+    } catch {
+      if (path.dirname(d) === d) return true; // no repository: nothing for git to read
+      continue;
+    }
+    let gitDir = dotgit;
+    if (!st.isDirectory()) {
+      // A worktree's `.git` file: small and regular (a FIFO or /dev/zero in its place is refused).
+      if (!st.isFile() || st.size > 4096) return false;
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotgit, "utf8"));
+      if (!m) return true; // not a repository git recognises; it will say so itself
+      gitDir = path.resolve(d, m[1]!);
+    }
+    if (!gitDirFilesOk(gitDir)) return false;
+    let common = "";
+    try {
+      common = readFileSync(path.join(gitDir, "commondir"), "utf8").trim(); // checked above: small, regular
+    } catch {}
+    return !common || gitDirFilesOk(path.resolve(gitDir, common));
+  }
 }
 
 /** n-th space-separated field to the end of the record (paths may contain spaces). */

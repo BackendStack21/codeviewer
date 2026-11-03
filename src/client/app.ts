@@ -530,7 +530,7 @@ class App {
   private copyReference(withCode: boolean) {
     const r = this.editor.referenceTarget();
     if (typeof r === "string") return this.notify(r);
-    if (unsafePath(r.path)) return this.notify("This file name has control characters: no reference copied");
+    if (unsafePath(r.path)) return this.notify("This file name has control or shell command characters: no reference copied");
     const text = withCode && r.span && r.lines ? referenceWithCode(r.path, r.span, r.lines) : reference(r.path, r.span);
     void navigator.clipboard.writeText(text);
     this.notify(`Copied ${reference(r.path, r.span)}${withCode && r.span ? " with code" : ""}`);
@@ -540,7 +540,7 @@ class App {
   private referenceToTerminal() {
     const r = this.editor.referenceTarget();
     if (typeof r === "string") return this.notify(r);
-    if (unsafePath(r.path)) return this.notify("This file name has control characters: nothing inserted");
+    if (unsafePath(r.path)) return this.notify("This file name has control or shell command characters: nothing inserted");
     const term = this.terms.active;
     if (!term || this.terms.activeExited) return this.notify("No running terminal to insert into");
     if (!this.L.panel) this.togglePanel(true);
@@ -746,7 +746,7 @@ class App {
     const u = this.updates.info;
     if (u?.available) {
       const b = h("button", { class: "st-item st-update", title: `Codeviewer ${u.latest} is available (you have ${u.current})`, onclick: () => this.updates.open() });
-      b.innerHTML = `<span class="st-up">↑</span>Update ${u.latest}`;
+      b.innerHTML = `<span class="st-up">↑</span>Update ${esc(u.latest ?? "")}`; // validated by the server too
       right.push(b);
     }
     right.push(h("span", { class: "st-item muted" }, "Read-only"));

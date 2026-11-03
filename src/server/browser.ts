@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import os from "node:os";
@@ -70,6 +70,9 @@ export function appWindowArgs(url: string, profile: string): string[] {
   return [
     `--app=${url}`,
     `--user-data-dir=${profile}`,
+    // Nothing on disk: a normal profile recorded the #t= launch URL (History, Favicons), so any
+    // process in a terminal could read the session token and type into the other terminals.
+    "--incognito",
     "--window-size=1440,920",
     "--no-first-run",
     "--no-default-browser-check",
@@ -84,6 +87,8 @@ export function appWindowArgs(url: string, profile: string): string[] {
     "--disable-features=Translate,MediaRouter,OptimizationHints,AutofillServerCommunication,DialMediaRouteProvider,InterestFeedContentSuggestions",
     "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
     "--proxy-server=127.0.0.1:9",
+    // WebRTC ignores the proxy: without this a page could still send STUN/TURN packets to any host.
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--class=codeviewer",
   ];
 }
@@ -93,8 +98,37 @@ export function appWindowArgs(url: string, profile: string): string[] {
  * local user (`ps`, /proc/<pid>/cmdline). So browsers are pointed at a bootstrap page in a
  * private 0700 directory (file 0600) that redirects to the real URL; it is deleted shortly after.
  */
+/** Temp dirs holding the token (boot pages, window profiles) that exist right now. */
+const tokenDirs = new Set<string>();
+
+/** Boot pages only (the page loads them once, at launch). */
+const bootDirs = new Set<string>();
+
+/** Deletes the boot pages now: called when the page has connected, so they live for seconds, not a minute. */
+export function removeBootPages() {
+  for (const d of bootDirs) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {}
+    tokenDirs.delete(d);
+  }
+  bootDirs.clear();
+}
+
+/** Deletes every boot page and window profile now, synchronously (for an exit that skips `finally`). */
+export function removeWindowFiles() {
+  for (const d of tokenDirs) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {}
+  }
+  tokenDirs.clear();
+}
+
 export async function bootPage(url: string): Promise<{ fileUrl: string; cleanup(): Promise<void> }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "codeviewer-boot-")); // mkdtemp creates 0700
+  tokenDirs.add(dir);
+  bootDirs.add(dir);
   const file = path.join(dir, "open.html");
   const safe = url.replace(/[^\w:/.#=?&%[\]-]/g, "");
   await writeFile(file, `<!doctype html><meta charset="utf-8"><title>Codeviewer</title><meta http-equiv="refresh" content="0;url=${safe}">`, { mode: 0o600 });
@@ -102,6 +136,8 @@ export async function bootPage(url: string): Promise<{ fileUrl: string; cleanup(
   const cleanup = async () => {
     if (done) return;
     done = true;
+    tokenDirs.delete(dir);
+    bootDirs.delete(dir);
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   };
   setTimeout(() => void cleanup(), 60_000).unref();
@@ -121,6 +157,7 @@ export function closeAppWindow() {
 
 export async function runAppWindow(browser: string, url: string): Promise<"closed" | "failed"> {
   const profile = await mkdtemp(path.join(os.tmpdir(), "codeviewer-profile-"));
+  tokenDirs.add(profile);
   const boot = await bootPage(url);
   const started = Date.now();
   let stderr = "";
@@ -147,6 +184,7 @@ export async function runAppWindow(browser: string, url: string): Promise<"close
   } finally {
     appWindow = null;
     await boot.cleanup();
+    tokenDirs.delete(profile);
     await rm(profile, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -197,4 +235,18 @@ export async function pickFolder(): Promise<string | null> {
   if (which("zenity")) return run(["zenity", "--file-selection", "--directory", "--title=Open folder in Codeviewer"]);
   if (which("kdialog")) return run(["kdialog", "--getexistingdirectory", os.homedir()]);
   return os.homedir();
+}
+
+/** http:// on a loopback address or one of this machine's own interfaces (a `--host` server). */
+export function isLocalViewerUrl(raw: string, interfaces = os.networkInterfaces()): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" || u.username || u.password || !u.port) return false;
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+  return Object.values(interfaces).some((list) => (list ?? []).some((a) => a.address === host));
 }

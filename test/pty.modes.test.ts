@@ -2,24 +2,22 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { applyModes, modesPrefix, PtyManager, type PtySocketData } from "../src/server/pty.ts";
+import { ModeTracker, modesPrefix, PtyManager, type PtySocketData } from "../src/server/pty.ts";
 
-const latin1 = (s: string) => new TextDecoder("latin1").decode(new TextEncoder().encode(s));
-
-test("applyModes: C1 CSI (UTF-8), colon sub-parameters and the alt-screen group", () => {
-  const m = new Map<number, boolean>();
-  applyModes(m, latin1("\u009b?1049h\u009b?1000h"));
-  expect(m.get(1049)).toBe(true);
-  expect(m.get(1000)).toBe(true);
-  applyModes(m, "\x1b[?2004:1h\x1b[?47h");
-  expect(m.get(2004)).toBe(true);
-  expect(m.has(1049)).toBe(false); // one alt-screen mode at a time
+test("ModeTracker: C1 CSI (UTF-8), colon sub-parameters and the alt-screen group", () => {
+  const t = new ModeTracker();
+  t.write(new TextEncoder().encode("\u009b?1049h\u009b?1000h"));
+  expect(t.modes.get(1049)).toBe(true);
+  expect(t.modes.get(1000)).toBe(true);
+  t.text("\x1b[?2004:1h\x1b[?47h");
+  expect(t.modes.get(2004)).toBe(true);
+  expect(t.modes.has(1049)).toBe(false); // one alt-screen mode at a time
   // A bare 0x9B byte is a UTF-8 continuation byte (ě is C4 9B), never CSI.
-  const n = new Map<number, boolean>();
-  applyModes(n, latin1("ě?1000h"));
-  expect(n.size).toBe(0);
-  applyModes(n, "\x1b[?25l");
-  expect(modesPrefix(n)).toBe("\x1b[?25l"); // a hidden cursor is restored too
+  const n = new ModeTracker();
+  n.write(new TextEncoder().encode("ě?1000h"));
+  expect(n.modes.size).toBe(0);
+  n.text("\x1b[?25l");
+  expect(modesPrefix(n.modes)).toBe("\x1b[?25l"); // a hidden cursor is restored too
 });
 
 let dir = "";
@@ -81,9 +79,9 @@ test("a trimmed replay includes mode changes in the bytes it skips (a TUI that e
   m.close(asWs(a));
   const s = (m as unknown as { sessions: Map<string, Record<string, unknown>> }).sessions.get("modes-trim")!;
   // The ring's first chunk: it starts inside an old line, then the TUI leaves alt screen, mouse and paste.
-  s.chunks = [
-    { data: new TextEncoder().encode("partial\x1b[?2004l\x1b[?1000l\x1b[?1049lEXITED\n$ prompt"), modes: "\x1b[?1049h\x1b[?1000h\x1b[?2004h" },
-  ];
+  const before = new ModeTracker();
+  before.text("\x1b[?1049h\x1b[?1000h\x1b[?2004h");
+  s.chunks = [{ data: new TextEncoder().encode("partial\x1b[?2004l\x1b[?1000l\x1b[?1049lEXITED\n$ prompt"), state: before.state() }];
   s.ringTrimmed = true;
   const b = fakeWs("x");
   (s.sendReplay as (ws: unknown) => void).call(s, b);

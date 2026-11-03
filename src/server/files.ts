@@ -162,6 +162,9 @@ export function looksBinary(buf: Uint8Array): boolean {
  * path is resolved again and must lead to the same inode.
  */
 export async function openRegular(abs: string, root?: string) {
+  // Refuse FIFOs and device nodes before opening them (an open alone can have side effects);
+  // the fstat below still decides, for whatever was actually opened.
+  if (!(await stat(abs)).isFile()) throw new Error("not a regular file");
   const fh = await open(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const st = await fh.stat();

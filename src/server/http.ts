@@ -33,6 +33,8 @@ export interface ServeOptions {
   searchScanner?: import("./search.ts").Scanner;
   /** Injected for tests: overrides SEARCH_DEADLINE_MS. */
   searchDeadlineMs?: number;
+  /** Called once, when the first page connects its events socket (the launch page has loaded). */
+  onFirstClient?: () => void;
 }
 
 type EventsSocketData = { kind: "events" };
@@ -63,6 +65,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     return updater.check().catch(() => null);
   })();
   const events = new Set<ServerWebSocket<SocketData>>();
+  let firstClient = false;
   let origin = "";
   let port = 0;
   const loopback = ["127.0.0.1", "localhost", "::1"].includes(opts.host);
@@ -140,11 +143,14 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     h.set("x-content-type-options", "nosniff");
     h.set("referrer-policy", "no-referrer");
     h.set("x-frame-options", "DENY");
+    // Other sites cannot load anything from here (an <img> of the favicon told them we run, and on which port).
+    h.set("cross-origin-resource-policy", "same-origin");
     return h;
   };
 
+  // no-store: in --browser mode the user's real profile cached /api/info (the root path), listings and status.
   const json = (data: unknown, status = 200) =>
-    new Response(JSON.stringify(data), { status, headers: securityHeaders(new Headers({ "content-type": "application/json" })) });
+    new Response(JSON.stringify(data), { status, headers: securityHeaders(new Headers({ "content-type": "application/json", "cache-control": "no-store" })) });
   const fail = (status: number, message: string) => json({ error: message }, status);
 
   const serveAsset = (req: Request, a: Asset) => {
@@ -568,7 +574,13 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       maxPayloadLength: 16 * 1024 * 1024,
       perMessageDeflate: false,
       open(ws) {
-        if (ws.data.kind === "events") events.add(ws);
+        if (ws.data.kind === "events") {
+          events.add(ws);
+          if (!firstClient) {
+            firstClient = true;
+            opts.onFirstClient?.();
+          }
+        }
         else ptys.open(ws as ServerWebSocket<PtySocketData>);
       },
       message(ws, msg) {
