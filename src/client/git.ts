@@ -14,6 +14,8 @@ export interface GitStatus {
   head: { hash: string; subject: string; author: string; time: number } | null;
   /** The viewed folder is itself git-ignored: everything in it is ignored (git lists nothing inside). */
   rootIgnored?: boolean;
+  /** `files` keys with no row in Changes: shown as untracked in the tree, not counted. */
+  unlisted?: string[];
 }
 
 /** Display status, VS Code style: Modified, Added, Untracked, Deleted, Renamed, Conflict, Ignored. */
@@ -69,13 +71,14 @@ export class GitState {
     this.prefixes = new Map();
     this.dirs.clear();
     this.counts = { changed: 0, staged: 0, untracked: 0, conflicts: 0 };
+    const unlisted = new Set(s.unlisted);
     for (const [raw, xy] of Object.entries(s.files ?? {})) {
       const g = describe(xy);
       const p = nfc(raw);
       if (p.endsWith("/")) this.prefixes.set(p.slice(0, -1), g);
       else this.files.set(p, g);
       if (g.letter === "I") continue;
-      if (g.letter === "U") this.counts.untracked++;
+      if (g.letter === "U") this.counts.untracked += unlisted.has(raw) ? 0 : 1;
       else if (g.letter === "C") this.counts.conflicts++;
       else this.counts.changed++;
       if (xy[0] !== "." && xy[0] !== "?" && !CONFLICT.has(xy)) this.counts.staged++;

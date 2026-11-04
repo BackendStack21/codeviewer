@@ -1065,3 +1065,20 @@ on v1.10.6 and about one in four alone, because the server sometimes never ended
 
 The delay is measured, not derived: the cause is inside Bun. The looped test is what will notice if
 a Bun upgrade changes this.
+
+## 26. Round 17: "1 untracked" with nothing in Changes
+
+The status bar counted untracked files from `git status`, while Changes leaves out `.DS_Store` and
+everything under a heavy folder, so a Mac folder could show `main*  1 untracked` over an empty list.
+
+| Finding | Fix |
+| --- | --- |
+| An untracked `.DS_Store` counted, made the branch dirty and could colour its folder, though the tree and Changes both hide it | `compute()` drops those `??` records. A tracked `.DS_Store` is a real change and stays |
+| An unignored heavy folder (`target/`) counted with no row in Changes, but the tree does show it, so its files must stay untracked there (badge, gutter) | The record stays and is named in `GitStatus.unlisted`, which the client leaves out of the count |
+| Status folds an untracked folder into one `dir/` record, so a folder holding only a `.DS_Store` or a `node_modules` counted too | `markUnlistedDirs` asks `ls-files` about those folders, only when there are some. It runs on every status, so `-x` skips heavy folders and `--directory` stops at the first real file: 9 ms instead of 54 ms on a 50,000-file untracked folder |
+| The heavy-name test ran on the whole path and on the last segment: a plain file named `target` or `venv` was missing from Changes and search | `isHeavyFile` (`index.ts`) tests folders only, plus `.DS_Store`. Status tests the root-relative path, so a viewed folder inside `target/` is not affected by the name above it |
+| A folder whose name is not UTF-8 decodes lossily and would match nothing as a pathspec, reading as empty | Such names are not checked and keep counting |
+
+`FileIndex.apply` keeps its own test: its watcher paths can be the heavy folder itself, which must
+not restart a build. A nested repository still counts as one untracked folder with no row in
+Changes: status cannot tell it from a plain folder, and it does exist.
