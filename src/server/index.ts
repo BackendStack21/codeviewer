@@ -8,6 +8,15 @@ export const HEAVY_DIRS = new Set([
   ".pytest_cache", ".gradle", ".terraform", ".DS_Store", "target", ".zig-cache", "zig-out",
 ]);
 
+/**
+ * A file left out of listings: anything under a heavy folder, and .DS_Store itself. A plain file
+ * that only shares a folder's name (`target`, `venv`) is listed. "dir/" is a folder.
+ */
+export function isHeavyFile(p: string): boolean {
+  const segs = p.split("/");
+  return segs.pop() === ".DS_Store" || segs.some((seg) => HEAVY_DIRS.has(seg));
+}
+
 const MAX_FILES = 200_000;
 
 /**

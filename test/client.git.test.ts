@@ -27,6 +27,16 @@ describe("GitState", () => {
     expect(g.counts).toEqual({ changed: 3, staged: 2, untracked: 1, conflicts: 1 });
   });
 
+  test("unlisted records stay untracked in the tree but do not count", () => {
+    const g = new GitState();
+    g.set({ ...st({ "target/": "??", "lib/pkg/": "??", "a.txt": "??" }), unlisted: ["target/", "lib/pkg/"] });
+    expect(g.counts.untracked).toBe(1);
+    expect(g.file("target/foo.rs")).toMatchObject({ letter: "U" });
+    expect(g.dir("lib")).toBe("U");
+    g.set({ ...st({ "target/": "??" }), unlisted: ["target/"] });
+    expect(g.counts).toEqual({ changed: 0, staged: 0, untracked: 0, conflicts: 0 });
+  });
+
   test("directories take the strongest status inside; prefixes cover descendants", () => {
     const g = new GitState();
     g.set(st({ "src/a/x.ts": ".M", "src/a/y.ts": "??", "src/b/z.ts": "UU", "build/": "!!", "tmp/": "??" }));

@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from "node:fs";
-import { HEAVY_DIRS } from "./index.ts";
+import { HEAVY_DIRS, isHeavyFile } from "./index.ts";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, openRegular } from "./files.ts";
@@ -40,6 +40,8 @@ export interface GitStatus {
   files: Record<string, string>;
   /** The viewed folder is itself git-ignored (git lists only the folder, so `files` has no "!!" entries). */
   rootIgnored: boolean;
+  /** `files` keys that are really untracked but have no row in Changes: the tree shows them, the count does not. */
+  unlisted: string[];
   head: { hash: string; subject: string; author: string; time: number } | null;
 }
 
@@ -80,7 +82,6 @@ export interface Changes {
   subjects: string[];
 }
 
-/** Most entries a Changes listing carries (tracked diffs and untracked files each). */
 export interface HistoryEntry {
   oid: string;
   /** First parent; null for a root commit. */
@@ -96,7 +97,10 @@ export interface HistoryEntry {
   status: "M" | "A" | "D" | "R" | "C" | "T";
 }
 
+/** Most entries a Changes listing carries (tracked diffs and untracked files each). */
 export const MAX_CHANGES = 1000;
+/** Above this many untracked folders in one status, they are counted without checking what they hold. */
+const MAX_UNTRACKED_DIR_CHECKS = 1000;
 /** Commits listed by File History at most. */
 export const MAX_HISTORY = 500;
 /** Untracked files whose lines are counted (the rest show no counts). */
@@ -270,7 +274,7 @@ export class Git {
     this.fresh();
     const r = await this.git(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate", "--", "."]);
     if (r.code !== 0) return null;
-    return new TextDecoder().decode(r.out).split("\0").filter((f) => f && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
+    return new TextDecoder().decode(r.out).split("\0").filter((f) => f && !isHeavyFile(f));
   }
 
   /** Current status; concurrent callers share one `git status` run. */
@@ -294,7 +298,7 @@ export class Git {
     ]);
     const s: GitStatus = {
       repo: true, branch: null, detached: false, oid: null, upstream: null, ahead: 0, behind: 0,
-      state: this.opState(), stash: 0, files: {}, rootIgnored: false, head: null,
+      state: this.opState(), stash: 0, files: {}, rootIgnored: false, unlisted: [], head: null,
     };
     if (stash.code === 0) s.stash = Number(new TextDecoder().decode(stash.out).trim()) || 0;
     if (head.code === 0) {
@@ -312,7 +316,13 @@ export class Git {
       }
       if (!p.startsWith(this.prefix)) return;
       const rel = p.slice(this.prefix.length);
-      if (rel) s.files[rel] = xy;
+      if (!rel) return;
+      if (xy === "??" && isHeavyFile(rel)) {
+        // The tree hides .DS_Store, so it must not colour a folder either; heavy folders it shows.
+        if (rel === ".DS_Store" || rel.endsWith("/.DS_Store")) return;
+        s.unlisted.push(rel);
+      }
+      s.files[rel] = xy;
     };
     for (let i = 0; i < recs.length; i++) {
       const r = recs[i]!;
@@ -343,7 +353,29 @@ export class Git {
       else if (kind === "?") add(r.slice(2), "??");
       else if (kind === "!") add(r.slice(2), "!!");
     }
+    await this.markUnlistedDirs(s);
     return s;
+  }
+
+  /**
+   * Status folds an untracked folder into one "dir/" record, even when all it holds is what Changes
+   * leaves out (a lone .DS_Store, a node_modules). Such a record would count with nothing to list.
+   */
+  private async markUnlistedDirs(s: GitStatus) {
+    // A name that is not UTF-8 does not survive decoding: as a pathspec it would match nothing.
+    const dirs = Object.keys(s.files).filter((p) => p.endsWith("/") && s.files[p] === "??" && !s.unlisted.includes(p) && !p.includes("\uFFFD"));
+    if (!dirs.length || dirs.length > MAX_UNTRACKED_DIR_CHECKS) return;
+    // Runs on every status: -x never enters a heavy folder, --directory stops at the first real file.
+    // A name in the viewed folder's own path stays out: -x tests the folders above the pathspec too.
+    const above = this.prefix.split("/");
+    const skip = [...HEAVY_DIRS].filter((name) => !above.includes(name)).flatMap((name) => ["-x", name === ".DS_Store" ? name : `${name}/`]);
+    const r = await this.git(["--literal-pathspecs", "ls-files", "-z", "--others", "--exclude-standard", "--directory", "--no-empty-directory", ...skip, "--", ...dirs]);
+    if (r.code !== 0) return;
+    const kept = new Set<string>();
+    for (const f of new TextDecoder().decode(r.out).split("\0")) {
+      for (let i = f.indexOf("/"); i >= 0; i = f.indexOf("/", i + 1)) kept.add(f.slice(0, i + 1));
+    }
+    for (const d of dirs) if (!kept.has(d)) s.unlisted.push(d);
   }
 
   private opState(): string | null {
@@ -556,7 +588,7 @@ export class Git {
     const all = new TextDecoder()
       .decode(r.out)
       .split("\0")
-      .filter((f) => f && !f.endsWith("/") && !f.split("/").some((seg) => HEAVY_DIRS.has(seg)));
+      .filter((f) => f && !f.endsWith("/") && !isHeavyFile(f));
     const paths = all.slice(0, MAX_CHANGES);
     const files: ChangeEntry[] = paths.map((p) => ({ path: p, status: "?", added: null, removed: null, binary: false }));
     // A few files at a time through one 64 KiB buffer each: never 200 MiB of buffers per request.

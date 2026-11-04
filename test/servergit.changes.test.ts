@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, mkdir, realpath, rm, writeFile, rename } from "node:fs/promises";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Git, isOid, MAX_CHANGES } from "../src/server/git.ts";
@@ -285,4 +286,111 @@ test("the list is capped and reports truncation; untracked symlinks are not read
   const lg = await git(links);
   const lc = await lg.changes("head");
   expect(lc.files).toEqual([{ path: "escape", status: "?", added: null, removed: null, binary: false }]);
+});
+
+test("status counts as untracked exactly what Changes lists", async () => {
+  const r = path.join(dir, "hidden-untracked");
+  await mkdir(path.join(r, "sub", "inner"), { recursive: true });
+  sh(["init", "-q", "-b", "main"], r);
+  await writeFile(path.join(r, ".gitignore"), "ignored/\n");
+  await writeFile(path.join(r, "sub", "s.txt"), "s\n");
+  await mkdir(path.join(r, "lib", "target"), { recursive: true });
+  await writeFile(path.join(r, "lib", "target", "t.txt"), "t\n");
+  sh(["add", "."], r);
+  sh(["commit", "-qm", "init"], r);
+
+  const put = async (rel: string) => {
+    await mkdir(path.dirname(path.join(r, rel)), { recursive: true });
+    await writeFile(path.join(r, rel), "x\n");
+  };
+  // Metadata is gone altogether; folders that hold nothing listable stay for the tree, uncounted.
+  for (const f of [".DS_Store", "sub/.DS_Store", "only/.DS_Store", "only/deep/.DS_Store", "target/out.o", "pkg/node_modules/m/i.js", "ignored/x"]) await put(f);
+  let g = await git(r);
+  expect((await g.changes("head")).files).toEqual([]);
+  let s = await g.status();
+  expect(s.files).toEqual({ "ignored/": "!!", "only/": "??", "pkg/": "??", "target/": "??" });
+  expect(s.unlisted.sort()).toEqual(["only/", "pkg/", "target/"]);
+
+  // Real files around them count, a folder holding one is one record, special characters are literal.
+  await put("real.txt");
+  await put("mixed/.DS_Store");
+  await put("mixed/new file.txt");
+  await put("glob[1]*/keep.txt");
+  g = await git(r);
+  expect((await g.changes("head")).files.map((f) => f.path).sort()).toEqual(["glob[1]*/keep.txt", "mixed/new file.txt", "real.txt"]);
+  s = await g.status();
+  expect(s.files).toMatchObject({ "glob[1]*/": "??", "mixed/": "??", "real.txt": "??" });
+  expect(s.unlisted.sort()).toEqual(["only/", "pkg/", "target/"]);
+
+  // A plain file that only shares a heavy folder's name is an ordinary file, alone or in a new folder.
+  await put("venv");
+  await put("plain/target");
+  g = await git(r);
+  expect((await g.changes("head")).files.map((f) => f.path)).toEqual(expect.arrayContaining(["venv", "plain/target"]));
+  s = await g.status();
+  expect(s.files).toMatchObject({ venv: "??", "plain/": "??" });
+  expect(s.unlisted).not.toContain("venv");
+  expect(s.unlisted).not.toContain("plain/");
+
+  // A nested repository really is there: it counts, though Changes has no row for it.
+  await put("nested/f.txt");
+  sh(["init", "-q"], path.join(r, "nested"));
+  g = await git(r);
+  s = await g.status();
+  expect(s.files["nested/"]).toBe("??");
+  expect(s.unlisted).not.toContain("nested/");
+  await rm(path.join(r, "nested"), { recursive: true });
+
+  // Viewing a subfolder: same rule, root-relative records.
+  await put("sub/only/.DS_Store");
+  await put("sub/kept/k.txt");
+  g = await git(path.join(r, "sub"));
+  s = await g.status();
+  expect(s.files).toEqual({ "kept/": "??", "only/": "??" });
+  expect(s.unlisted).toEqual(["only/"]);
+
+  // Viewing a folder inside a heavy-named one: the name above the root does not matter.
+  await put("lib/target/new.txt");
+  await put("lib/target/d/x.txt");
+  g = await git(path.join(r, "lib", "target"));
+  expect((await g.changes("head")).files.map((f) => f.path).sort()).toEqual(["d/x.txt", "new.txt"]);
+  s = await g.status();
+  expect(s.files).toEqual({ "d/": "??", "new.txt": "??" });
+  expect(s.unlisted).toEqual([]);
+
+  // A .DS_Store that is tracked is a real change and stays visible.
+  sh(["add", "-f", "sub/.DS_Store"], r);
+  sh(["commit", "-qm", "track it"], r);
+  await writeFile(path.join(r, "sub", ".DS_Store"), "changed\n");
+  g = await git(path.join(r, "sub"));
+  expect((await g.status()).files[".DS_Store"]).toBe(".M");
+});
+
+test("an untracked folder with a name that is not UTF-8 still counts (Linux)", async () => {
+  const r = path.join(dir, "latin1");
+  await mkdir(r);
+  sh(["init", "-q", "-b", "main"], r);
+  const named = Buffer.concat([Buffer.from(r + "/caf"), Buffer.from([0xe9])]);
+  try {
+    mkdirSync(named);
+  } catch {
+    return; // APFS refuses such names
+  }
+  writeFileSync(Buffer.concat([named, Buffer.from("/f.txt")]), "x\n");
+  const s = await (await git(r)).status();
+  expect(Object.keys(s.files)).toEqual(["caf�/"]);
+  expect(s.unlisted).toEqual([]);
+});
+
+test("past the check limit, untracked folders are counted unchecked", async () => {
+  const r = path.join(dir, "many-dirs");
+  await mkdir(r);
+  sh(["init", "-q", "-b", "main"], r);
+  for (let i = 0; i <= 1000; i++) {
+    await mkdir(path.join(r, `d${i}`));
+    await writeFile(path.join(r, `d${i}`, ".DS_Store"), "");
+  }
+  const s = await (await git(r)).status();
+  expect(Object.keys(s.files)).toHaveLength(1001);
+  expect(s.unlisted).toEqual([]);
 });
