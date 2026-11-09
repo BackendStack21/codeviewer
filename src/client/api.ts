@@ -77,6 +77,9 @@ export interface ChangeFile {
   added: number | null;
   removed: number | null;
   binary: boolean;
+  /** Git octal modes ("000000" when absent on that side; untracked entries carry only newMode). */
+  oldMode?: string;
+  newMode?: string;
 }
 
 /** One commit of a file's history (see src/server/git.ts HistoryEntry). */

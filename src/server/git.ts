@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { HEAVY_DIRS, isHeavyFile } from "./index.ts";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, openRegular } from "./files.ts";
 
@@ -66,6 +66,9 @@ export interface ChangeEntry {
   added: number | null;
   removed: number | null;
   binary: boolean;
+  /** Git octal modes ("100644", "100755", "120000"; "000000" when absent on that side). */
+  oldMode?: string;
+  newMode?: string;
 }
 
 export interface Changes {
@@ -519,7 +522,7 @@ export class Git {
           continue; // keep consuming: the numstat records of kept entries follow
         }
         const status = (/^[MADRCTUX]$/.test(st) ? st : "M") as ChangeEntry["status"];
-        const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false };
+        const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false, oldMode: parts[0], newMode: parts[1] };
         // Kept for the stat-only check below (not part of the entry sent to the client).
         if (status === "M" && parts[0] === parts[1]) statOnly.set(e, parts[2] ?? "");
         if (two) {
@@ -592,11 +595,26 @@ export class Git {
     const paths = all.slice(0, MAX_CHANGES);
     const files: ChangeEntry[] = paths.map((p) => ({ path: p, status: "?", added: null, removed: null, binary: false }));
     // A few files at a time through one 64 KiB buffer each: never 200 MiB of buffers per request.
+    for (const e of files) e.newMode = this.untrackedMode(e.path);
     const queue = files.slice(0, COUNT_UNTRACKED);
     await Promise.all(Array.from({ length: 8 }, async () => {
       for (let e = queue.shift(); e; e = queue.shift()) await this.countLines(e);
     }));
     return { files, truncated: all.length > MAX_CHANGES };
+  }
+
+  /** Mode of an untracked file from lstat (a link is never followed); the parent directory must resolve inside the root. */
+  private untrackedMode(rel: string): string | undefined {
+    try {
+      const abs = path.join(this.root, ...rel.split("/"));
+      const parent = realpathSync(path.dirname(abs));
+      if (parent !== this.root && !parent.startsWith(this.root + path.sep)) return undefined;
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) return "120000";
+      return st.mode & 0o111 ? "100755" : "100644";
+    } catch {
+      return undefined;
+    }
   }
 
   private async countLines(e: ChangeEntry) {
