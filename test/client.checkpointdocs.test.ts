@@ -72,4 +72,29 @@ describe("checkpoint docs", () => {
     expect(row).toContain("src/client/checkpointctl.ts");
     expect(row).toMatch(/app\.ts/);
   });
+
+  test("DESIGN.md section 31 follows section 30 with the votes and the findings", () => {
+    const h30 = design.indexOf("## 30. Round 21: changes since a checkpoint\n");
+    const h31 = design.indexOf("## 31. Round 22: next unreviewed file");
+    expect(h31).toBeGreaterThan(h30);
+    const s = design.slice(h31);
+    expect(s).toContain("4 of 4");
+    expect(s).toContain("panel 4");
+    expect(s).toContain("repository trust report");
+    expect(s).toContain("Go to Definition");
+    expect(s).toContain("fifth time");
+    expect(s).toContain("content-based risk hints");
+    expect(s).toContain("| Finding | Fix |");
+    const rows = s.split("\n").filter((l) => l.startsWith("| ") && !l.startsWith("| Finding") && !l.startsWith("| ---"));
+    expect(rows.length).toBeGreaterThanOrEqual(7);
+    const low = s.toLowerCase();
+    expect(low).toContain("checkpointtext");
+    expect(low).toContain("setcurrent");
+    expect(low).toContain("unreviewedkey");
+    expect(low).toContain("live region");
+    expect(low).toContain("404");
+    expect(low).toContain("skipped");
+    expect(low).toContain("current file last");
+    expect(low).toContain("reviewed");
+  });
 });

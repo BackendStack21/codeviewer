@@ -10,6 +10,21 @@ export const CHECKPOINT_COMMANDS = [
   { id: "changes.clearCheckpoint", title: "Changes: Clear Checkpoint" },
 ] as const;
 
+/**
+ * Text for a checkpoint: the string; null = the file vanished (a 404); undefined = binary, truncated,
+ * too large or otherwise unreadable.
+ */
+export async function checkpointText(
+  read: () => Promise<{ kind: string; truncated: boolean; text: string }>,
+): Promise<string | null | undefined> {
+  try {
+    const f = await read();
+    return f.kind === "text" && !f.truncated ? f.text : undefined;
+  } catch (e) {
+    return typeof e === "object" && e !== null && (e as { status?: unknown }).status === 404 ? null : undefined;
+  }
+}
+
 export interface SinceDiff {
   path: string;
   status: "A" | "M" | "D";

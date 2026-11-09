@@ -119,10 +119,20 @@ export interface UpdateInfo {
   checkedAt: number;
 }
 
+/** A failed request: the server's message and its HTTP status. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? res.statusText);
+    throw new ApiError(body.error ?? res.statusText, res.status);
   }
   return res;
 }

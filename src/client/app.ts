@@ -1,6 +1,6 @@
 import { wsUrl } from "./auth.ts"; // first: installs the auth header on fetch
 import { api, type Info } from "./api.ts";
-import { CHECKPOINT_COMMANDS, CheckpointController } from "./checkpointctl.ts";
+import { CHECKPOINT_COMMANDS, CheckpointController, checkpointText } from "./checkpointctl.ts";
 import { Editor, type StatusInfo } from "./editor.ts";
 import { FileTree } from "./tree.ts";
 import { Palette, type Command, type PickItem } from "./palette.ts";
@@ -98,10 +98,7 @@ class App {
   private live!: HTMLElement;
   private checkpoints = new CheckpointController({
     changes: () => api.gitChanges("head"),
-    readText: async (p) => {
-      const f = await api.file(p).catch(() => null);
-      return f && f.kind === "text" && !f.truncated ? f.text : undefined;
-    },
+    readText: (p) => checkpointText(() => api.file(p)),
     baseText: (p, rev) => api.gitBase(p, rev),
     now: () => Date.now(),
     notify: (m) => this.notify(m),

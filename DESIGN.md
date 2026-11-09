@@ -1174,3 +1174,31 @@ palette's `pick()`. Enter opens a read-only diff tab (`Editor.openSinceDiff`) la
 | A failed base read left an unhandled rejection and no message | Since Checkpoint resolves and says it could not compare |
 | Since tabs could be re-pointed by git events, stepping or reloads | The since tab is not tied to Changes: no re-pointing, no stepping, no reloads, no position |
 | The Changes summary was rebuilt with innerHTML, replacing the `ch-riskcount` live region so screen readers might not announce the new count | The summary elements are created once; the render updates only their text and the `ch-riskcount` element persists |
+
+
+## 31. Round 22: next unreviewed file
+
+A panel of four picked the next feature. Next/Previous Unreviewed Changed File got 4 of 4 votes this time
+(agent-workflow #1, UX #1, navigation #2, git/security #3) and 3 in panel 4; S1 got 3 votes.
+A repository trust report got a first place (git/security). Go to Definition got a first place for the fifth time
+(navigation). Votes for content-based risk hints: 2.
+
+The search is pure: `nextUnreviewed` in `changes.ts` walks the paths from the current file, wrapping, and
+checks the current file last. `ChangesView.stepUnreviewed` and `unreviewedCount` use the same `seenKey` rule
+as the dimmed rows. `src/client/unreviewed.ts` holds the two palette commands and `runUnreviewed`, which
+announces through the live region (no toast); `unreviewedKey` in `keys.ts` routes Alt+F6 and Alt+Shift+F6
+and is `null` in the terminal. `app.ts` is glue. The checkpoint fix (S1) is `checkpointText` in
+`checkpointctl.ts`: `api.ts` throws an `ApiError` with the HTTP status, and a 404 while reading a file for a
+checkpoint means it vanished (recorded as deleted); every other failure stays skipped.
+
+| Finding | Fix |
+| --- | --- |
+| Stepping with the diff's buttons visited reviewed rows | `stepUnreviewed` goes only to rows that are not reviewed, and returns `null` when none is left |
+| Reviewed was only visual (a dimmed row) | A reviewed row carries a visually hidden ", reviewed" text, so its accessible name says so |
+| The unreviewed search could be wrong at the ends or when everything is reviewed | It is pure (`nextUnreviewed`), wraps, checks the current file last and returns -1 when all are reviewed |
+| The stepping start was first tied to the private keyboard selection, which tests and other callers could not set | The current file is the one whose diff is open (`setCurrent`) |
+| The hidden ", reviewed" text first sat before the directory, so nested rows read "name, reviewed dir" | It follows the directory span: "name dir, reviewed" |
+| One scenario test reused a view where the expected file was already reviewed | The test uses a fresh view and records the step again |
+| A key could fire inside the terminal, which keeps Alt combinations | Routing goes through `unreviewedKey`, which is `null` when the focus is in the terminal |
+| A toast would be missed by screen readers and cover the diff | The result is announced through the polite live region as "path, N unreviewed left"; no toast |
+| A file that vanished while a checkpoint was taken was recorded as skipped instead of deleted | `api.ts` throws `ApiError` with the status; `checkpointText` maps a 404 to deleted (null) and other failures to skipped |
