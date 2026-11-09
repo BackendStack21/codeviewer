@@ -72,3 +72,9 @@ export function navKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): "bac
   if (e.key !== "-") return null;
   return o.isMac ? (e.altKey ? null : "back") : e.altKey ? "back" : null;
 }
+
+/** Alt+F6 / Alt+Shift+F6: next / previous unreviewed changed file (1 / -1). Never from a focused terminal. */
+export function unreviewedKey(e: KeyLike, o: { inTerm: boolean }): 1 | -1 | null {
+  if (o.inTerm || e.key !== "F6" || !e.altKey || e.ctrlKey || e.metaKey) return null;
+  return e.shiftKey ? -1 : 1;
+}

@@ -18,7 +18,8 @@ import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
 import { Navigation, routeNavZoomKey } from "./navigation.ts";
-import { helpKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
+import { helpKey, normSideView, referenceKey, searchKey, symbolKey, unreviewedKey, type SideView } from "./keys.ts";
+import { runUnreviewed, UNREVIEWED_COMMANDS } from "./unreviewed.ts";
 import { reference, referenceWithCode, unsafePath } from "./reference.ts";
 import { headingText, type Sym } from "./symbols.ts";
 import { createHiddenNav } from "./hiddennav.ts";
@@ -464,6 +465,7 @@ class App {
       c("file.nextHidden", "Go to Next Hidden Character", () => this.hiddenNav.next()),
       c("git.next", "Git: Next Change", () => this.editor.nextChange(1), key("⌥F5", "Alt+F5")),
       c("git.prev", "Git: Previous Change", () => this.editor.nextChange(-1), key("⌥⇧F5", "Alt+Shift+F5")),
+      ...UNREVIEWED_COMMANDS.map((u) => c(u.id, u.title, () => this.stepUnreviewed(u.dir), u.dir === 1 ? key("⌥F6", "Alt+F6") : key("⌥⇧F6", "Alt+Shift+F6"))),
     ];
   }
 
@@ -522,6 +524,13 @@ class App {
     if (!this.L.sidebar) this.toggleSidebar(true);
     this.setSideView("changes");
     this.changes.focus();
+  }
+
+  /** ⌥F6 / ⌥⇧F6: step to the next / previous unreviewed changed file and announce it. */
+  private stepUnreviewed(dir: 1 | -1) {
+    if (!this.git.repo) return this.notify("Not a git repository");
+    this.showChanges();
+    runUnreviewed(dir, { view: this.changes, announce: (m) => (this.live.textContent = m) });
   }
 
   private async openDiff(f: ChangeFile, pin: boolean, focus = false) {
@@ -837,6 +846,7 @@ class App {
         else if (symbolKey(e, { isMac: IS_MAC }) && appKey) this.palette.open("@");
         else if (referenceKey(e, { isMac: IS_MAC }) && !inTerm) this.copyReference(false);
         else if (e.altKey && e.key === "F5" && !inTerm) this.editor.nextChange(e.shiftKey ? -1 : 1);
+        else if (unreviewedKey(e, { inTerm: !!inTerm }) !== null) this.stepUnreviewed(unreviewedKey(e, { inTerm: !!inTerm })!);
         else if (mod && e.shiftKey && k === "p") this.palette.open(">");
         else if (mod && !e.shiftKey && k === "p" && appKey && (IS_MAC || !inPalette)) this.palette.open(); // Linux: Ctrl+P is the palette's own "up"
         else if (mod && e.shiftKey && k === "e") {

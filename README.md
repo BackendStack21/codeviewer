@@ -52,7 +52,7 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   - **Review changes (⌘⇧G):** a Changes view in the sidebar lists every file the branch touched
     (vs its base branch, working tree included) or only the uncommitted ones (vs `HEAD`), with
     `+/−` per file and a one-line summary. Each file opens as a read-only unified diff; ⌥F5 walks
-    the changes and moves on to the next file. Reviewed files dim until they change again.
+    the changes and moves on to the next file. Reviewed files dim until they change again, and ⌥F6 / ⌥⇧F6 (or the palette commands "Changes: Next Unreviewed File" / "Changes: Previous Unreviewed File") step through only the files not yet reviewed, announcing how many are left. Screen readers read reviewed rows as "reviewed".
     Right-click a file in the Explorer and pick "View Changes" to jump to its diff.
   - **Risk flags:** rows in Changes carry a small badge, and the summary counts them ("· 2 flagged"),
     for an added executable bit, a new symbolic link, CI configuration, git hooks, dependency
@@ -154,6 +154,7 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌃⇧- / Ctrl+Shift+- | Go forward again |
 | ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
+| ⌥F6 / ⌥⇧F6 | Next / previous unreviewed changed file (Alt+F6 / Alt+Shift+F6 elsewhere) |
 | ⌘/ | Every shortcut and the terminal tips, in your platform's key names (⌘⇧7 on layouts where "/" is Shift+7, such as German) |
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
