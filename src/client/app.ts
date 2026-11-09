@@ -16,7 +16,7 @@ import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
-import { helpKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
+import { helpKey, navKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
 import { reference, referenceWithCode, unsafePath } from "./reference.ts";
 import { headingText } from "./symbols.ts";
 import { slugify } from "./markdown.ts";
@@ -614,6 +614,11 @@ class App {
     this.applyLayout();
   }
 
+  /** Back / Forward through the jump list (history wiring follows; empty until then). */
+  private navigate(dir: "back" | "forward") {
+    this.notify(dir === "back" ? "No previous location" : "No next location");
+  }
+
   private zoom(d: number) {
     const L = this.L;
     if (d === 0) {
@@ -769,7 +774,9 @@ class App {
         const appKey = IS_MAC || !inTerm;
         let handled = true;
         const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
-        if (sk === "search") this.showSearch();
+        const nk = navKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
+        if (nk) this.navigate(nk === "back" ? "back" : "forward");
+        else if (sk === "search") this.showSearch();
         else if (sk === "next" || sk === "prev") this.search.step(sk === "next" ? 1 : -1);
         else if (e.ctrlKey && (e.code === "Backquote" || k === "`")) {
           if (e.shiftKey) this.newTerminal();
