@@ -17,7 +17,7 @@ const data = (files: ChangeFile[]): ChangesData => ({
   files, truncated: false, commits: 2, subjects: ["feat: one"],
 });
 
-describe("stepUnreviewed when the diff opens later (onOpen never calls setCurrent)", () => {
+describe("runUnreviewed when the diff opens later (onOpen never calls setCurrent)", () => {
   let restore: (() => void) | null = null;
   afterEach(() => {
     restore?.();
@@ -32,17 +32,6 @@ describe("stepUnreviewed when the diff opens later (onOpen never calls setCurren
     v.onOpen = () => {};
     return v;
   }
-
-  test("the chosen file counts as reviewed at once and the next press moves on", async () => {
-    const v = await make();
-    expect(v.stepUnreviewed(1)?.path).toBe("a.ts");
-    expect(v.unreviewedCount()).toBe(2);
-    expect(v.stepUnreviewed(1)?.path).toBe("b.ts");
-    expect(v.unreviewedCount()).toBe(1);
-    expect(v.stepUnreviewed(1)?.path).toBe("c.ts");
-    expect(v.unreviewedCount()).toBe(0);
-    expect(v.stepUnreviewed(1)).toBeNull();
-  });
 
   test("the command announces how many are left", async () => {
     const v = await make();

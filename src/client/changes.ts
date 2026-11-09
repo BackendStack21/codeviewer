@@ -293,7 +293,6 @@ export class ChangesView {
     const next = nextUnreviewed(this.files.map((x) => x.path), this.current, dir, (p) => this.isSeen(p));
     if (next < 0) return null;
     const f = this.files[next]!;
-    this.setCurrent(f.path); // the diff opens later: count it as reviewed now so a quick repeat moves on
     this.select(next);
     this.onOpen(f, false);
     return f;

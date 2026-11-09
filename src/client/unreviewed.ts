@@ -6,7 +6,7 @@ export const UNREVIEWED_COMMANDS = [
 ] as const;
 
 export interface UnreviewedDeps {
-  view: { files: readonly { path: string }[]; stepUnreviewed(dir: 1 | -1): { path: string } | null; unreviewedCount(): number };
+  view: { files: readonly { path: string }[]; stepUnreviewed(dir: 1 | -1): { path: string } | null; unreviewedCount(): number; setCurrent?(path: string): void };
   announce(message: string): void;
 }
 
@@ -16,6 +16,7 @@ export function runUnreviewed(dir: 1 | -1, deps: UnreviewedDeps): void {
   if (view.files.length === 0) return announce("No changes");
   const f = view.stepUnreviewed(dir);
   if (!f) return announce(`All ${view.files.length} changed files reviewed`);
+  view.setCurrent?.(f.path); // the diff loads later: count the file as reviewed now so a quick repeat moves on
   announce(`${f.path}, ${view.unreviewedCount()} unreviewed left`);
 }
 
