@@ -42,6 +42,28 @@ export function summarize(files: readonly ChangeFile[]): { added: number; remove
 /** What "reviewed" was reviewed against: any later edit to the file un-dims its row. */
 const seenKey = (f: ChangeFile) => `${f.status}:${f.added}:${f.removed}:${f.oldPath ?? ""}`;
 
+/** Index of the next path that is not reviewed, searching from `current` in `dir` with wrap-around; -1 when none. */
+export function nextUnreviewed(
+  paths: readonly string[], current: string | null, dir: 1 | -1,
+  isReviewed: (path: string) => boolean,
+): number {
+  const n = paths.length;
+  if (!n) return -1;
+  const c = current === null ? -1 : paths.indexOf(current);
+  if (c < 0) {
+    for (let k = 0; k < n; k++) {
+      const i = dir === 1 ? k : n - 1 - k;
+      if (!isReviewed(paths[i]!)) return i;
+    }
+    return -1;
+  }
+  for (let k = 1; k <= n; k++) {
+    const i = (((c + dir * k) % n) + n) % n; // k = n lands on c itself: checked last
+    if (!isReviewed(paths[i]!)) return i;
+  }
+  return -1;
+}
+
 const BADGE: Record<RiskFlag, string> = { exec: "exec", symlink: "symlink", ci: "CI", hook: "hook", lockfile: "lock", manifest: "manifest", env: "env", hidden: "hidden" };
 
 const safe = (s: string) => esc(showHidden(s));
@@ -266,6 +288,26 @@ export class ChangesView {
     return f;
   }
 
+  /** Opens the next/previous file that is not reviewed (wrapping); null when every file is reviewed. */
+  stepUnreviewed(dir: 1 | -1): ChangeFile | null {
+    const next = nextUnreviewed(this.files.map((x) => x.path), this.current, dir, (p) => this.isSeen(p));
+    if (next < 0) return null;
+    this.select(next);
+    const f = this.files[next]!;
+    this.onOpen(f, false);
+    return f;
+  }
+
+  private isSeen(path: string): boolean {
+    const f = this.files.find((x) => x.path === path);
+    return !!f && this.seen.get(path) === seenKey(f);
+  }
+
+  /** Rows in the current list that are not reviewed. */
+  unreviewedCount(): number {
+    return this.files.filter((f) => this.seen.get(f.path) !== seenKey(f)).length;
+  }
+
   focus() {
     if (this.sel < 0) this.sel = Math.max(0, this.files.findIndex((f) => f.path === this.current));
     this.render();
@@ -375,7 +417,7 @@ export class ChangesView {
         .join("");
       html +=
         `<div class="${cls.join(" ")}" data-i="${i}" id="ch-${i}" role="option" aria-selected="${i === this.sel}" title="${esc(showHidden(f.path))} · ${labelOf(f)}${cls.includes("seen") ? " · reviewed (dims until the file changes again)" : ""}">` +
-        `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${risks}${counts}</div>`;
+        `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${cls.includes("seen") ? `<span class="sr-only">, reviewed</span>` : ""}${risks}${counts}</div>`;
     });
     if (d.truncated) html += `<div class="sv-note sv-warn">Showing the first ${files.length.toLocaleString()} files</div>`;
     this.list.innerHTML = html;
