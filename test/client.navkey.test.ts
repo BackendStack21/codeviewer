@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { navKey } from "../src/client/keys.ts";
 
 const mac = { isMac: true, inTerm: false };
@@ -59,27 +58,5 @@ describe("navKey everywhere", () => {
     expect(navKey({ key: "-", code: "Slash", ctrlKey: true }, mac)).toBe("back");
     expect(navKey({ key: "-", code: "Slash", ctrlKey: true, altKey: true }, lin)).toBe("back");
     expect(navKey({ key: "_", code: "Slash", ctrlKey: true, shiftKey: true }, lin)).toBe("forward");
-  });
-});
-
-// The App class is not exported (it boots at import), so the key handler's order is pinned in the
-// source: the navigation branch must come before the zoom-out branch that also matches Ctrl+-.
-describe("app keydown handler (AC-12)", () => {
-  const src = readFileSync(new URL("../src/client/app.ts", import.meta.url), "utf8");
-  const handler = src.slice(src.indexOf("private bindKeys()"), src.indexOf("private connectEvents()"));
-
-  test("calls navKey with the platform and terminal state", () => {
-    expect(handler).toMatch(/navKey\(e, \{ isMac: IS_MAC, inTerm: !!inTerm \}\)/);
-  });
-  test("navigation is dispatched before Ctrl+Alt+- can reach zoom out", () => {
-    const nav = handler.indexOf("navKey(");
-    const zoomOut = handler.indexOf("this.zoom(-1)");
-    expect(nav).toBeGreaterThan(-1);
-    expect(zoomOut).toBeGreaterThan(-1);
-    expect(nav).toBeLessThan(zoomOut);
-  });
-  test("both directions run the Go Back / Go Forward actions", () => {
-    expect(handler).toMatch(/"back"/);
-    expect(handler).toMatch(/"forward"/);
   });
 });

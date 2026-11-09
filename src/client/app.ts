@@ -16,9 +16,10 @@ import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
-import { helpKey, navKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
+import { Navigation, routeNavZoomKey } from "./navigation.ts";
+import { helpKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
 import { reference, referenceWithCode, unsafePath } from "./reference.ts";
-import { headingText } from "./symbols.ts";
+import { headingText, type Sym } from "./symbols.ts";
 import { slugify } from "./markdown.ts";
 
 
@@ -92,6 +93,12 @@ class App {
   private statusRight!: HTMLElement;
   private themeBtn!: HTMLButtonElement;
   private live!: HTMLElement;
+  private nav = new Navigation({
+    open: (loc) => this.editor.open(loc.path, { pin: true, line: loc.line, focus: false }).then((ok) => (void this.tree.reveal(loc.path), ok)),
+    current: () => this.editor.location(),
+    announce: (m) => (this.live.textContent = m),
+    notify: (m) => this.notify(m),
+  });
   private killArmed = 0;
   private help = new Help();
   private sideSplit!: HTMLElement;
@@ -190,13 +197,13 @@ class App {
 
     // Sidebar
     this.tree = new FileTree(this.info.name);
-    this.tree.onOpen = (p, pin) => void this.openFile(p, { pin, focus: pin });
+    this.tree.onOpen = (p, pin) => void this.jump(p, { pin, focus: pin });
     this.search = new SearchView();
     this.tree.onSearchIn = (dir, ignored) => this.search.searchIn(dir, ignored);
     this.tree.onViewChanges = (p) => void this.viewChanges(p);
     this.tree.onHistory = (p) => void this.fileHistory(p);
     this.search.onReveal = () => this.showSearch();
-    this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
+    this.search.onOpen = (path, line, col, len) => void this.jump(path, { line, col, len, focus: false });
     this.changes = new ChangesView();
     this.changes.onOpen = (f, pin) => void this.openDiff(f, pin);
     this.changes.onData = (d) => {
@@ -363,8 +370,8 @@ class App {
     });
 
     this.palette.recent = this.recent;
-    this.palette.onOpenFile = (p, line) => void this.openFile(p, { pin: true, line });
-    this.palette.onGoToLine = (n) => this.editor.goToLine(n);
+    this.palette.onOpenFile = (p, line) => void this.jump(p, { pin: true, line });
+    this.palette.onGoToLine = (n) => this.jumpToLine(n);
     this.palette.symbols = () => this.symbolItems();
     this.palette.commands = this.commands();
 
@@ -389,6 +396,8 @@ class App {
       c("view.theme", "Cycle Theme (System/Dark/Light)", () => this.cycleTheme()),
       c("view.zoomIn", "Increase Font Size", () => this.zoom(1), `${MOD}=`),
       c("view.zoomOut", "Decrease Font Size", () => this.zoom(-1), `${MOD}-`),
+      c("nav.back", "Go Back", () => this.navigate("back"), key("⌃-", "Ctrl+Alt+-")),
+      c("nav.forward", "Go Forward", () => this.navigate("forward"), key("⌃⇧-", "Ctrl+Shift+-")),
       c("view.zoomReset", "Reset Font Size", () => this.zoom(0), `${MOD}0`),
       c("search.files", "Search in Files", () => this.showSearch(), IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F"),
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
@@ -442,6 +451,26 @@ class App {
     void this.tree.reveal(path);
   }
 
+  /** Opens a file as a jump the Back / Forward history remembers. */
+  private async jump(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
+    const from = this.editor.location();
+    await this.openFile(path, opts);
+    if (from?.path === path && !opts.line) return; // re-showing the open file is not a jump
+    if (this.editor.location()?.path === path) this.nav.record(from, { path, line: opts.line ?? 1 });
+  }
+
+  private jumpToLine(n: number) {
+    const from = this.editor.location();
+    this.editor.goToLine(n);
+    if (from) this.nav.record(from, { path: from.path, line: n });
+  }
+
+  private jumpToSymbol(s: Sym, slug?: string) {
+    const from = this.editor.location();
+    this.editor.revealSymbol(s, slug);
+    if (from) this.nav.record(from, { path: from.path, line: s.line + 1 });
+  }
+
   private async openFromTerminal(p: string, line: number) {
     let rel = p;
     if (rel.startsWith(this.info.root + "/")) rel = rel.slice(this.info.root.length + 1);
@@ -452,7 +481,7 @@ class App {
       if (c.startsWith("/") || c.startsWith("~")) break;
       const type = await api.stat(c);
       if (type === "file") {
-        await this.openFile(c, { pin: true, line, focus: false });
+        await this.jump(c, { pin: true, line, focus: false });
         return;
       }
       if (type === "dir") {
@@ -508,7 +537,7 @@ class App {
         detail: `${s.kind} · line ${s.line + 1}`,
         icon: `<span class="sym-kind sym-${s.kind}" aria-hidden="true">${SYM_LETTER[s.kind]}</span>`,
         indent: depths.indexOf(s.depth),
-        run: () => this.editor.revealSymbol(s, slug),
+        run: () => this.jumpToSymbol(s, slug),
       };
     });
   }
@@ -614,9 +643,8 @@ class App {
     this.applyLayout();
   }
 
-  /** Back / Forward through the jump list (history wiring follows; empty until then). */
   private navigate(dir: "back" | "forward") {
-    this.notify(dir === "back" ? "No previous location" : "No next location");
+    void this.nav.go(dir);
   }
 
   private zoom(d: number) {
@@ -774,9 +802,9 @@ class App {
         const appKey = IS_MAC || !inTerm;
         let handled = true;
         const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
-        const nk = navKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
-        if (nk) this.navigate(nk === "back" ? "back" : "forward");
-        else if (sk === "search") this.showSearch();
+        if (routeNavZoomKey(e, { isMac: IS_MAC, inTerm: !!inTerm }, { navigate: (d) => this.navigate(d), zoom: (d) => this.zoom(d) })) {
+          // Go Back / Go Forward and the zoom keys
+        } else if (sk === "search") this.showSearch();
         else if (sk === "next" || sk === "prev") this.search.step(sk === "next" ? 1 : -1);
         else if (e.ctrlKey && (e.code === "Backquote" || k === "`")) {
           if (e.shiftKey) this.newTerminal();
@@ -813,9 +841,6 @@ class App {
           else this.editor.cycle(dir);
         }
         else if (e.ctrlKey && e.key === "Tab" && !inTerm) this.editor.cycle(e.shiftKey ? -1 : 1);
-        else if (mod && (k === "=" || k === "+") && appKey) this.zoom(1);
-        else if (mod && k === "-" && appKey) this.zoom(-1);
-        else if (mod && k === "0" && appKey) this.zoom(0);
         else if (mod && k === "j" && appKey) this.togglePanel();
         else if (helpKey(e, { isMac: IS_MAC }) && appKey) this.help.open();
         else if (e.key === "Escape" && this.help.isOpen) this.help.close();
@@ -871,7 +896,7 @@ class App {
         } else if (msg.t === "git" && msg.status) {
           this.git.set(msg.status as never);
         } else if (msg.t === "open" && msg.path) {
-          void this.openFile(msg.path, { pin: true, line: msg.line, focus: false });
+          void this.jump(msg.path, { pin: true, line: msg.line, focus: false });
           window.focus();
         }
       };

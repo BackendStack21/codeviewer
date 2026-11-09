@@ -118,7 +118,7 @@ export class Editor {
     this.render();
   }
 
-  async open(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
+  async open(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}): Promise<boolean> {
     let tab = this.tabs.find((t) => t.path === path && !t.isDiff);
     if (!tab) {
       // A single unpinned "preview" tab is reused while browsing.
@@ -149,6 +149,14 @@ export class Editor {
     }
     if (opts.focus !== false && this.active === tab) tab.code?.focus();
     this.render();
+    return tab.kind !== "error";
+  }
+
+  /** Where the user is: the active text or Markdown file and its current line (1-based). */
+  location(): { path: string; line: number } | undefined {
+    const t = this.active;
+    if (!t || t.isDiff || t.kind === "error" || t.kind === "image" || t.kind === "dir") return undefined;
+    return { path: t.path, line: t.code && t.code.activeLine >= 0 ? t.code.activeLine + 1 : 1 };
   }
 
   /**
