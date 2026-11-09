@@ -1173,3 +1173,4 @@ palette's `pick()`. Enter opens a read-only diff tab (`Editor.openSinceDiff`) la
 | Clear Checkpoint during an in-flight Set was undone when the listing resolved | Clear bumps a generation and the late result is dropped |
 | A failed base read left an unhandled rejection and no message | Since Checkpoint resolves and says it could not compare |
 | Since tabs could be re-pointed by git events, stepping or reloads | The since tab is not tied to Changes: no re-pointing, no stepping, no reloads, no position |
+| The Changes summary was rebuilt with innerHTML, replacing the `ch-riskcount` live region so screen readers might not announce the new count | The summary elements are created once; the render updates only their text and the `ch-riskcount` element persists |
