@@ -6,6 +6,7 @@ import { languageFor, languageName } from "./highlight.ts";
 import { fileIcon, icons } from "./icons.ts";
 import { isMarkdown } from "./markdown.ts";
 import { MarkdownView } from "./mdview.ts";
+import type { NavLoc } from "./navhistory.ts";
 import { decidePreview, tooLargeNote } from "./mdgate.ts";
 import { planView, toggleLabel, toggleMode, viewMode } from "./viewstate.ts";
 import { basename, debounce, dirname, esc, formatBytes, h, MOD, showHidden } from "./util.ts";
@@ -118,7 +119,7 @@ export class Editor {
     this.render();
   }
 
-  async open(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}): Promise<boolean> {
+  async open(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean; view?: "preview" } = {}): Promise<boolean> {
     let tab = this.tabs.find((t) => t.path === path && !t.isDiff);
     if (!tab) {
       // A single unpinned "preview" tab is reused while browsing.
@@ -141,6 +142,11 @@ export class Editor {
     } else {
       if (opts.pin) tab.pinned = true;
       this.activate(tab);
+      if (opts.view === "preview" && !opts.line && isMarkdown(path) && tab.asSource && tab.code) {
+        tab.asSource = false;
+        this.dropCode(tab);
+        await this.load(tab);
+      }
       if (opts.line && tab.md) await this.toSource(tab);
       if (opts.line && tab.code) {
         if (opts.col !== undefined && opts.len) tab.code.showRange(opts.line - 1, opts.col, opts.col + opts.len);
@@ -153,10 +159,21 @@ export class Editor {
   }
 
   /** Where the user is: the active text or Markdown file and its current line (1-based). */
-  location(): { path: string; line: number } | undefined {
+  location(): NavLoc | undefined {
     const t = this.active;
     if (!t || t.isDiff || t.kind === "error" || t.kind === "image" || t.kind === "dir") return undefined;
-    return { path: t.path, line: t.code && t.code.activeLine >= 0 ? t.code.activeLine + 1 : 1 };
+    if (t.md && !t.code) return { path: t.path, line: 1, view: "preview" };
+    const c = t.code;
+    if (!c) return { path: t.path, line: 1 };
+    const inView = c.activeLine >= c.firstVisibleLine() && c.activeLine <= c.lastVisibleLine();
+    return { path: t.path, line: c.activeLine >= 0 && inView ? c.activeLine + 1 : c.firstVisibleLine() + 1 };
+  }
+
+  /** The NavLoc for what `open(path, { line })` now shows. */
+  landing(path: string, line?: number): NavLoc {
+    const t = this.tabs.find((x) => x.path === path && !x.isDiff);
+    if (!line && t?.md && !t.code) return { path, line: 1, view: "preview" };
+    return { path, line: line ?? 1 };
   }
 
   /**

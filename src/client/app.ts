@@ -94,7 +94,7 @@ class App {
   private themeBtn!: HTMLButtonElement;
   private live!: HTMLElement;
   private nav = new Navigation({
-    open: (loc) => this.editor.open(loc.path, { pin: true, line: loc.line, focus: false }).then((ok) => (void this.tree.reveal(loc.path), ok)),
+    open: (loc) => this.editor.open(loc.path, loc.view ? { pin: true, view: loc.view, focus: false } : { pin: true, line: loc.line, focus: false }).then((ok) => (void this.tree.reveal(loc.path), ok)),
     current: () => this.editor.location(),
     announce: (m) => (this.live.textContent = m),
     notify: (m) => this.notify(m),
@@ -456,7 +456,7 @@ class App {
     const from = this.editor.location();
     await this.openFile(path, opts);
     if (from?.path === path && !opts.line) return; // re-showing the open file is not a jump
-    if (this.editor.location()?.path === path) this.nav.record(from, { path, line: opts.line ?? 1 });
+    if (this.editor.location()?.path === path) this.nav.record(from, this.editor.landing(path, opts.line));
   }
 
   private jumpToLine(n: number) {

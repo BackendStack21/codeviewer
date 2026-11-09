@@ -1121,4 +1121,7 @@ after the path, counts flagged rows in the summary and exposes `flags(path)`. Th
 | A mode-only change has no diff lines | The exec badge is the only sign of a `chmod +x` in the list |
 | The plan claimed a path matches at most one path category, but a directory rule and a name rule can both match (`.husky/.env` is hook and env) | Flags are a set returned in union order; the plan review caught it before any test was written |
 | The Changes summary had no `role="status"` although it is a count that changes | The summary wrap is a status region |
+| Back restored the clicked line, which may be scrolled off screen, and a never-clicked file always went back to line 1 | `Editor.location()` reports the active line only while it is on screen, else the topmost visible line (`CodeView.firstVisibleLine`/`lastVisibleLine`, inclusive) |
+| A Markdown file shown as the rendered preview came back as source | `NavLoc.view = "preview"` is recorded by `location()` and `Editor.landing()`, kept by `NavHistory` on every update path (set or removed together with the line), and `Editor.open(path, { view: "preview" })` reopens the preview; `app.ts` only forwards it |
+| Closing a tab might forget where Back should go | Pinned by tests: history entries survive `Editor.close`, and Back reopens the file; diff and image tabs have no location |
 

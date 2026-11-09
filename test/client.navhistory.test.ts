@@ -276,3 +276,88 @@ describe("NavHistory", () => {
     expect(h.forward(L("a", 1))).toEqual(L("b", 30));
   });
 });
+
+describe("AC-17 view survives in the history", () => {
+  const P = (path: string, line: number): NavLoc => ({ path, line, view: "preview" });
+  const seed = (h: NavHistory, ...es: NavLoc[]) => {
+    // build entries by recording each as a separate jump (distinct paths, so nothing coalesces)
+    h.record(undefined, es[0]!);
+    for (const e of es.slice(1)) h.record(undefined, e);
+  };
+
+  test("(1) a preview location keeps its view; one without has no view key", () => {
+    const h = new NavHistory();
+    h.record(undefined, P("a.md", 1));
+    expect(h.entries()).toEqual([P("a.md", 1)]);
+    const h2 = new NavHistory();
+    h2.record(undefined, L("a.md", 1));
+    expect("view" in h2.entries()[0]!).toBe(false);
+  });
+
+  test("(2) from updating the current entry sets its view", () => {
+    const h = new NavHistory({ near: 10 });
+    h.record(undefined, L("a.md", 1));
+    h.record(P("a.md", 5), L("b.ts", 1));
+    expect(h.entries()).toEqual([P("a.md", 5), L("b.ts", 1)]);
+  });
+
+  test("(3) from updating the current entry removes its view", () => {
+    const h = new NavHistory({ near: 10 });
+    h.record(undefined, P("a.md", 1));
+    h.record(L("a.md", 7), L("b.ts", 1));
+    const es = h.entries();
+    expect(es).toEqual([L("a.md", 7), L("b.ts", 1)]);
+    expect("view" in es[0]!).toBe(false);
+  });
+
+  test("(4) an appended from keeps its own view", () => {
+    const h = new NavHistory({ near: 10 });
+    h.record(undefined, L("c.ts", 1));
+    h.record(P("a.md", 3), L("b.ts", 1));
+    expect(h.entries()).toEqual([L("c.ts", 1), P("a.md", 3), L("b.ts", 1)]);
+  });
+
+  test("(5) a coalescing to sets the view", () => {
+    const h = new NavHistory({ near: 10 });
+    h.record(undefined, L("a.md", 3));
+    h.record(undefined, P("a.md", 8));
+    expect(h.entries()).toEqual([P("a.md", 8)]);
+  });
+
+  test("(6) a coalescing to removes the view", () => {
+    const h = new NavHistory({ near: 10 });
+    h.record(undefined, P("a.md", 3));
+    h.record(undefined, L("a.md", 8));
+    const es = h.entries();
+    expect(es).toEqual([L("a.md", 8)]);
+    expect("view" in es[0]!).toBe(false);
+  });
+
+  test("(d) an appended to keeps its own view", () => {
+    const h = new NavHistory({ near: 10 });
+    h.record(undefined, L("a.ts", 1));
+    h.record(undefined, P("b.md", 1));
+    expect(h.entries()).toEqual([L("a.ts", 1), P("b.md", 1)]);
+  });
+
+  test("(7) back and forward store current with its view, and return entries as stored", () => {
+    const h = new NavHistory();
+    seed(h, P("a.md", 1), L("b.ts", 1));
+    expect(h.back(L("b.ts", 4))).toEqual(P("a.md", 1));
+    expect(h.entries()).toEqual([P("a.md", 1), L("b.ts", 4)]);
+    // leaving the preview of a.md for b.ts, then coming back and leaving it as source
+    expect(h.forward(L("a.md", 9))).toEqual(L("b.ts", 4));
+    const es = h.entries();
+    expect(es[0]).toEqual(L("a.md", 9));
+    expect("view" in es[0]!).toBe(false);
+    expect(h.back(P("b.ts", 2))).toEqual(L("a.md", 9));
+    expect(h.entries()[1]).toEqual(P("b.ts", 2));
+  });
+
+  test("(7) back with a current that has a view sets it on the entry left", () => {
+    const h = new NavHistory();
+    seed(h, L("a.md", 1), L("b.ts", 1));
+    h.back(P("b.ts", 1));
+    expect(h.entries()[1]).toEqual(P("b.ts", 1));
+  });
+});

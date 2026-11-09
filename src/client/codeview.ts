@@ -699,6 +699,17 @@ export class CodeView {
     }
   }
 
+  /** Topmost visible line (0-based). */
+  firstVisibleLine(): number {
+    return Math.max(0, Math.floor(this.scroller.scrollTop / this.lh));
+  }
+
+  /** Last visible line (0-based, inclusive). */
+  lastVisibleLine(): number {
+    const s = this.scroller;
+    return Math.max(this.firstVisibleLine(), Math.ceil((s.scrollTop + (s.clientHeight || 800)) / this.lh) - 1);
+  }
+
   /** Scrolls so that 0-based `line` is visible (centered when far away). */
   revealLine(line: number, select = true) {
     line = Math.max(0, Math.min(this.lines.length - 1, line));

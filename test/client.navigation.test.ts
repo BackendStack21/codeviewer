@@ -238,3 +238,19 @@ describe("AC-12 keydown routing on Linux", () => {
     expect(r.handled).toBe(false);
   });
 });
+
+describe("AC-18 / AC-19 Navigation hands the recorded view to open", () => {
+  test("Back to a preview passes view preview to deps.open; Forward to a source passes none", async () => {
+    const { nav, log, state } = harness();
+    const P: NavLoc = { path: "docs/a.md", line: 1, view: "preview" };
+    state.at = { ...P };
+    nav.record({ ...P }, B(1));
+    state.at = B(1);
+    await nav.go("back");
+    expect(log.opened.at(-1)).toEqual(P);
+    state.at = { ...P };
+    await nav.go("forward");
+    expect(log.opened.at(-1)).toEqual(B(1));
+    expect("view" in log.opened.at(-1)!).toBe(false);
+  });
+});

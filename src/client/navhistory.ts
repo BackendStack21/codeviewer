@@ -1,9 +1,18 @@
 export interface NavLoc {
   path: string;
   line: number; // 1-based
+  /** Set when the location was a rendered Markdown preview. */
+  view?: "preview";
 }
 
-const copy = (l: NavLoc): NavLoc => ({ path: l.path, line: l.line });
+const copy = (l: NavLoc): NavLoc => (l.view ? { path: l.path, line: l.line, view: l.view } : { path: l.path, line: l.line });
+
+/** Gives `e` the line and view of `l` (the view key is removed when `l` has none). */
+const take = (e: NavLoc, l: NavLoc): void => {
+  e.line = l.line;
+  if (l.view) e.view = l.view;
+  else delete e.view;
+};
 
 /** Browser-style back/forward list: entries plus the index of the current one. */
 export class NavHistory {
@@ -21,11 +30,11 @@ export class NavHistory {
     this.list.length = this.idx + 1;
     if (from) {
       const cur = this.list[this.idx];
-      if (cur && cur.path === from.path) cur.line = from.line;
+      if (cur && cur.path === from.path) take(cur, from);
       else this.push(from);
     }
     const cur = this.list[this.idx];
-    if (cur && cur.path === to.path && Math.abs(cur.line - to.line) <= this.near) cur.line = to.line;
+    if (cur && cur.path === to.path && Math.abs(cur.line - to.line) <= this.near) take(cur, to);
     else this.push(to);
   }
 
