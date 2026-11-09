@@ -35,6 +35,9 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   preview scrolls to the heading itself. Covers TypeScript/JavaScript, Python, Rust, Go, C/C++,
   Java/Kotlin/C#, Swift, Ruby, PHP, Lua, shell, CSS, Zig, Haskell, Makefiles, YAML/TOML keys and
   Dockerfile stages, with patterns, not a parser.
+- **Back and forward:** ⌃- (Ctrl+Alt+- on Linux) returns to where you jumped from, ⌃⇧- (Ctrl+Shift+-) goes
+  forward again, like a browser. Jumps nearby (within 10 lines) merge; files that were deleted are skipped.
+  The history lives in memory only and is announced to screen readers.
 - **References for your agent:** ⌥⌘C copies `path:line` (or `path:12-40` for a selection) for the
   cursor or the selected lines. The palette also has **Copy Reference with Code** (the reference
   plus the lines in a fenced block) and **Insert Reference in Terminal**, which types it at the
@@ -129,6 +132,8 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs (in the terminal: switch terminals) |
 | ⌘W in the terminal | Close an exited terminal; a running one asks for a second press (Linux: Ctrl+W stays the shell's) |
 | Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…", "View Changes", "File History") |
+| ⌃- / Ctrl+Alt+- | Go back to the previous location (after a jump: `path:line`, Go to Line or Symbol, a search result, a terminal link, `codeviewer open`) |
+| ⌃⇧- / Ctrl+Shift+- | Go forward again |
 | ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
 | ⌘/ | Every shortcut and the terminal tips, in your platform's key names (⌘⇧7 on layouts where "/" is Shift+7, such as German) |

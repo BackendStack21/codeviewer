@@ -1082,3 +1082,22 @@ everything under a heavy folder, so a Mac folder could show `main*  1 untracked`
 `FileIndex.apply` keeps its own test: its watcher paths can be the heavy folder itself, which must
 not restart a build. A nested repository still counts as one untracked folder with no row in
 Changes: status cannot tell it from a plain folder, and it does exist.
+
+## 27. Round 18: back and forward navigation
+
+After jumping by `path:line`, Go to Symbol, a search result or a terminal link there was no way back.
+A panel of four (agent-workflow developer, UX/accessibility designer, code-navigation engineer,
+git/security engineer) compared options. B7, a browser-style jump list with Back and Forward, won with
+3 votes and no vetoes. Runners-up: risky-change flags in Changes (2 votes) and a checkpoint diff (2 votes).
+
+The list is `NavHistory` (`navhistory.ts`, pure): a capped list (100) with a current index; jumps within
+10 lines of the current entry merge. `Navigation` (`navigation.ts`) records jumps, reopens entries
+without recording, and announces "Back to path line N" in the polite live region. Keys: Ctrl+- and
+Ctrl+Shift+- on macOS, Ctrl+Alt+- and Ctrl+Shift+- on Linux. The history is never stored or sent.
+
+| Finding | Fix |
+| --- | --- |
+| `src/client/app.ts` constructs the app on import, so tests cannot load it | The jump bookkeeping lives in `src/client/navigation.ts` (`Navigation` with injected open/announce/notify) and the key routing in `routeNavZoomKey`; app.ts is glue |
+| On Linux Ctrl+Alt+- also matched zoom-out (Ctrl+-) | The navigation keys are routed before zoom |
+| The first AC-12 tests matched app.ts source text and broke on the refactor | Replaced by behavioural tests through `routeNavZoomKey` |
+| A file in the history may have vanished | `Editor.open` reports whether the file opened; Back/Forward drop the path and move on |

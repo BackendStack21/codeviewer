@@ -26,6 +26,8 @@ export class Help {
       ...group("In a file", [
         row(key("⌘F", "Ctrl+F"), "Find in file"),
         row(key("⌃G", "Ctrl+G"), "Go to line"),
+        row(key("⌃-", "Ctrl+Alt+-"), "Go back to the previous location (after a jump)"),
+        row(key("⌃⇧-", "Ctrl+Shift+-"), "Go forward again"),
         row(key("⌘⇧O", "Ctrl+Shift+O"), "Go to symbol (functions, classes, headings); or type @ in Go to file"),
         row(key("⌥⌘C", "Ctrl+Alt+C"), "Copy a path:line reference to the selected lines (palette: with code, or into the terminal)"),
         row(key("⌘⇧F", "Ctrl+Shift+F"), "Search in files"),

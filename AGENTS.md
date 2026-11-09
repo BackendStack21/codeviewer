@@ -44,6 +44,7 @@ bun run build:local               # binaries + the app for this machine (needs X
 | `src/client/codeview.ts`, `mdview.ts`, `diffview.ts` | The three file views; each owns select-all and copy while visible |
 | `src/client/term/` | Terminal emulator (`terminal.ts`), renderer, view (input, links, a11y log) |
 | `src/client/tree.ts`, `search.ts`, `changes.ts`, `palette.ts` | Sidebar views and the palette (virtualized rows, `aria-activedescendant`); the palette's `pick()` lists anything (File History) and `@` lists symbols |
+| `src/client/navhistory.ts`, `navigation.ts` | Back / Forward: the pure jump list (`NavHistory`) and `Navigation` (injected open/announce/notify, `routeNavZoomKey`); app.ts is glue |
 | `src/client/symbols.ts`, `reference.ts` | Go to Symbol patterns per language (pure); `path:line` references and their parsing |
 | `src/client/styles.css` | All styling; colour tokens at the top, dark and light |
 | `test/helpers/fakedom.ts`, `selfake.ts` | Minimal fake DOM for client tests (see limits below) |
