@@ -62,6 +62,8 @@ export class CheckpointController {
     const out: { path: string; text: string | null }[] = [];
     const unreadable: string[] = [];
     for (const f of files) {
+      // A rename is a delete plus an add: the old path is gone whatever the new file turns out to be.
+      if (f.status === "R" && f.oldPath !== undefined && f.oldPath !== f.path && !listed.has(f.oldPath)) out.push({ path: f.oldPath, text: null });
       if (f.binary) {
         unreadable.push(f.path);
         continue;
@@ -71,8 +73,6 @@ export class CheckpointController {
         unreadable.push(f.path);
         continue;
       }
-      // A rename is a delete plus an add.
-      if (f.status === "R" && f.oldPath !== undefined && f.oldPath !== f.path && !listed.has(f.oldPath)) out.push({ path: f.oldPath, text: null });
       out.push({ path: f.path, text });
     }
     return { out, unreadable };
@@ -103,9 +103,14 @@ export class CheckpointController {
     const derived: Checkpoint = { ...cp, skipped: [...cp.skipped, ...unreadable] };
     const skip = new Set(derived.skipped);
     const base = new Map<string, string | null | undefined>();
-    for (const p of new Set([...current.keys(), ...cp.texts.keys()])) {
-      if (skip.has(p) || (cp.texts.has(p) && current.has(p))) continue;
-      base.set(p, cp.rev === null ? null : await this.deps.baseText(p, cp.rev));
+    try {
+      for (const p of new Set([...current.keys(), ...cp.texts.keys()])) {
+        if (skip.has(p) || (cp.texts.has(p) && current.has(p))) continue;
+        base.set(p, cp.rev === null ? null : await this.deps.baseText(p, cp.rev));
+      }
+    } catch {
+      if (this.cp === cp) this.deps.notify("Could not compare with the checkpoint");
+      return;
     }
     if (this.cp !== cp) return;
     const baseOf = (p: string) => base.get(p);
@@ -129,6 +134,7 @@ export class CheckpointController {
   }
 
   clear(): void {
+    this.gen++; // a set() still reading must not bring the checkpoint back
     this.cp = null;
     this.deps.notify("Checkpoint cleared");
   }
