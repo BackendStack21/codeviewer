@@ -351,3 +351,130 @@ describe("ChangesView.ready", () => {
     expect(t.v.files).toEqual([]);
   });
 });
+
+describe("risk flags in the Changes view", () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+
+  async function load(files: ChangeFile[]) {
+    const m = mockFetch(() => Response.json(data(files)));
+    restore = m.restore;
+    const v = new C.ChangesView({ debounce: 0 });
+    const el = v.el as unknown as FakeElement;
+    v.setRepo(true);
+    await v.refresh();
+    return { v, list: el.querySelector(".ch-list")!, summary: el.querySelector(".ch-summary-wrap")! };
+  }
+
+  const attrs = (tag: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const m of tag.matchAll(/([\w-]+)="([^"]*)"/g)) out[m[1]!] = m[2]!;
+    return out;
+  };
+  /** The rows of the rendered list as HTML strings (rows contain no nested divs). */
+  const rowsOf = (html: string) => html.split('<div class="ch-row').slice(1).map((r) => '<div class="ch-row' + r.split("</div>")[0] + "</div>");
+  /** Badge elements of a row: attributes, text and the offset in the row. */
+  const badges = (row: string) =>
+    [...row.matchAll(/<(\w+)([^>]*)>([^<]*)<\/\1>/g)]
+      .map((m) => ({ attrs: attrs(m[2]!), text: m[3]!, at: m.index! }))
+      .filter((b) => (b.attrs.class ?? "").split(/\s+/).includes("risk"));
+  const rowFor = (html: string, path: string) => rowsOf(html).find((r) => attrs(r.match(/^<div[^>]*>/)![0]).title?.startsWith(path + " ·"));
+
+  test("flags(path) reports the computed flags of a listed row", async () => {
+    const t = await load([
+      f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }),
+      f("package-lock.json", "M", 2, 1),
+      f("plain.txt", "M"),
+    ]);
+    expect(t.v.flags("a.sh")).toEqual(["exec"]);
+    expect(t.v.flags("package-lock.json")).toEqual(["lockfile"]);
+    expect(t.v.flags("plain.txt")).toEqual([]);
+    expect(t.v.flags("nope")).toEqual([]);
+  });
+
+  test("a flagged row has a badge after the path with text, title and aria-label", async () => {
+    const t = await load([f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" })]);
+    const row = rowFor(t.list.innerHTML, "a.sh")!;
+    expect(row).toBeDefined();
+    const all = badges(row);
+    expect(all.length).toBe(1);
+    const [b, ...rest] = all;
+    expect(rest).toEqual([]);
+    expect(b!.text).toBe("exec");
+    expect(b!.attrs.title).toBe("executable bit added");
+    expect(b!.attrs["aria-label"]).toBe("executable bit added");
+    expect(b!.at).toBeGreaterThan(row.indexOf('class="ch-name"'));
+  });
+
+  test("every flag has its visible text, and multiple flags keep union order", async () => {
+    const cases: Array<[ChangeFile, string[], string[]]> = [
+      [f("l", "A", 1, 0, { oldMode: "000000", newMode: "120000" }), ["symlink"], ["new symbolic link"]],
+      [f(".github/workflows/ci.yml", "M"), ["CI"], ["CI configuration"]],
+      [f(".husky/pre-commit", "M"), ["hook"], ["git hook"]],
+      [f("yarn.lock", "M"), ["lock"], ["dependency lockfile"]],
+      [f("Dockerfile", "M"), ["manifest"], ["package manifest or build file"]],
+      [f(".env.local", "M"), ["env"], ["environment or registry configuration"]],
+      [f(".github/workflows/deploy.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }), ["exec", "CI"], ["executable bit added", "CI configuration"]],
+      [f(".husky/.env", "M"), ["hook", "env"], ["git hook", "environment or registry configuration"]],
+    ];
+    for (const [file, texts, labels] of cases) {
+      const t = await load([file]);
+      restore?.();
+      restore = null;
+      const bs = badges(rowFor(t.list.innerHTML, file.path)!);
+      expect(bs.map((b) => b.text)).toEqual(texts);
+      expect(bs.map((b) => b.attrs.title)).toEqual(labels);
+      expect(bs.map((b) => b.attrs["aria-label"])).toEqual(labels);
+    }
+  });
+
+  test("hostile paths are escaped, badges included", async () => {
+    const evil = '.husky/<img src=x onerror=1>"q".sh';
+    const t = await load([f(evil, "A", 1, 0, { oldMode: "000000", newMode: "100755" }), f('Dockerfile.<b>"x"', "M")]);
+    const html = t.list.innerHTML;
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;img src=x onerror=1&gt;");
+    const row = rowsOf(html).find((r) => r.includes("&lt;img"))!;
+    expect(badges(row).map((b) => b.text)).toEqual(["exec", "hook"]);
+    // Attribute values are closed strings (the path's quotes are entities) and no attribute is named onerror.
+    for (const r of rowsOf(html)) {
+      const tag = r.match(/<div[^>]*>/)![0];
+      expect(Object.keys(attrs(tag))).not.toContain("onerror");
+      expect(tag.replace(/<div|>$/g, "").replace(/\s[\w-]+="[^"]*"/g, "").trim()).toBe("");
+    }
+    expect(attrs(rowsOf(html).find((r) => r.includes("&lt;img"))!.match(/<div[^>]*>/)![0]).title).toContain("&quot;q&quot;");
+  });
+
+  test("summary appends the flagged count only when rows are flagged", async () => {
+    const t = await load([
+      f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }),
+      f("package.json", "M"),
+      f("plain.txt", "M"),
+    ]);
+    expect(t.summary.innerHTML).toContain("· 2 flagged");
+    expect(t.summary.innerHTML.match(/flagged/g)!.length).toBe(1);
+    // The count is announced: the summary region is a status.
+    expect(t.summary.innerHTML.includes('role="status"') || t.summary.getAttribute("role") === "status").toBe(true);
+    const none = await load([f("plain.txt", "M"), f("b.ts", "M", 1, 0, { oldMode: "100644", newMode: "100644" })]);
+    expect(none.summary.innerHTML).not.toContain("flagged");
+    expect(none.summary.innerHTML.includes('role="status"') || none.summary.getAttribute("role") === "status").toBe(true);
+  });
+
+  test("flags do not reorder rows, and an unflagged row renders as before", async () => {
+    const files = [f("z.ts", "M", 10, 2), f("package.json", "M"), f("a.ts", "M", 1, 0, { oldMode: "100644", newMode: "100644" })];
+    const t = await load(files);
+    expect(t.v.files.map((x) => x.path)).toEqual(["a.ts", "package.json", "z.ts"]);
+    const titles = rowsOf(t.list.innerHTML).map((r) => attrs(r.match(/<div[^>]*>/)![0]).title);
+    expect(titles).toEqual(["a.ts · Modified", "package.json · Modified", "z.ts · Modified"]);
+    expect(rowsOf(t.list.innerHTML)[0]).toBe(
+      '<div class="ch-row git-M" data-i="0" id="ch-0" role="option" aria-selected="false" title="a.ts · Modified">' +
+        '<span class="gbadge">M</span><span class="ch-name">a.ts</span><span class="ch-dir"></span>' +
+        '<span class="ch-add">+1</span><span class="ch-del"></span></div>',
+    );
+    expect(badges(rowsOf(t.list.innerHTML)[0]!)).toEqual([]);
+  });
+});

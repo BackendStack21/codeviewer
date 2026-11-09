@@ -54,6 +54,11 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
     `+/−` per file and a one-line summary. Each file opens as a read-only unified diff; ⌥F5 walks
     the changes and moves on to the next file. Reviewed files dim until they change again.
     Right-click a file in the Explorer and pick "View Changes" to jump to its diff.
+  - **Risk flags:** rows in Changes carry a small badge, and the summary counts them ("· 2 flagged"),
+    for an added executable bit, a new symbolic link, CI configuration, git hooks, dependency
+    lockfiles, package manifests and build files, and `.env`/registry configuration. They are hints
+    for where to look first, not a safety verdict: they match file names, directories and git modes
+    only, never contents, and they can miss things (a malicious change in an ordinary file is not flagged).
   - **File History:** "Git: File History" in the palette (or "File History" in the Explorer's file
     menu) lists the commits that changed the file, renames followed, newest first; type to filter by
     subject, Enter to open what that commit changed as a read-only diff tab labelled with its short id.

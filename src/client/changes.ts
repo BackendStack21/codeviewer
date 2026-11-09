@@ -1,5 +1,6 @@
 import { api, type ChangeFile, type ChangesData } from "./api.ts";
 import type { Letter } from "./git.ts";
+import { riskFlags, riskLabel, type RiskFlag } from "./risk.ts";
 import { basename, dirname, esc, h, showHidden } from "./util.ts";
 
 export type Scope = "head" | "branch";
@@ -41,6 +42,8 @@ export function summarize(files: readonly ChangeFile[]): { added: number; remove
 /** What "reviewed" was reviewed against: any later edit to the file un-dims its row. */
 const seenKey = (f: ChangeFile) => `${f.status}:${f.added}:${f.removed}:${f.oldPath ?? ""}`;
 
+const BADGE: Record<RiskFlag, string> = { exec: "exec", symlink: "symlink", ci: "CI", hook: "hook", lockfile: "lock", manifest: "manifest", env: "env" };
+
 const safe = (s: string) => esc(showHidden(s));
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -79,7 +82,7 @@ export class ChangesView {
   constructor(opts: { debounce?: number } = {}) {
     this.debounce = opts.debounce ?? 150;
     this.scopeEl = h("div", { class: "ch-scope", role: "group", "aria-label": "Comparison", hidden: true });
-    this.summary = h("div", { class: "ch-summary-wrap", hidden: true });
+    this.summary = h("div", { class: "ch-summary-wrap", role: "status", hidden: true });
     this.list = h("div", { class: "ch-list", role: "listbox", tabindex: "0", "aria-label": "Changed files" });
     this.el = h("div", { class: "changes-view" }, this.scopeEl, this.summary, this.list);
     this.scopeEl.addEventListener("click", (e) => {
@@ -106,6 +109,12 @@ export class ChangesView {
       e.preventDefault();
     });
     this.render();
+  }
+
+  /** Risk flags of the listed row with this path ([] for an unknown path or an unflagged row). */
+  flags(path: string): RiskFlag[] {
+    const f = this.files.find((x) => x.path === path);
+    return f ? riskFlags(f) : [];
   }
 
   get scopeName(): Scope {
@@ -318,10 +327,12 @@ export class ChangesView {
     const commits = d.scope === "branch" && d.commits
       ? `<span class="ch-sep">·</span><span class="ch-commits" title="${esc(d.subjects.map(showHidden).join("\n"))}">${plural(d.commits, "commit", "commits")}</span>`
       : "";
+    const flagged = files.filter((f) => riskFlags(f).length).length;
+    const flaggedHtml = flagged ? `<span class="ch-riskcount">· ${flagged} flagged</span>` : "";
     const p = added + removed ? Math.round((added / (added + removed)) * 100) : 50;
     this.summary.innerHTML =
       `<div class="ch-summary"><span class="ch-counts"><b>${files.length}</b> ${files.length === 1 ? "file" : "files"}` +
-      `<span class="ch-sep">·</span><span class="git-A">+${added.toLocaleString()}</span> <span class="git-D">−${removed.toLocaleString()}</span>${commits}</span>` +
+      `<span class="ch-sep">·</span><span class="git-A">+${added.toLocaleString()}</span> <span class="git-D">−${removed.toLocaleString()}</span>${commits}${flaggedHtml}</span>` +
       `<span class="ch-vs">${safe(this.vs)}</span></div>` +
       `<div class="ch-bar${added + removed ? "" : " empty"}" style="--p:${p}%"></div>`;
     if (!files.length) {
@@ -352,9 +363,12 @@ export class ChangesView {
         : f.added === null
           ? `<span class="ch-bin">—</span>`
           : `<span class="ch-add">${f.added ? `+${f.added}` : ""}</span><span class="ch-del">${f.removed ? `−${f.removed}` : ""}</span>`;
+      const risks = riskFlags(f)
+        .map((r) => `<span class="risk risk-${r}" title="${esc(riskLabel(r))}" aria-label="${esc(riskLabel(r))}">${BADGE[r]}</span>`)
+        .join("");
       html +=
         `<div class="${cls.join(" ")}" data-i="${i}" id="ch-${i}" role="option" aria-selected="${i === this.sel}" title="${esc(showHidden(f.path))} · ${labelOf(f)}${cls.includes("seen") ? " · reviewed (dims until the file changes again)" : ""}">` +
-        `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${counts}</div>`;
+        `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${risks}${counts}</div>`;
     });
     if (d.truncated) html += `<div class="sv-note sv-warn">Showing the first ${files.length.toLocaleString()} files</div>`;
     this.list.innerHTML = html;

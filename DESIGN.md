@@ -1101,3 +1101,24 @@ Ctrl+Shift+- on macOS, Ctrl+Alt+- and Ctrl+Shift+- on Linux. The history is neve
 | On Linux Ctrl+Alt+- also matched zoom-out (Ctrl+-) | The navigation keys are routed before zoom |
 | The first AC-12 tests matched app.ts source text and broke on the refactor | Replaced by behavioural tests through `routeNavZoomKey` |
 | A file in the history may have vanished | `Editor.open` reports whether the file opened; Back/Forward drop the path and move on |
+
+## 28. Round 19: risk flags in Changes
+
+A panel of four (agent-workflow developer, git/security engineer, UX/accessibility designer,
+code-navigation engineer) picked the next feature. Risk flags in Changes won with 3 votes (agent-workflow
+developer #1, git/security engineer #1, UX/accessibility designer #2). Back/Forward fidelity got 4 votes
+and follows as a separate part; a checkpoint diff got 3 votes but is size L and deferred. Single votes:
+live-change announcements, Go to Definition, a hidden-Unicode detector.
+
+`ChangeEntry` carries git's `oldMode`/`newMode`. `src/client/risk.ts` (pure) turns an entry into flags
+(`exec`, `symlink`, `ci`, `hook`, `lockfile`, `manifest`, `env`); `ChangesView` renders one badge per flag
+after the path, counts flagged rows in the summary and exposes `flags(path)`. The flags are hints, not a verdict.
+
+| Finding | Fix |
+| --- | --- |
+| Existing Changes tests compared whole entries with `toEqual`, so the new mode fields changed seven expectations | Each now names the exact modes: stricter, not looser |
+| The mode of an untracked file must not follow a link or leave the root | It comes from `lstat` after the parent directory's realpath is checked to be inside the root; tests cover a parent link leaving the root and a file that vanishes before `lstat` |
+| A mode-only change has no diff lines | The exec badge is the only sign of a `chmod +x` in the list |
+| The plan claimed a path matches at most one path category, but a directory rule and a name rule can both match (`.husky/.env` is hook and env) | Flags are a set returned in union order; the plan review caught it before any test was written |
+| The Changes summary had no `role="status"` although it is a count that changes | The summary wrap is a status region |
+
