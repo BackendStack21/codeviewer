@@ -5,6 +5,8 @@ import { hiddenName, nextHidden, scanHidden, type HiddenHit } from "./hidden.ts"
 export interface HiddenNavHost {
   /** The active text file's lines, or null when no text file is shown. */
   lines(): readonly string[] | null;
+  /** The editor's current position: 1-based line (as Editor.location() reports it), 1-based col when known. */
+  position?(): { line: number; col?: number };
   /** Reveals a 0-based line. */
   reveal(line: number): void;
   /** Polite live-region announcement. */
@@ -40,6 +42,13 @@ export function createHiddenNav(host: HiddenNavHost): HiddenNav {
       const lines = host.lines();
       if (file && lines !== file) reset();
       file = lines;
+      const p = host.position?.();
+      if (p) {
+        // The editor owns the position (search, Go to Line, a click move it); the column of our own
+        // last jump is kept only while the editor is still on that line.
+        col = p.col ?? (p.line === line ? col : 0);
+        line = p.line;
+      }
       const hit: HiddenHit | undefined = lines ? nextHidden(scanHidden(lines.join("\n")).hits, line, col) : undefined;
       if (!hit) return void host.toast("No hidden characters in this file");
       line = hit.line;

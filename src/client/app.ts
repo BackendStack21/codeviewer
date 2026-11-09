@@ -102,6 +102,7 @@ class App {
   });
   private hiddenNav = createHiddenNav({
     lines: () => this.editor.active?.code?.lineTexts ?? null,
+    position: () => ({ line: this.editor.location()?.line ?? 1 }),
     reveal: (l) => this.editor.active?.code?.revealLine(l),
     announce: (m) => (this.live.textContent = m),
     toast: (m) => this.notify(m),
