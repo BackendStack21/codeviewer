@@ -18,3 +18,11 @@ export function runUnreviewed(dir: 1 | -1, deps: UnreviewedDeps): void {
   if (!f) return announce(`All ${view.files.length} changed files reviewed`);
   announce(`${f.path}, ${view.unreviewedCount()} unreviewed left`);
 }
+
+/** Announcer for a live region element: clears it first so an identical message is read again. */
+export function liveAnnouncer(el: { textContent: string | null }): (message: string) => void {
+  return (message) => {
+    el.textContent = "";
+    el.textContent = message;
+  };
+}

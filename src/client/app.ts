@@ -19,7 +19,7 @@ import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
 import { Navigation, routeNavZoomKey } from "./navigation.ts";
 import { helpKey, normSideView, referenceKey, searchKey, symbolKey, unreviewedKey, type SideView } from "./keys.ts";
-import { runUnreviewed, UNREVIEWED_COMMANDS } from "./unreviewed.ts";
+import { liveAnnouncer, runUnreviewed, UNREVIEWED_COMMANDS } from "./unreviewed.ts";
 import { reference, referenceWithCode, unsafePath } from "./reference.ts";
 import { headingText, type Sym } from "./symbols.ts";
 import { createHiddenNav } from "./hiddennav.ts";
@@ -527,7 +527,7 @@ class App {
   private stepUnreviewed(dir: 1 | -1) {
     if (!this.git.repo) return this.notify("Not a git repository");
     this.showChanges();
-    runUnreviewed(dir, { view: this.changes, announce: (m) => (this.live.textContent = m) });
+    runUnreviewed(dir, { view: this.changes, announce: liveAnnouncer(this.live) });
   }
 
   private async openDiff(f: ChangeFile, pin: boolean, focus = false) {
