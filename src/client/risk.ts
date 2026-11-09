@@ -1,5 +1,5 @@
 // Risk flags for Changes rows: hints for attention, never a safety verdict.
-export type RiskFlag = "exec" | "symlink" | "ci" | "hook" | "lockfile" | "manifest" | "env";
+export type RiskFlag = "exec" | "symlink" | "ci" | "hook" | "lockfile" | "manifest" | "env" | "hidden";
 
 const DIRS: Array<[RiskFlag, string[]]> = [
   ["ci", [".github/workflows/", ".github/actions/", ".circleci/", ".buildkite/"]],
@@ -13,9 +13,9 @@ const NAMES: Array<[RiskFlag, string[]]> = [
   ["env", [".env", ".npmrc", ".yarnrc", ".yarnrc.yml", ".pypirc"]],
 ];
 const PREFIXES: Array<[RiskFlag, string]> = [["manifest", "Dockerfile."], ["env", ".env."]];
-const ORDER: RiskFlag[] = ["exec", "symlink", "ci", "hook", "lockfile", "manifest", "env"];
+const ORDER: RiskFlag[] = ["exec", "symlink", "ci", "hook", "lockfile", "manifest", "env", "hidden"];
 
-export function riskFlags(f: { path: string; status: string; oldMode?: string; newMode?: string }): RiskFlag[] {
+export function riskFlags(f: { path: string; status: string; oldMode?: string; newMode?: string; hidden?: number }): RiskFlag[] {
   const hit = new Set<RiskFlag>();
   if (f.newMode === "100755" && f.oldMode !== "100755") hit.add("exec");
   if (f.newMode === "120000" && f.oldMode !== "120000") hit.add("symlink");
@@ -26,6 +26,7 @@ export function riskFlags(f: { path: string; status: string; oldMode?: string; n
   }
   for (const [flag, names] of NAMES) if (names.includes(name)) hit.add(flag);
   for (const [flag, pre] of PREFIXES) if (name.startsWith(pre)) hit.add(flag);
+  if (f.hidden !== undefined && f.hidden > 0) hit.add("hidden");
   return ORDER.filter((x) => hit.has(x));
 }
 
@@ -37,6 +38,7 @@ const LABELS: Record<RiskFlag, string> = {
   lockfile: "dependency lockfile",
   manifest: "package manifest or build file",
   env: "environment or registry configuration",
+  hidden: "hidden or invisible characters",
 };
 
 export function riskLabel(flag: RiskFlag): string {

@@ -464,6 +464,27 @@ describe("risk flags in the Changes view", () => {
     expect(none.summary.innerHTML.includes('role="status"') || none.summary.getAttribute("role") === "status").toBe(true);
   });
 
+  test("a row with hidden characters has the hidden badge, and the summary counts it once", async () => {
+    const t = await load([
+      f("notes.md", "M", 1, 0, { hidden: 3 }),
+      f("plain.txt", "M"),
+      f("run.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755", hidden: 1 }),
+    ]);
+    const row = rowFor(t.list.innerHTML, "notes.md")!;
+    expect(row).toBeDefined();
+    expect(row).toContain(
+      '<span class="risk risk-hidden" title="hidden or invisible characters" aria-label="hidden or invisible characters">hidden</span>',
+    );
+    expect(badges(row).map((b) => b.text)).toEqual(["hidden"]);
+    expect(badges(row)[0]!.at).toBeGreaterThan(row.indexOf('class="ch-name"'));
+    expect(badges(rowFor(t.list.innerHTML, "run.sh")!).map((b) => b.text)).toEqual(["exec", "hidden"]);
+    expect(badges(rowFor(t.list.innerHTML, "plain.txt")!)).toEqual([]);
+    expect(t.summary.innerHTML).toContain("· 2 flagged");
+    const one = await load([f("notes.md", "M", 1, 0, { hidden: 1 }), f("plain.txt", "M")]);
+    expect(one.summary.innerHTML).toContain("· 1 flagged");
+    expect(t.v.flags("notes.md")).toEqual(["hidden"]);
+  });
+
   test("flags do not reorder rows, and an unflagged row renders as before", async () => {
     const files = [f("z.ts", "M", 10, 2), f("package.json", "M"), f("a.ts", "M", 1, 0, { oldMode: "100644", newMode: "100644" })];
     const t = await load(files);

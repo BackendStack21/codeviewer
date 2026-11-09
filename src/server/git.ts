@@ -3,6 +3,7 @@ import { HEAVY_DIRS, isHeavyFile } from "./index.ts";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, openRegular } from "./files.ts";
+import { scanHidden } from "../client/hidden.ts";
 
 /**
  * Read-only git integration via the system `git` CLI.
@@ -69,7 +70,13 @@ export interface ChangeEntry {
   /** Git octal modes ("100644", "100755", "120000"; "000000" when absent on that side). */
   oldMode?: string;
   newMode?: string;
+  /** Count of hidden or invisible characters in the current content; absent when none. */
+  hidden?: number;
 }
+
+/** Most file content scanned for hidden characters per changes() call. */
+export const HIDDEN_SCAN_BUDGET = 32 * 1024 * 1024;
+const HIDDEN_MAX_FILE = 1024 * 1024;
 
 export interface Changes {
   scope: "head" | "branch";
@@ -443,6 +450,51 @@ export class Git {
   }
 
   private inflight: Partial<Record<"head" | "branch", Promise<Changes>>> = {};
+  /** Files read for the hidden-character scan so far (cache hits do not count). */
+  hiddenReads = 0;
+  /** Entries in the hidden-character cache. */
+  hiddenCacheSize(): number {
+    return this.hiddenCache.size;
+  }
+  private hiddenCache = new Map<string, { size: number; mtime: number; count: number }>();
+
+  /** Sets `hidden` on entries whose current content has hidden characters (bounded, cached by size and mtime). */
+  private async markHidden(files: ChangeEntry[]): Promise<void> {
+    let left = HIDDEN_SCAN_BUDGET;
+    const keep = new Set<string>();
+    for (const e of [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
+      keep.add(e.path);
+      if (e.status === "D" || e.binary) continue;
+      try {
+        const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")), this.root);
+        try {
+          if (st.size > HIDDEN_MAX_FILE) continue;
+          const c = this.hiddenCache.get(e.path);
+          let count: number;
+          if (c && c.size === st.size && c.mtime === st.mtimeMs) count = c.count;
+          else {
+            if (st.size > left) continue;
+            left -= st.size;
+            this.hiddenReads++;
+            const buf = new Uint8Array(st.size);
+            let n = 0;
+            while (n < buf.length) {
+              const { bytesRead } = await fh.read(buf, n, buf.length - n, n);
+              if (!bytesRead) break;
+              n += bytesRead;
+            }
+            const part = buf.subarray(0, n);
+            count = looksBinary(part.subarray(0, 64 * 1024)) ? 0 : scanHidden(new TextDecoder().decode(part), 0).count;
+            this.hiddenCache.set(e.path, { size: st.size, mtime: st.mtimeMs, count });
+          }
+          if (count > 0) e.hidden = count;
+        } finally {
+          await fh.close();
+        }
+      } catch {}
+    }
+    for (const k of this.hiddenCache.keys()) if (!keep.has(k)) this.hiddenCache.delete(k);
+  }
 
   /**
    * Files changed in the working tree against HEAD ("head") or against the merge-base with the
@@ -476,6 +528,7 @@ export class Git {
       else byPath.set(p, { path: p, status: "U", added: null, removed: null, binary: false });
     }
     const files = [...byPath.values()];
+    await this.markHidden(files);
     let commits = 0;
     let subjects: string[] = [];
     if (branch) {

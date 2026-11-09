@@ -42,7 +42,7 @@ export function summarize(files: readonly ChangeFile[]): { added: number; remove
 /** What "reviewed" was reviewed against: any later edit to the file un-dims its row. */
 const seenKey = (f: ChangeFile) => `${f.status}:${f.added}:${f.removed}:${f.oldPath ?? ""}`;
 
-const BADGE: Record<RiskFlag, string> = { exec: "exec", symlink: "symlink", ci: "CI", hook: "hook", lockfile: "lock", manifest: "manifest", env: "env" };
+const BADGE: Record<RiskFlag, string> = { exec: "exec", symlink: "symlink", ci: "CI", hook: "hook", lockfile: "lock", manifest: "manifest", env: "env", hidden: "hidden" };
 
 const safe = (s: string) => esc(showHidden(s));
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

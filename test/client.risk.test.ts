@@ -106,3 +106,19 @@ describe("riskFlags order, uniqueness and labels (AC-10)", () => {
     expect(riskLabel("env")).toBe("environment or registry configuration");
   });
 });
+
+describe("riskFlags hidden", () => {
+  test("hidden count above zero flags the file, zero or absent does not", () => {
+    expect(riskFlags({ path: "a.txt", status: "M", hidden: 2 })).toEqual(["hidden"]);
+    expect(riskFlags({ path: "a.txt", status: "M", hidden: 0 })).toEqual([]);
+    expect(riskFlags({ path: "a.txt", status: "M", hidden: undefined })).toEqual([]);
+    expect(riskFlags({ path: "a.txt", status: "M" })).toEqual([]);
+  });
+  test("hidden comes last", () => {
+    expect(riskFlags({ path: ".github/workflows/x.sh", status: "A", newMode: "100755", hidden: 1 })).toEqual(["exec", "ci", "hidden"]);
+    expect(riskFlags({ path: ".env", status: "M", hidden: 1 })).toEqual(["env", "hidden"]);
+  });
+  test("label", () => {
+    expect(riskLabel("hidden")).toBe("hidden or invisible characters");
+  });
+});

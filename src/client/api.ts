@@ -80,6 +80,8 @@ export interface ChangeFile {
   /** Git octal modes ("000000" when absent on that side; untracked entries carry only newMode). */
   oldMode?: string;
   newMode?: string;
+  /** Count of hidden or invisible characters in the current content; absent when none. */
+  hidden?: number;
 }
 
 /** One commit of a file's history (see src/server/git.ts HistoryEntry). */
