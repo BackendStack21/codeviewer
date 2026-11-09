@@ -18,7 +18,7 @@ function joinerExempt(prev: number): boolean {
 }
 
 /** The kind of a counted character, or undefined. `prev` is the code point just before (-1: none). */
-function classify(cp: number, prev: number, offset: number): HiddenKind | undefined {
+export function classify(cp: number, prev: number, offset: number): HiddenKind | undefined {
   if (cp < 0x200b) return undefined;
   if (cp === 0x200b || (cp >= 0x2060 && cp <= 0x2064)) return "zero-width";
   if (cp === 0x200c || cp === 0x200d) return prev >= 0 && joinerExempt(prev) ? undefined : "zero-width";

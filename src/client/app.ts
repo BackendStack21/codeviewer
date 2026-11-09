@@ -20,6 +20,7 @@ import { Navigation, routeNavZoomKey } from "./navigation.ts";
 import { helpKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
 import { reference, referenceWithCode, unsafePath } from "./reference.ts";
 import { headingText, type Sym } from "./symbols.ts";
+import { createHiddenNav } from "./hiddennav.ts";
 import { slugify } from "./markdown.ts";
 
 
@@ -98,6 +99,12 @@ class App {
     current: () => this.editor.location(),
     announce: (m) => (this.live.textContent = m),
     notify: (m) => this.notify(m),
+  });
+  private hiddenNav = createHiddenNav({
+    lines: () => this.editor.active?.code?.lineTexts ?? null,
+    reveal: (l) => this.editor.active?.code?.revealLine(l),
+    announce: (m) => (this.live.textContent = m),
+    toast: (m) => this.notify(m),
   });
   private killArmed = 0;
   private help = new Help();
@@ -439,6 +446,7 @@ class App {
         store.set("updates", { auto });
         this.notify(`Automatic update checks ${auto ? "on" : "off"} (from the next launch)`);
       }),
+      c("file.nextHidden", "Go to Next Hidden Character", () => this.hiddenNav.next()),
       c("git.next", "Git: Next Change", () => this.editor.nextChange(1), key("⌥F5", "Alt+F5")),
       c("git.prev", "Git: Previous Change", () => this.editor.nextChange(-1), key("⌥⇧F5", "Alt+Shift+F5")),
     ];

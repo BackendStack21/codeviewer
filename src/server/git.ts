@@ -484,7 +484,7 @@ export class Git {
               n += bytesRead;
             }
             const part = buf.subarray(0, n);
-            count = looksBinary(part.subarray(0, 64 * 1024)) ? 0 : scanHidden(new TextDecoder().decode(part), 0).count;
+            count = looksBinary(part.subarray(0, 64 * 1024)) ? 0 : scanHidden(new TextDecoder("utf-8", { ignoreBOM: true }).decode(part), 0).count;
             this.hiddenCache.set(e.path, { size: st.size, mtime: st.mtimeMs, count });
           }
           if (count > 0) e.hidden = count;

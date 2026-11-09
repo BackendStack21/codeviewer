@@ -62,6 +62,9 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
     The one exception is `hidden`: files up to 1 MiB are scanned for zero-width, tag and variation
     characters and bidi controls, which render as nothing but can hide text. That is a hint too, not
     a verdict: legitimate text (emoji, Arabic, Indic scripts) is skipped, but other uses can still match.
+    In the code view such characters get a visible outlined marker (the text is unchanged, so copy
+    works as before), and the palette command "Go to Next Hidden Character" jumps to the next one
+    and announces its name and position.
   - **File History:** "Git: File History" in the palette (or "File History" in the Explorer's file
     menu) lists the commits that changed the file, renames followed, newest first; type to filter by
     subject, Enter to open what that commit changed as a read-only diff tab labelled with its short id.

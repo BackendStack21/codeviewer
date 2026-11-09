@@ -1243,6 +1243,15 @@ svg {
   overflow: visible;
   box-shadow: 0 0 0 1px var(--danger);
 }
+/* Zero-width, tag and variation characters in code: an outlined box that keeps columns where they are. */
+.hidden-char {
+  display: inline-block;
+  min-width: 0.4em;
+  height: 1.1em;
+  vertical-align: text-bottom;
+  box-shadow: 0 0 0 1px var(--danger);
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
 .trunc {
   -webkit-user-select: none;
   user-select: none;
