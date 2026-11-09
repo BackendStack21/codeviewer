@@ -68,6 +68,13 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   - **File History:** "Git: File History" in the palette (or "File History" in the Explorer's file
     menu) lists the commits that changed the file, renames followed, newest first; type to filter by
     subject, Enter to open what that commit changed as a read-only diff tab labelled with its short id.
+  - **Changes since a checkpoint:** "Changes: Set Checkpoint" remembers the text of every uncommitted
+    file; later, "Changes: Since Checkpoint…" lists what changed after that moment (path, `+added
+    −removed`, type to filter) and Enter opens a read-only diff tab labelled "since HH:MM".
+    "Changes: Clear Checkpoint" forgets it. The checkpoint is kept in memory only and is lost on reload;
+    nothing is written or sent anywhere. Binary files, unreadable files and files over the caps
+    (500 files, 16 million characters) are skipped, and the toast counts them ("Checkpoint set (4 files, 2
+    skipped)"). The since tab is fixed content: it does not follow the Changes list.
   - Everything updates live as files, the index or refs change.
 - **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
   update pill in the status bar when a new version is out. Installing verifies the release's
@@ -85,7 +92,7 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   tabs coloured by git status, breadcrumbs, several terminals as tabs, and a terminal panel at the
   bottom or on the right that can be maximized ("Move Terminal Panel", "Maximize/Restore Terminal
   Panel"). The title bar button cycles the System, Dark and Light themes. The palette also has
-  Copy Path, Copy Absolute Path, Close All Tabs and Clear Terminal. In a diff tab, ‹ › step to the
+  Changes: Set Checkpoint, Changes: Since Checkpoint… and Changes: Clear Checkpoint, Copy Path, Copy Absolute Path, Close All Tabs and Clear Terminal. In a diff tab, ‹ › step to the
   previous or next changed file and "Open file" opens the file itself; the Changes view switches
   between "Uncommitted" and "vs main".
 - **Keyboard and screen-reader friendly:** ⌘/ lists every shortcut in your platform's key names.

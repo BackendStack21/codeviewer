@@ -1147,3 +1147,29 @@ variation runs, and "Go to Next Hidden Character" jumps between hits. Results ar
 | The marker had `min-width`, which shifted columns | It is zero-width with an outline like the bidi marker |
 | Joiners in Arabic, Persian, Indic text and emoji sequences would be false positives | Joiners after those letters and emoji, a lone U+FE0F, and a BOM at offset 0 are exempt |
 | The Changes summary wrapper was a live region, so any re-render re-announced the whole line, and the count sat inside `.ch-counts`, whose ellipsis could clip it | The wrapper has no live role; one persistent `.ch-riskcount` element carries `role="status"`, sits beside `.ch-counts` and does not shrink |
+
+
+## 30. Round 21: changes since a checkpoint
+
+A panel of four picked the next feature. A checkpoint got 3 votes with two first places (agent-workflow
+developer #1, git/security engineer #1, navigation #2); it had been deferred three times before as size L and
+is scoped here to a client-only, in-memory version. Next/Previous Unreviewed Changed File got 3 votes (UX #1)
+and is next in line. Go to Definition got a first place for the fourth time.
+
+The design is client-only and in memory. `src/client/checkpoint.ts` (pure) has `takeCheckpoint` (bounded:
+500 files, 16 million characters) and `sinceCheckpoint` (statuses and line counts from `diffLines`).
+`src/client/checkpointctl.ts` is the controller behind "Changes: Set Checkpoint", "Changes: Since
+Checkpoint…" and "Changes: Clear Checkpoint"; `app.ts` only wires it to the existing endpoints and the
+palette's `pick()`. Enter opens a read-only diff tab (`Editor.openSinceDiff`) labelled "since HH:MM".
+
+| Finding | Fix |
+| --- | --- |
+| A server checkpoint would have needed the first state-setting route and blobs git cannot keep without writing | The checkpoint is client-only, in memory, read through existing GET endpoints; it is lost on reload |
+| A path in neither `texts` nor `skipped` has no stored text | It means unchanged from the checkpoint's HEAD; its text is read at the checkpoint's `rev` |
+| A path that is no longer changed would look deleted | It reverts to its base text (the text at the checkpoint's `rev`) |
+| Binary and unreadable files cannot be compared | They are skipped and counted in the toast, never put in the comparison |
+| The line counts depend on how a trailing newline splits | The rule drops one final empty element, pinned with examples; `old === now` is compared on strings, so a trailing-newline-only change is kept with 0/0 counts |
+| A rename whose new path was binary or unreadable lost the old path's deletion | A rename is a delete plus an add: the old path is recorded as deleted before the new one is read |
+| Clear Checkpoint during an in-flight Set was undone when the listing resolved | Clear bumps a generation and the late result is dropped |
+| A failed base read left an unhandled rejection and no message | Since Checkpoint resolves and says it could not compare |
+| Since tabs could be re-pointed by git events, stepping or reloads | The since tab is not tied to Changes: no re-pointing, no stepping, no reloads, no position |
