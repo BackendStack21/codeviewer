@@ -83,7 +83,10 @@ export class CheckpointController {
         unreadable.push(f.path);
         continue;
       }
-      const text = f.status === "D" ? null : await this.deps.readText(f.path);
+      let text = f.status === "D" ? null : await this.deps.readText(f.path);
+      // The server answers 404 for a symlink that leaves the root as well as for a missing file, so a
+      // symlink's 404 does not mean it vanished: it is skipped.
+      if (text === null && f.status !== "D" && f.newMode === "120000") text = undefined;
       if (text === undefined) {
         unreadable.push(f.path);
         continue;

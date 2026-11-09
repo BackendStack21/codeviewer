@@ -1189,7 +1189,9 @@ as the dimmed rows. `src/client/unreviewed.ts` holds the two palette commands an
 announces through the live region (no toast); `unreviewedKey` in `keys.ts` routes Alt+F6 and Alt+Shift+F6
 and is `null` in the terminal. `app.ts` is glue. The checkpoint fix (S1) is `checkpointText` in
 `checkpointctl.ts`: `api.ts` throws an `ApiError` with the HTTP status, and a 404 while reading a file for a
-checkpoint means it vanished (recorded as deleted); every other failure stays skipped.
+checkpoint means it vanished (recorded as deleted); every other failure stays skipped. The server answers a
+uniform 404 for a symlink that leaves the root too, so a listing entry whose newMode is 120000 (a symlink)
+is never recorded as deleted: its 404 is skipped.
 
 | Finding | Fix |
 | --- | --- |
@@ -1202,3 +1204,4 @@ checkpoint means it vanished (recorded as deleted); every other failure stays sk
 | A key could fire inside the terminal, which keeps Alt combinations | Routing goes through `unreviewedKey`, which is `null` when the focus is in the terminal |
 | A toast would be missed by screen readers and cover the diff | The result is announced through the polite live region as "path, N unreviewed left"; no toast |
 | A file that vanished while a checkpoint was taken was recorded as skipped instead of deleted | `api.ts` throws `ApiError` with the status; `checkpointText` maps a 404 to deleted (null) and other failures to skipped |
+| The server's uniform 404 for a symlink leaving the root made `checkpointText` record such a symlink as deleted | The controller skips a symlink entry (newMode 120000) whose read gives null; only a non-symlink 404 means vanished, and the server's 404 stays uniform |
