@@ -1,5 +1,6 @@
 import { wsUrl } from "./auth.ts"; // first: installs the auth header on fetch
 import { api, type Info } from "./api.ts";
+import { CHECKPOINT_COMMANDS, CheckpointController } from "./checkpointctl.ts";
 import { Editor, type StatusInfo } from "./editor.ts";
 import { FileTree } from "./tree.ts";
 import { Palette, type Command, type PickItem } from "./palette.ts";
@@ -94,6 +95,18 @@ class App {
   private statusRight!: HTMLElement;
   private themeBtn!: HTMLButtonElement;
   private live!: HTMLElement;
+  private checkpoints = new CheckpointController({
+    changes: () => api.gitChanges("head"),
+    readText: async (p) => {
+      const f = await api.file(p).catch(() => null);
+      return f && f.kind === "text" && !f.truncated ? f.text : undefined;
+    },
+    baseText: (p, rev) => api.gitBase(p, rev),
+    now: () => Date.now(),
+    notify: (m) => this.notify(m),
+    pick: (items, title) => this.palette.pick(items, title),
+    openDiff: (d) => void this.editor.openSinceDiff(d, { focus: true }),
+  });
   private nav = new Navigation({
     open: (loc) => this.editor.open(loc.path, loc.view ? { pin: true, view: loc.view, focus: false } : { pin: true, line: loc.line, focus: false }).then((ok) => (void this.tree.reveal(loc.path), ok)),
     current: () => this.editor.location(),
@@ -164,7 +177,7 @@ class App {
     if (tabs.active) await this.editor.open(tabs.active, { focus: false });
     this.editor.onChange = () => {
       store.set(`tabs:${this.info.root}`, this.editor.serialize());
-      this.changes.watching = this.editor.tabs.some((t) => t.isDiff && !t.commit);
+      this.changes.watching = this.editor.tabs.some((t) => t.isDiff && !t.commit && !t.since);
     };
   }
 
@@ -440,6 +453,7 @@ class App {
         if (!t) this.notify("Open a file first");
         else void this.fileHistory(t.path);
       }),
+      ...CHECKPOINT_COMMANDS.map((k) => c(k.id, k.title, () => void (k.id === "changes.checkpoint" ? this.checkpoints.set() : k.id === "changes.sinceCheckpoint" ? this.checkpoints.since() : this.checkpoints.clear()))),
       c("git.scope", "Git: Compare With Base Branch / HEAD", () => this.changes.toggleScope()),
       c("app.update", "Check for Updates…", () => void this.updates.checkNow()),
       c("app.autoUpdate", "Toggle Automatic Update Checks", () => {
