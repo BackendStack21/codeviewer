@@ -1125,3 +1125,25 @@ after the path, counts flagged rows in the summary and exposes `flags(path)`. Th
 | A Markdown file shown as the rendered preview came back as source | `NavLoc.view = "preview"` is recorded by `location()` and `Editor.landing()`, kept by `NavHistory` on every update path (set or removed together with the line), and `Editor.open(path, { view: "preview" })` reopens the preview; `app.ts` only forwards it |
 | Closing a tab might forget where Back should go | Pinned by tests: history entries survive `Editor.close`, and Back reopens the file; diff and image tabs have no location |
 
+
+## 29. Round 20: hidden characters
+
+A panel of four (git/security engineer, UX/accessibility designer, agent-workflow developer,
+code-navigation engineer) picked the next feature. Hidden characters won with 4 votes (git/security #1,
+UX #2, agent-workflow #3, navigation #4). A checkpoint diff got 3 votes but is size L and was deferred a
+third time. The Changes summary live-region fix (Q1/Q2) got 3 votes and ships as Part B. Single votes:
+Go to Definition, next unreviewed changed file, go to last live change, a repository trust report.
+
+`src/client/hidden.ts` (pure, also imported by the server) defines the counted set once. The server adds
+`hidden` to changed files, Changes rows show a `hidden` badge, the code view marks zero-width, tag and
+variation runs, and "Go to Next Hidden Character" jumps between hits. Results are hints, not verdicts.
+
+| Finding | Fix |
+| --- | --- |
+| The code view renders a line in token segments, so the joiner and variation-selector rules could not see the character before a segment and a BOM starting a later line was never marked | `markHidden` takes `ctx {prev, atFileStart}` and the code view passes them per segment (caught in plan review) |
+| The first tests held raw bidi controls and failed the repo's own invariant against raw bidi in sources | Every hidden character in tests is a `\u` escape |
+| `TextDecoder` strips one leading BOM, so a file starting with two BOMs reported none | The server decodes with the BOM kept and `scanHidden` applies its own offset-0 rule |
+| Go to Next Hidden Character started from its own last jump and skipped hits after a search or Go to Line | It starts from the editor's current position |
+| The marker had `min-width`, which shifted columns | It is zero-width with an outline like the bidi marker |
+| Joiners in Arabic, Persian, Indic text and emoji sequences would be false positives | Joiners after those letters and emoji, a lone U+FE0F, and a BOM at offset 0 are exempt |
+| The Changes summary wrapper was a live region, so any re-render re-announced the whole line, and the count sat inside `.ch-counts`, whose ellipsis could clip it | The wrapper has no live role; one persistent `.ch-riskcount` element carries `role="status"`, sits beside `.ch-counts` and does not shrink |

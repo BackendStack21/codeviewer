@@ -82,7 +82,7 @@ export class ChangesView {
   constructor(opts: { debounce?: number } = {}) {
     this.debounce = opts.debounce ?? 150;
     this.scopeEl = h("div", { class: "ch-scope", role: "group", "aria-label": "Comparison", hidden: true });
-    this.summary = h("div", { class: "ch-summary-wrap", role: "status", hidden: true });
+    this.summary = h("div", { class: "ch-summary-wrap", hidden: true });
     this.list = h("div", { class: "ch-list", role: "listbox", tabindex: "0", "aria-label": "Changed files" });
     this.el = h("div", { class: "changes-view" }, this.scopeEl, this.summary, this.list);
     this.scopeEl.addEventListener("click", (e) => {
@@ -328,11 +328,11 @@ export class ChangesView {
       ? `<span class="ch-sep">·</span><span class="ch-commits" title="${esc(d.subjects.map(showHidden).join("\n"))}">${plural(d.commits, "commit", "commits")}</span>`
       : "";
     const flagged = files.filter((f) => riskFlags(f).length).length;
-    const flaggedHtml = flagged ? `<span class="ch-riskcount">· ${flagged} flagged</span>` : "";
+    const flaggedHtml = `<span class="ch-riskcount" role="status">${flagged ? `· ${flagged} flagged` : ""}</span>`;
     const p = added + removed ? Math.round((added / (added + removed)) * 100) : 50;
     this.summary.innerHTML =
       `<div class="ch-summary"><span class="ch-counts"><b>${files.length}</b> ${files.length === 1 ? "file" : "files"}` +
-      `<span class="ch-sep">·</span><span class="git-A">+${added.toLocaleString()}</span> <span class="git-D">−${removed.toLocaleString()}</span>${commits}${flaggedHtml}</span>` +
+      `<span class="ch-sep">·</span><span class="git-A">+${added.toLocaleString()}</span> <span class="git-D">−${removed.toLocaleString()}</span>${commits}</span>${flaggedHtml}` +
       `<span class="ch-vs">${safe(this.vs)}</span></div>` +
       `<div class="ch-bar${added + removed ? "" : " empty"}" style="--p:${p}%"></div>`;
     if (!files.length) {

@@ -457,11 +457,65 @@ describe("risk flags in the Changes view", () => {
     ]);
     expect(t.summary.innerHTML).toContain("· 2 flagged");
     expect(t.summary.innerHTML.match(/flagged/g)!.length).toBe(1);
-    // The count is announced: the summary region is a status.
-    expect(t.summary.innerHTML.includes('role="status"') || t.summary.getAttribute("role") === "status").toBe(true);
+    // The count is announced by the persistent .ch-riskcount element, not by the wrapper.
+    expect(t.summary.getAttribute("role")).toBeNull();
+    expect(t.summary.innerHTML.match(/role="status"/g)!.length).toBe(1);
     const none = await load([f("plain.txt", "M"), f("b.ts", "M", 1, 0, { oldMode: "100644", newMode: "100644" })]);
     expect(none.summary.innerHTML).not.toContain("flagged");
-    expect(none.summary.innerHTML.includes('role="status"') || none.summary.getAttribute("role") === "status").toBe(true);
+    expect(none.summary.getAttribute("role")).toBeNull();
+    expect(none.summary.innerHTML.match(/role="status"/g)!.length).toBe(1);
+  });
+
+  test("Part B: the live region is the persistent ch-riskcount element, outside ch-counts", async () => {
+    const flaggedT = await load([f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }), f("package.json", "M"), f("plain.txt", "M")]);
+    const none = await load([f("plain.txt", "M")]);
+    for (const t of [flaggedT, none]) {
+      const html = t.summary.innerHTML;
+      expect(t.summary.getAttribute("role")).toBeNull();
+      expect(t.summary.getAttribute("aria-live")).toBeNull();
+      expect(html).not.toContain("aria-live");
+      expect(html.match(/role="status"/g)!.length).toBe(1);
+      const tag = html.match(/<[^>]*role="status"[^>]*>/)![0];
+      expect(tag).toContain('class="ch-riskcount"');
+      // A sibling of .ch-counts inside .ch-summary: not within the .ch-counts element.
+      const start = html.indexOf('<span class="ch-counts"');
+      expect(start).toBeGreaterThan(-1);
+      const riskAt = html.indexOf('class="ch-riskcount"');
+      let depth = 0, end = -1;
+      for (const m of html.slice(start).matchAll(/<(\/?)span\b/g)) {
+        depth += m[1] ? -1 : 1;
+        if (depth === 0) { end = start + m.index! + "</span>".length; break; }
+      }
+      expect(end).toBeGreaterThan(start);
+      expect(riskAt).toBeGreaterThanOrEqual(end);
+      expect(html.slice(start, end)).not.toContain("ch-riskcount");
+    }
+    expect(flaggedT.summary.innerHTML).toContain('<span class="ch-riskcount" role="status">· 2 flagged</span>');
+    expect(none.summary.innerHTML).toContain('<span class="ch-riskcount" role="status"></span>');
+  });
+
+  test("Part B: ch-riskcount stays at the same markup position when the flagged count changes", async () => {
+    const a = await load([f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" })]);
+    const b = await load([f("plain.txt", "M")]);
+    // Same neighbours in both renders: right after .ch-counts and right before .ch-vs.
+    for (const t of [a, b]) {
+      expect(t.summary.innerHTML).toMatch(/<\/span><span class="ch-riskcount" role="status">[^<]*<\/span><span class="ch-vs">/);
+    }
+    expect(a.summary.innerHTML).toContain("· 1 flagged");
+    expect(b.summary.innerHTML).not.toContain("flagged");
+  });
+
+  test("Part B: styles keep ch-riskcount from shrinking and ch-counts ellipsised; DESIGN.md has the round", () => {
+    const css = require("node:fs").readFileSync(`${import.meta.dir}/../src/client/styles.css`, "utf8") as string;
+    const rule = (sel: string) => [...css.matchAll(new RegExp(`(?:^|\\n)${sel.replace(".", "\\.")}\\s*\\{([^}]*)\\}`, "g"))].map((m) => m[1]).join(" ");
+    expect(rule(".ch-riskcount")).toMatch(/flex-shrink:\s*0/);
+    expect(rule(".ch-riskcount")).not.toContain("ellipsis");
+    expect(rule(".ch-counts")).toContain("text-overflow: ellipsis");
+    const design = require("node:fs").readFileSync(`${import.meta.dir}/../DESIGN.md`, "utf8") as string;
+    expect(design).toContain("## 29. Round 20: hidden characters");
+    const sec = design.slice(design.indexOf("## 29. Round 20"));
+    expect(sec).toMatch(/hidden characters[^\n]*4 votes|4 votes[^\n]*hidden/i);
+    expect(sec).toContain("| Finding | Fix |");
   });
 
   test("a row with hidden characters has the hidden badge, and the summary counts it once", async () => {
