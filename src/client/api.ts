@@ -77,6 +77,11 @@ export interface ChangeFile {
   added: number | null;
   removed: number | null;
   binary: boolean;
+  /** Git octal modes ("000000" when absent on that side; untracked entries carry only newMode). */
+  oldMode?: string;
+  newMode?: string;
+  /** Count of hidden or invisible characters in the current content; absent when none. */
+  hidden?: number;
 }
 
 /** One commit of a file's history (see src/server/git.ts HistoryEntry). */
@@ -114,10 +119,20 @@ export interface UpdateInfo {
   checkedAt: number;
 }
 
+/** A failed request: the server's message and its HTTP status. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error ?? res.statusText);
+    throw new ApiError(body.error ?? res.statusText, res.status);
   }
   return res;
 }

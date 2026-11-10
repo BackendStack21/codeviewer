@@ -90,11 +90,11 @@ test("feature branch: branch scope diffs the working tree against the merge-base
   expect(b.commits).toBe(2);
   expect(b.subjects).toEqual(["chore: empty", "feat: first"]);
   const bf = byPath(b.files);
-  expect(bf["a.txt"]).toEqual({ path: "a.txt", status: "M", added: 3, removed: 1, binary: false });
-  expect(bf["bin.dat"]).toEqual({ path: "bin.dat", status: "D", added: null, removed: null, binary: true });
-  expect(bf["new.txt"]).toEqual({ path: "new.txt", oldPath: "old name.txt", status: "R", added: 1, removed: 0, binary: false });
-  expect(bf["notes todo.md"]).toEqual({ path: "notes todo.md", status: "?", added: 3, removed: 0, binary: false });
-  expect(bf["blob.bin"]).toEqual({ path: "blob.bin", status: "?", added: null, removed: null, binary: true });
+  expect(bf["a.txt"]).toEqual({ path: "a.txt", status: "M", added: 3, removed: 1, binary: false, oldMode: "100644", newMode: "100644" });
+  expect(bf["bin.dat"]).toEqual({ path: "bin.dat", status: "D", added: null, removed: null, binary: true, oldMode: "100644", newMode: "000000" });
+  expect(bf["new.txt"]).toEqual({ path: "new.txt", oldPath: "old name.txt", status: "R", added: 1, removed: 0, binary: false, oldMode: "100644", newMode: "100644" });
+  expect(bf["notes todo.md"]).toEqual({ path: "notes todo.md", status: "?", added: 3, removed: 0, binary: false, newMode: "100644" });
+  expect(bf["blob.bin"]).toEqual({ path: "blob.bin", status: "?", added: null, removed: null, binary: true, newMode: "100644" });
   expect(Object.keys(bf).sort()).toEqual(["a.txt", "bin.dat", "blob.bin", "new.txt", "notes todo.md"]);
 
   const hd = await g.changes("head");
@@ -155,7 +155,7 @@ test("detached HEAD still compares with the base; a repo without remote falls ba
   expect(c.base?.name).toBe("main");
   expect(c.base?.same).toBe(false);
   expect(c.commits).toBe(1);
-  expect(c.files).toEqual([{ path: "f.txt", status: "M", added: 1, removed: 0, binary: false }]);
+  expect(c.files).toEqual([{ path: "f.txt", status: "M", added: 1, removed: 0, binary: false, oldMode: "100644", newMode: "100644" }]);
 });
 
 test("unborn branch: no rev, untracked files only", async () => {
@@ -167,7 +167,7 @@ test("unborn branch: no rev, untracked files only", async () => {
   const c = await g.changes("branch");
   expect(c.rev).toBeNull();
   expect(c.base).toBeNull();
-  expect(c.files).toEqual([{ path: "x.txt", status: "?", added: 1, removed: 0, binary: false }]);
+  expect(c.files).toEqual([{ path: "x.txt", status: "?", added: 1, removed: 0, binary: false, newMode: "100644" }]);
 });
 
 test("merge conflicts are listed as U, including modify/delete ones", async () => {
@@ -203,7 +203,7 @@ test("a file removed from the index but present on disk is one modified entry", 
   sh(["rm", "-q", "--cached", "f.txt"], d);
   const g = await git(d);
   const c = await g.changes("head");
-  expect(c.files).toEqual([{ path: "f.txt", status: "M", added: null, removed: null, binary: false }]);
+  expect(c.files).toEqual([{ path: "f.txt", status: "M", added: null, removed: null, binary: false, oldMode: "100644", newMode: "000000" }]);
 });
 
 test("an orphan branch with staged files lists them as added against the empty tree", async () => {
@@ -215,7 +215,7 @@ test("an orphan branch with staged files lists them as added against the empty t
   const g = await git(d);
   const c = await g.changes("branch");
   expect(c.rev).toBeNull();
-  expect(c.files).toEqual([{ path: "s.txt", status: "A", added: 2, removed: 0, binary: false }]);
+  expect(c.files).toEqual([{ path: "s.txt", status: "A", added: 2, removed: 0, binary: false, oldMode: "000000", newMode: "100644" }]);
 });
 
 test("over the cap, kept entries still carry their counts and truncation is reported", async () => {
@@ -253,7 +253,7 @@ test("hostile configs: order file, mailmap and relative paths cannot hang or bla
   const t0 = performance.now();
   const c = await Promise.race([g.changes("branch"), Bun.sleep(8000).then(() => null)]);
   expect(performance.now() - t0).toBeLessThan(8000);
-  expect(c?.files).toEqual([{ path: "a.txt", status: "M", added: 1, removed: 0, binary: false }]);
+  expect(c?.files).toEqual([{ path: "a.txt", status: "M", added: 1, removed: 0, binary: false, oldMode: "100644", newMode: "100644" }]);
   expect(c?.subjects).toEqual(["work"]);
   expect(c?.commits).toBe(1);
 });
@@ -285,7 +285,7 @@ test("the list is capped and reports truncation; untracked symlinks are not read
   await symlink(path.join(dir, "outside2.txt"), path.join(links, "escape"));
   const lg = await git(links);
   const lc = await lg.changes("head");
-  expect(lc.files).toEqual([{ path: "escape", status: "?", added: null, removed: null, binary: false }]);
+  expect(lc.files).toEqual([{ path: "escape", status: "?", added: null, removed: null, binary: false, newMode: "120000" }]);
 });
 
 test("status counts as untracked exactly what Changes lists", async () => {
@@ -393,4 +393,53 @@ test("past the check limit, untracked folders are counted unchecked", async () =
   const s = await (await git(r)).status();
   expect(Object.keys(s.files)).toHaveLength(1001);
   expect(s.unlisted).toEqual([]);
+});
+
+test("changes carry oldMode/newMode: exec bit, symlink replacement, untracked files", async () => {
+  const { chmodSync, symlinkSync, unlinkSync, writeFileSync: wf } = await import("node:fs");
+  const d = await realpath(await mkdtemp(path.join(tmpdir(), "cv-modes-")));
+  try {
+    wf(path.join(d, "a.sh"), "echo a\n");
+    wf(path.join(d, "swap.txt"), "swap me\n");
+    wf(path.join(d, "gone.txt"), "bye\n");
+    sh(["init", "-q", "-b", "main"], d);
+    sh(["add", "."], d);
+    sh(["commit", "-qm", "init"], d);
+    chmodSync(path.join(d, "a.sh"), 0o755);
+    unlinkSync(path.join(d, "swap.txt"));
+    symlinkSync("a.sh", path.join(d, "swap.txt"));
+    unlinkSync(path.join(d, "gone.txt"));
+    wf(path.join(d, "added.txt"), "new\n");
+    sh(["add", "added.txt"], d);
+    wf(path.join(d, "u-exec.sh"), "#!/bin/sh\n");
+    chmodSync(path.join(d, "u-exec.sh"), 0o755);
+    wf(path.join(d, "u-plain.txt"), "plain\n");
+    chmodSync(path.join(d, "u-plain.txt"), 0o644);
+    symlinkSync("a.sh", path.join(d, "u-link"));
+    symlinkSync("/etc/passwd", path.join(d, "u-outside"));
+    const g = await git(d);
+    const f = byPath((await g.changes("head")).files) as Record<string, { oldMode?: string; newMode?: string }>;
+    // AC-1
+    expect(f["a.sh"]!.oldMode).toBe("100644");
+    expect(f["a.sh"]!.newMode).toBe("100755");
+    // AC-2
+    expect(f["swap.txt"]!.oldMode).toBe("100644");
+    expect(f["swap.txt"]!.newMode).toBe("120000");
+    // AC-4 (server side): added and deleted tracked files
+    expect(f["added.txt"]!.oldMode).toBe("000000");
+    expect(f["added.txt"]!.newMode).toBe("100644");
+    expect(f["gone.txt"]!.oldMode).toBe("100644");
+    expect(f["gone.txt"]!.newMode).toBe("000000");
+    // AC-3
+    expect(f["u-exec.sh"]!.newMode).toBe("100755");
+    expect("oldMode" in f["u-exec.sh"]!).toBe(false);
+    expect(f["u-plain.txt"]!.newMode).toBe("100644");
+    expect("oldMode" in f["u-plain.txt"]!).toBe(false);
+    expect(f["u-link"]!.newMode).toBe("120000");
+    expect("oldMode" in f["u-link"]!).toBe(false);
+    expect(f["u-outside"]!.newMode).toBe("120000");
+    expect("oldMode" in f["u-outside"]!).toBe(false);
+  } finally {
+    await rm(d, { recursive: true, force: true });
+  }
 });

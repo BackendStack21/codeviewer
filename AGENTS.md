@@ -44,7 +44,12 @@ bun run build:local               # binaries + the app for this machine (needs X
 | `src/client/codeview.ts`, `mdview.ts`, `diffview.ts` | The three file views; each owns select-all and copy while visible |
 | `src/client/term/` | Terminal emulator (`terminal.ts`), renderer, view (input, links, a11y log) |
 | `src/client/tree.ts`, `search.ts`, `changes.ts`, `palette.ts` | Sidebar views and the palette (virtualized rows, `aria-activedescendant`); the palette's `pick()` lists anything (File History) and `@` lists symbols |
+| `src/client/navhistory.ts`, `navigation.ts` | Back / Forward: the pure jump list (`NavHistory`) and `Navigation` (injected open/announce/notify, `routeNavZoomKey`); app.ts is glue |
+| `src/client/hidden.ts` | Hidden-character scanner (zero-width, bidi, tag, variation; pure, also imported by the server) |
+| `src/client/unreviewed.ts` | The two unreviewed-file commands and `runUnreviewed`, which announces through the live region; `app.ts` is glue |
 | `src/client/symbols.ts`, `reference.ts` | Go to Symbol patterns per language (pure); `path:line` references and their parsing |
+| `src/client/checkpoint.ts`, `src/client/checkpointctl.ts` | Changes since a checkpoint: pure `takeCheckpoint`/`sinceCheckpoint` math, and the controller behind the three Changes checkpoint commands (`app.ts` is glue); client-only, in memory |
+| `src/client/risk.ts` | Risk flags for Changes rows (pure): `riskFlags`, `riskLabel`; hints, never a safety verdict |
 | `src/client/styles.css` | All styling; colour tokens at the top, dark and light |
 | `test/helpers/fakedom.ts`, `selfake.ts` | Minimal fake DOM for client tests (see limits below) |
 | `scripts/shots.ts`, `shots.list.ts`, `demo-repo.ts` | Landing page screenshots: a deterministic demo repo, an isolated server, `packaging/macos/appshot.swift` driving an offscreen WKWebView |

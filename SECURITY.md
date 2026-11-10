@@ -50,6 +50,15 @@ programs the repository's config names for it (`remote.*.uploadpack`, `core.sshC
 exist inside the served root, at most 500 commits and 4 MB of output; each side of a commit's diff is
 read with `cat-file` by full object id, never from a revision expression the client chose.
 
+The Changes listing reads the working-tree text of changed files to count hidden characters
+(zero-width, tag and variation characters and bidi controls): regular files only, opened like every
+other file (`O_NOFOLLOW` after containment in the root), at most 1 MiB each and 32 MiB per listing,
+cached by size and modification time; binary and larger files are not scanned. File modes come from
+the diff git already runs, or `lstat` for untracked files. The resulting risk flags, and the markers
+the code view draws on hidden characters, are hints for review, not a verdict: a harmful change
+in an ordinary file carries no flag. Checkpoints ("Changes: Set Checkpoint") live in the page's
+memory only; nothing is written to disk or sent anywhere.
+
 Commands that type into a terminal ("Insert Reference in Terminal") send one line as a paste and
 never press Enter, and refuse file names with control characters or command substitution.
 After a reload the server restores the terminal's input modes (bracketed paste, mouse) with a parser

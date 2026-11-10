@@ -82,7 +82,7 @@
       <article class="card">
         <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v10M7 14a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17 9c0 4-10 3-10 5" /></g></svg>
         <h3>Git, read-only</h3>
-        <p>Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, a Changes view that lists every file the branch touched as read-only diffs, and the history of any file, one commit at a time. It never writes to your repository.</p>
+        <p>Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, a Changes view that lists every file the branch touched as read-only diffs, flags risky edits and hidden characters, steps through what you have not reviewed yet and shows what changed since a checkpoint, and the history of any file, one commit at a time. It never writes to your repository.</p>
       </article>
       <article class="card">
         <svg class="ficon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 14h6l-1 7 8-11h-6z" /></g></svg>
@@ -120,7 +120,7 @@
         <article class="tcard">
           <h4>Go to file</h4>
           <figure class="tshot"><picture><source srcset="assets/features/quick-open-light-half.jpg 660w, assets/features/quick-open-light.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/quick-open-dark.jpg" srcset="assets/features/quick-open-dark-half.jpg 660w, assets/features/quick-open-dark.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" width="1320" height="530" alt="Go to file with “ca” typed, listing cache.ts, cache.test.ts and other matches with the matched letters highlighted." loading="lazy" decoding="async"></picture></figure>
-          <p>Fuzzy-matches file names first, then whole paths. Type <code>path:line</code> to land on a line; an empty box lists recent files.</p><p class="keys"><kbd>⌘P</kbd></p>
+          <p>Fuzzy-matches file names first, then whole paths. Type <code>path:line</code> to land on a line; an empty box lists recent files. After any jump, <kbd>⌃-</kbd> takes you back to where you were and <kbd>⌃⇧-</kbd> forward again (Ctrl+Alt+- and Ctrl+Shift+- on Linux).</p><p class="keys"><kbd>⌘P</kbd> <kbd>⌃-</kbd> / <kbd>⌃⇧-</kbd></p>
         </article>
         <article class="tcard">
           <h4>Go to Symbol</h4>
@@ -129,7 +129,7 @@
         </article>
         <article class="tcard">
           <h4>Command palette</h4>
-          <figure class="tshot"><picture><source srcset="assets/features/commands-light-half.jpg 660w, assets/features/commands-light.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/commands-dark.jpg" srcset="assets/features/commands-dark-half.jpg 660w, assets/features/commands-dark.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" width="1320" height="598" alt="The command palette filtered by “git”: Next Change, Show Changes, File History, Previous Change, Peek HEAD on Current Line, Compare With Base Branch / HEAD and Toggle Automatic Update Checks, with their shortcuts." loading="lazy" decoding="async"></picture></figure>
+          <figure class="tshot"><picture><source srcset="assets/features/commands-light-half.jpg 660w, assets/features/commands-light.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/commands-dark.jpg" srcset="assets/features/commands-dark-half.jpg 660w, assets/features/commands-dark.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" width="1320" height="598" alt="The command palette filtered by “changes”: Set Checkpoint, Since Checkpoint…, Show Changes, Clear Checkpoint, Next and Previous Unreviewed File and Clear Change Markers, with their shortcuts." loading="lazy" decoding="async"></picture></figure>
           <p>Every command with its shortcut: terminals, panels, theme, font size, git, references, updates. The same box takes <code>&gt;</code> for commands, <code>:</code> for a line and <code>@</code> for symbols.</p><p class="keys"><kbd>⌘⇧P</kbd></p>
         </article>
         <article class="tcard">
@@ -144,7 +144,7 @@
         </article>
         <article class="tcard tall">
           <h4>Every shortcut, one key away</h4>
-          <figure class="tshot"><picture><source srcset="assets/features/help-light-half.jpg 508w, assets/features/help-light.jpg 1016w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/help-dark.jpg" srcset="assets/features/help-dark-half.jpg 508w, assets/features/help-dark.jpg 1016w" sizes="(max-width: 860px) 100vw, 540px" width="1016" height="1022" alt="The Keyboard shortcuts sheet, showing its Files and In a file groups." loading="lazy" decoding="async"></picture></figure>
+          <figure class="tshot"><picture><source srcset="assets/features/help-light-half.jpg 508w, assets/features/help-light.jpg 1016w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/help-dark.jpg" srcset="assets/features/help-dark-half.jpg 508w, assets/features/help-dark.jpg 1016w" sizes="(max-width: 860px) 100vw, 540px" width="1016" height="1118" alt="The Keyboard shortcuts sheet, showing its Files and In a file groups." loading="lazy" decoding="async"></picture></figure>
           <p>The cheat sheet uses your platform's key names. The whole app works from the keyboard, and lists, the palette and the terminal expose what they show to screen readers.</p><p class="keys"><kbd>⌘/</kbd></p>
         </article>
       </div>
@@ -191,10 +191,20 @@
         <figure class="tshot"><picture><source srcset="assets/features/changes-light-half.jpg 800w, assets/features/changes-light.jpg 1600w" sizes="(max-width: 860px) 100vw, 680px" media="(prefers-color-scheme: light)"><img src="assets/features/changes-dark.jpg" srcset="assets/features/changes-dark-half.jpg 800w, assets/features/changes-dark.jpg 1600w" sizes="(max-width: 860px) 100vw, 680px" width="1600" height="800" alt="The Changes view comparing the branch with main: six files with their status letters and line counts, and cache.ts open as a unified diff with added and removed lines." loading="lazy" decoding="async"></picture></figure>
         <div>
           <h4>Review the branch</h4>
-          <p>Lists every file the branch touched since it left <code>main</code>, or only what is uncommitted, with <code>+/−</code> counts. Each file opens as a read-only diff. <kbd>⌥F5</kbd> walks hunk by hunk and on to the next file, and reviewed files dim until they change again.</p><p class="keys"><kbd>⌘⇧G</kbd> <kbd>⌥F5</kbd> / <kbd>⌥⇧F5</kbd></p>
+          <p>Lists every file the branch touched since it left <code>main</code>, or only what is uncommitted, with <code>+/−</code> counts. Each file opens as a read-only diff. <kbd>⌥F5</kbd> walks hunk by hunk and on to the next file. Reviewed files dim until they change again, and <kbd>⌥F6</kbd> skips straight to the next file you have not reviewed.</p><p class="keys"><kbd>⌘⇧G</kbd> <kbd>⌥F5</kbd> / <kbd>⌥⇧F5</kbd> <kbd>⌥F6</kbd> / <kbd>⌥⇧F6</kbd></p>
         </div>
       </article>
       <div class="tgrid">
+        <article class="tcard">
+          <h4>Risk flags and hidden characters</h4>
+          <figure class="tshot"><picture><source srcset="assets/features/flags-light-half.jpg 800w, assets/features/flags-light.jpg 1600w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/flags-dark.jpg" srcset="assets/features/flags-dark-half.jpg 800w, assets/features/flags-dark.jpg 1600w" sizes="(max-width: 860px) 100vw, 540px" width="1600" height="768" alt="The Changes view with 4 flagged files: deploy.yml in .github/workflows marked CI, package.json manifest, router.ts hidden and server.ts exec. router.ts is open on a comment that ends in a red marker where invisible tag characters hide text." loading="lazy" decoding="async"></picture></figure>
+          <p>Badges mark the edits worth a second look: an executable bit or symlink, CI workflows, git hooks, lockfiles, manifests, <code>.env</code> and registry files, and invisible Unicode (zero-width, tag and variation characters, bidi controls). The code view outlines each hidden character in place, and <b>Go to Next Hidden Character</b> walks them. Hints, never a verdict.</p>
+        </article>
+        <article class="tcard">
+          <h4>Changes since a checkpoint</h4>
+          <figure class="tshot"><picture><source srcset="assets/features/checkpoint-light-half.jpg 660w, assets/features/checkpoint-light.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/checkpoint-dark.jpg" srcset="assets/features/checkpoint-dark-half.jpg 660w, assets/features/checkpoint-dark.jpg 1320w" sizes="(max-width: 860px) 100vw, 540px" width="1320" height="326" alt="The list of changes since 06:33: src/cache.ts and src/router.ts modified and src/version.ts added, with their added and removed line counts." loading="lazy" decoding="async"></picture></figure>
+          <p><b>Changes: Set Checkpoint</b> remembers every uncommitted file. After the agent's next turn, <b>Since Checkpoint…</b> lists only what changed after that moment, each file opening as a diff from the checkpoint to now. Kept in memory only, never on disk.</p>
+        </article>
         <article class="tcard">
           <h4>Peek at HEAD</h4>
           <figure class="tshot"><picture><source srcset="assets/features/peek-light-half.jpg 669w, assets/features/peek-light.jpg 1338w" sizes="(max-width: 860px) 100vw, 540px" media="(prefers-color-scheme: light)"><img src="assets/features/peek-dark.jpg" srcset="assets/features/peek-dark-half.jpg 669w, assets/features/peek-dark.jpg 1338w" sizes="(max-width: 860px) 100vw, 540px" width="1338" height="644" alt="A peek popup under a changed block in router.ts, showing the single line HEAD had where there are now three." loading="lazy" decoding="async"></picture></figure>

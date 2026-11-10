@@ -1,5 +1,6 @@
 import { api, type ChangeFile, type ChangesData } from "./api.ts";
 import type { Letter } from "./git.ts";
+import { riskFlags, riskLabel, type RiskFlag } from "./risk.ts";
 import { basename, dirname, esc, h, showHidden } from "./util.ts";
 
 export type Scope = "head" | "branch";
@@ -41,6 +42,30 @@ export function summarize(files: readonly ChangeFile[]): { added: number; remove
 /** What "reviewed" was reviewed against: any later edit to the file un-dims its row. */
 const seenKey = (f: ChangeFile) => `${f.status}:${f.added}:${f.removed}:${f.oldPath ?? ""}`;
 
+/** Index of the next path that is not reviewed, searching from `current` in `dir` with wrap-around; -1 when none. */
+export function nextUnreviewed(
+  paths: readonly string[], current: string | null, dir: 1 | -1,
+  isReviewed: (path: string) => boolean,
+): number {
+  const n = paths.length;
+  if (!n) return -1;
+  const c = current === null ? -1 : paths.indexOf(current);
+  if (c < 0) {
+    for (let k = 0; k < n; k++) {
+      const i = dir === 1 ? k : n - 1 - k;
+      if (!isReviewed(paths[i]!)) return i;
+    }
+    return -1;
+  }
+  for (let k = 1; k <= n; k++) {
+    const i = (((c + dir * k) % n) + n) % n; // k = n lands on c itself: checked last
+    if (!isReviewed(paths[i]!)) return i;
+  }
+  return -1;
+}
+
+const BADGE: Record<RiskFlag, string> = { exec: "exec", symlink: "symlink", ci: "CI", hook: "hook", lockfile: "lock", manifest: "manifest", env: "env", hidden: "hidden" };
+
 const safe = (s: string) => esc(showHidden(s));
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -74,12 +99,18 @@ export class ChangesView {
   private waiters: (() => void)[] = [];
   private scopeEl: HTMLElement;
   private summary: HTMLElement;
+  // Built once: the live region must persist so screen readers announce a changed count.
+  private countsEl = h("span", { class: "ch-counts" });
+  private riskEl = h("span", { class: "ch-riskcount", role: "status" });
+  private vsEl = h("span", { class: "ch-vs" });
+  private barEl = h("div", { class: "ch-bar empty", style: "--p:50%" });
   private list: HTMLElement;
 
   constructor(opts: { debounce?: number } = {}) {
     this.debounce = opts.debounce ?? 150;
     this.scopeEl = h("div", { class: "ch-scope", role: "group", "aria-label": "Comparison", hidden: true });
     this.summary = h("div", { class: "ch-summary-wrap", hidden: true });
+    this.summary.append(h("div", { class: "ch-summary" }, this.countsEl, this.riskEl, this.vsEl), this.barEl);
     this.list = h("div", { class: "ch-list", role: "listbox", tabindex: "0", "aria-label": "Changed files" });
     this.el = h("div", { class: "changes-view" }, this.scopeEl, this.summary, this.list);
     this.scopeEl.addEventListener("click", (e) => {
@@ -106,6 +137,12 @@ export class ChangesView {
       e.preventDefault();
     });
     this.render();
+  }
+
+  /** Risk flags of the listed row with this path ([] for an unknown path or an unflagged row). */
+  flags(path: string): RiskFlag[] {
+    const f = this.files.find((x) => x.path === path);
+    return f ? riskFlags(f) : [];
   }
 
   get scopeName(): Scope {
@@ -251,6 +288,26 @@ export class ChangesView {
     return f;
   }
 
+  /** Opens the next/previous file that is not reviewed (wrapping); null when every file is reviewed. */
+  stepUnreviewed(dir: 1 | -1): ChangeFile | null {
+    const next = nextUnreviewed(this.files.map((x) => x.path), this.current, dir, (p) => this.isSeen(p));
+    if (next < 0) return null;
+    const f = this.files[next]!;
+    this.select(next);
+    this.onOpen(f, false);
+    return f;
+  }
+
+  private isSeen(path: string): boolean {
+    const f = this.files.find((x) => x.path === path);
+    return !!f && this.seen.get(path) === seenKey(f);
+  }
+
+  /** Rows in the current list that are not reviewed. */
+  unreviewedCount(): number {
+    return this.files.filter((f) => this.seen.get(f.path) !== seenKey(f)).length;
+  }
+
   focus() {
     if (this.sel < 0) this.sel = Math.max(0, this.files.findIndex((f) => f.path === this.current));
     this.render();
@@ -318,12 +375,15 @@ export class ChangesView {
     const commits = d.scope === "branch" && d.commits
       ? `<span class="ch-sep">·</span><span class="ch-commits" title="${esc(d.subjects.map(showHidden).join("\n"))}">${plural(d.commits, "commit", "commits")}</span>`
       : "";
+    const flagged = files.filter((f) => riskFlags(f).length).length;
     const p = added + removed ? Math.round((added / (added + removed)) * 100) : 50;
-    this.summary.innerHTML =
-      `<div class="ch-summary"><span class="ch-counts"><b>${files.length}</b> ${files.length === 1 ? "file" : "files"}` +
-      `<span class="ch-sep">·</span><span class="git-A">+${added.toLocaleString()}</span> <span class="git-D">−${removed.toLocaleString()}</span>${commits}</span>` +
-      `<span class="ch-vs">${safe(this.vs)}</span></div>` +
-      `<div class="ch-bar${added + removed ? "" : " empty"}" style="--p:${p}%"></div>`;
+    this.countsEl.innerHTML =
+      `<b>${files.length}</b> ${files.length === 1 ? "file" : "files"}` +
+      `<span class="ch-sep">·</span><span class="git-A">+${added.toLocaleString()}</span> <span class="git-D">−${removed.toLocaleString()}</span>${commits}`;
+    this.riskEl.textContent = flagged ? `· ${flagged} flagged` : "";
+    this.vsEl.innerHTML = safe(this.vs);
+    this.barEl.setAttribute("class", `ch-bar${added + removed ? "" : " empty"}`);
+    this.barEl.setAttribute("style", `--p:${p}%`);
     if (!files.length) {
       const msg = d.scope === "branch" && d.base
         ? d.commits ? `No changes ${safe(this.vs)}.` : `Branch is up to date with ${safe(d.base.name)}.`
@@ -352,9 +412,12 @@ export class ChangesView {
         : f.added === null
           ? `<span class="ch-bin">—</span>`
           : `<span class="ch-add">${f.added ? `+${f.added}` : ""}</span><span class="ch-del">${f.removed ? `−${f.removed}` : ""}</span>`;
+      const risks = riskFlags(f)
+        .map((r) => `<span class="risk risk-${r}" title="${esc(riskLabel(r))}" aria-label="${esc(riskLabel(r))}">${BADGE[r]}</span>`)
+        .join("");
       html +=
         `<div class="${cls.join(" ")}" data-i="${i}" id="ch-${i}" role="option" aria-selected="${i === this.sel}" title="${esc(showHidden(f.path))} · ${labelOf(f)}${cls.includes("seen") ? " · reviewed (dims until the file changes again)" : ""}">` +
-        `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${counts}</div>`;
+        `<span class="gbadge">${letter}</span><span class="ch-name">${name}</span><span class="ch-dir">${dir}</span>${cls.includes("seen") ? `<span class="sr-only">, reviewed</span>` : ""}${risks}${counts}</div>`;
     });
     if (d.truncated) html += `<div class="sv-note sv-warn">Showing the first ${files.length.toLocaleString()} files</div>`;
     this.list.innerHTML = html;

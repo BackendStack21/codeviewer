@@ -135,3 +135,31 @@ test("stripLinks is exactly the link regex it replaced (random strings over the 
     expect(stripLinks(s)).toBe(old(s));
   }
 });
+
+test("scanHidden and nextHidden grow linearly on hidden-character runs", async () => {
+  const { scanHidden, nextHidden } = await import("../src/client/hidden.ts");
+  const shapes: ((n: number) => string)[] = [
+    (n) => "\u200B".repeat(n),
+    (n) => "a\u200D".repeat(n / 2),
+    (n) => "x" + "\uFE0F".repeat(n),
+    (n) => "\u{E0041}".repeat(n / 2),
+    (n) => "\u202E\n".repeat(n / 2),
+  ];
+  const timeScan = (make: (n: number) => string) => {
+    const small = make(40_000);
+    const large = make(320_000);
+    const ta = best(() => void scanHidden(small), 3, true);
+    const tb = best(() => void scanHidden(large), 3, true);
+    return { ta, tb };
+  };
+  const slow: string[] = [];
+  shapes.forEach((make, i) => {
+    const { ta, tb } = timeScan(make);
+    if (tb > 15 && tb / Math.max(ta, 0.05) > 24) slow.push(`shape #${i}: ${ta.toFixed(1)} ms → ${tb.toFixed(1)} ms`);
+    if (tb > 1000) slow.push(`shape #${i}: ${tb.toFixed(0)} ms at 320000 chars`);
+  });
+  expect(slow).toEqual([]);
+  const hits = scanHidden("\u200B".repeat(300)).hits;
+  expect(hits.length).toBe(200);
+  expect(best(() => { for (let i = 0; i < 2000; i++) nextHidden(hits, 1, i % 250); }, 3)).toBeLessThan(500);
+}, 60_000);

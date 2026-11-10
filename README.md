@@ -35,6 +35,9 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   preview scrolls to the heading itself. Covers TypeScript/JavaScript, Python, Rust, Go, C/C++,
   Java/Kotlin/C#, Swift, Ruby, PHP, Lua, shell, CSS, Zig, Haskell, Makefiles, YAML/TOML keys and
   Dockerfile stages, with patterns, not a parser.
+- **Back and forward:** ⌃- (Ctrl+Alt+- on Linux) returns to where you jumped from, ⌃⇧- (Ctrl+Shift+-) goes
+  forward again, like a browser. Jumps nearby (within 10 lines) merge; files that were deleted are skipped.
+  The history lives in memory only and is announced to screen readers.
 - **References for your agent:** ⌥⌘C copies `path:line` (or `path:12-40` for a selection) for the
   cursor or the selected lines. The palette also has **Copy Reference with Code** (the reference
   plus the lines in a fenced block) and **Insert Reference in Terminal**, which types it at the
@@ -49,11 +52,29 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   - **Review changes (⌘⇧G):** a Changes view in the sidebar lists every file the branch touched
     (vs its base branch, working tree included) or only the uncommitted ones (vs `HEAD`), with
     `+/−` per file and a one-line summary. Each file opens as a read-only unified diff; ⌥F5 walks
-    the changes and moves on to the next file. Reviewed files dim until they change again.
+    the changes and moves on to the next file. Reviewed files dim until they change again, and ⌥F6 / ⌥⇧F6 (or the palette commands "Changes: Next Unreviewed File" / "Changes: Previous Unreviewed File") step through only the files not yet reviewed, announcing how many are left. Screen readers read reviewed rows as "reviewed".
     Right-click a file in the Explorer and pick "View Changes" to jump to its diff.
+  - **Risk flags:** rows in Changes carry a small badge, and the summary counts them ("· 2 flagged"),
+    for an added executable bit, a new symbolic link, CI configuration, git hooks, dependency
+    lockfiles, package manifests and build files, and `.env`/registry configuration. They are hints
+    for where to look first, not a safety verdict: they match file names, directories and git modes
+    only, never contents, and they can miss things (a malicious change in an ordinary file is not flagged).
+    The one exception is `hidden`: files up to 1 MiB are scanned for zero-width, tag and variation
+    characters and bidi controls, which render as nothing but can hide text. That is a hint too, not
+    a verdict: legitimate text (emoji, Arabic, Indic scripts) is skipped, but other uses can still match.
+    In the code view such characters get a visible outlined marker (the text is unchanged, so copy
+    works as before), and the palette command "Go to Next Hidden Character" jumps to the next one
+    and announces its name and position.
   - **File History:** "Git: File History" in the palette (or "File History" in the Explorer's file
     menu) lists the commits that changed the file, renames followed, newest first; type to filter by
     subject, Enter to open what that commit changed as a read-only diff tab labelled with its short id.
+  - **Changes since a checkpoint:** "Changes: Set Checkpoint" remembers the text of every uncommitted
+    file; later, "Changes: Since Checkpoint…" lists what changed after that moment (path, `+added
+    −removed`, type to filter) and Enter opens a read-only diff tab labelled "since HH:MM".
+    "Changes: Clear Checkpoint" forgets it. The checkpoint is kept in memory only and is lost on reload;
+    nothing is written or sent anywhere. Binary files, unreadable files and files over the caps
+    (500 files, 16 million characters) are skipped, and the toast counts them ("Checkpoint set (4 files, 2
+    skipped)"). The since tab is fixed content: it does not follow the Changes list.
   - Everything updates live as files, the index or refs change.
 - **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
   update pill in the status bar when a new version is out. Installing verifies the release's
@@ -71,7 +92,7 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
   tabs coloured by git status, breadcrumbs, several terminals as tabs, and a terminal panel at the
   bottom or on the right that can be maximized ("Move Terminal Panel", "Maximize/Restore Terminal
   Panel"). The title bar button cycles the System, Dark and Light themes. The palette also has
-  Copy Path, Copy Absolute Path, Close All Tabs and Clear Terminal. In a diff tab, ‹ › step to the
+  Changes: Set Checkpoint, Changes: Since Checkpoint… and Changes: Clear Checkpoint, Copy Path, Copy Absolute Path, Close All Tabs and Clear Terminal. In a diff tab, ‹ › step to the
   previous or next changed file and "Open file" opens the file itself; the Changes view switches
   between "Uncommitted" and "vs main".
 - **Keyboard and screen-reader friendly:** ⌘/ lists every shortcut in your platform's key names.
@@ -129,8 +150,11 @@ Closing the app window quits codeviewer. Settings live in `~/.config/codeviewer/
 | ⌘W · ⌘⇧[ ⌘⇧] | Close tab · switch tabs (in the terminal: switch terminals) |
 | ⌘W in the terminal | Close an exited terminal; a running one asks for a second press (Linux: Ctrl+W stays the shell's) |
 | Shift+F10 / Menu | Context menu for the selected explorer entry ("Search in Folder…", "View Changes", "File History") |
+| ⌃- / Ctrl+Alt+- | Go back to the previous location (after a jump: `path:line`, Go to Line or Symbol, a search result, a terminal link, `codeviewer open`) |
+| ⌃⇧- / Ctrl+Shift+- | Go forward again |
 | ⌘= ⌘- ⌘0 | Font size (code, terminal and the UI chrome) |
 | ⌘⇧G · ⌥F5 / ⌥⇧F5 | Changes · next / previous change (then next file) |
+| ⌥F6 / ⌥⇧F6 | Next / previous unreviewed changed file (Alt+F6 / Alt+Shift+F6 elsewhere) |
 | ⌘/ | Every shortcut and the terminal tips, in your platform's key names (⌘⇧7 on layouts where "/" is Shift+7, such as German) |
 | ⌘-click in terminal | Open `path:line` or URL |
 | Left ⌥ | Meta in the terminal (right ⌥ still types special characters) |
@@ -176,6 +200,9 @@ The server binds to localhost and serves a shell. It was hardened through an adv
   - A throwaway profile, locked to the window's own server port.
   - External links open in your default browser.
   - Terminal clipboard writes always show a notice.
+- **Hidden characters:** the code view marks zero-width, tag and variation characters and bidi
+  controls in place, and Changes counts them per changed file (regular files up to 1 MiB, 32 MiB per
+  listing). Like the other risk flags, a hint, not a verdict.
 - **Markdown:** repository files are untrusted. The preview never uses `innerHTML`, shows no raw HTML,
   filters link schemes and loads no remote images (the CSP is unchanged).
 - **Terminals:** the shell gets a narrow token that only lets `codeviewer open` ask the viewer to show

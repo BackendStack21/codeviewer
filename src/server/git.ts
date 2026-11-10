@@ -1,8 +1,9 @@
 import { watch, type FSWatcher } from "node:fs";
 import { HEAVY_DIRS, isHeavyFile } from "./index.ts";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { looksBinary, openRegular } from "./files.ts";
+import { scanHidden } from "../client/hidden.ts";
 
 /**
  * Read-only git integration via the system `git` CLI.
@@ -66,7 +67,16 @@ export interface ChangeEntry {
   added: number | null;
   removed: number | null;
   binary: boolean;
+  /** Git octal modes ("100644", "100755", "120000"; "000000" when absent on that side). */
+  oldMode?: string;
+  newMode?: string;
+  /** Count of hidden or invisible characters in the current content; absent when none. */
+  hidden?: number;
 }
+
+/** Most file content scanned for hidden characters per changes() call. */
+export const HIDDEN_SCAN_BUDGET = 32 * 1024 * 1024;
+const HIDDEN_MAX_FILE = 1024 * 1024;
 
 export interface Changes {
   scope: "head" | "branch";
@@ -440,6 +450,51 @@ export class Git {
   }
 
   private inflight: Partial<Record<"head" | "branch", Promise<Changes>>> = {};
+  /** Files read for the hidden-character scan so far (cache hits do not count). */
+  hiddenReads = 0;
+  /** Entries in the hidden-character cache. */
+  hiddenCacheSize(): number {
+    return this.hiddenCache.size;
+  }
+  private hiddenCache = new Map<string, { size: number; mtime: number; count: number }>();
+
+  /** Sets `hidden` on entries whose current content has hidden characters (bounded, cached by size and mtime). */
+  private async markHidden(files: ChangeEntry[]): Promise<void> {
+    let left = HIDDEN_SCAN_BUDGET;
+    const keep = new Set<string>();
+    for (const e of [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
+      keep.add(e.path);
+      if (e.status === "D" || e.binary) continue;
+      try {
+        const { fh, st } = await openRegular(path.join(this.root, ...e.path.split("/")), this.root);
+        try {
+          if (st.size > HIDDEN_MAX_FILE) continue;
+          const c = this.hiddenCache.get(e.path);
+          let count: number;
+          if (c && c.size === st.size && c.mtime === st.mtimeMs) count = c.count;
+          else {
+            if (st.size > left) continue;
+            left -= st.size;
+            this.hiddenReads++;
+            const buf = new Uint8Array(st.size);
+            let n = 0;
+            while (n < buf.length) {
+              const { bytesRead } = await fh.read(buf, n, buf.length - n, n);
+              if (!bytesRead) break;
+              n += bytesRead;
+            }
+            const part = buf.subarray(0, n);
+            count = looksBinary(part.subarray(0, 64 * 1024)) ? 0 : scanHidden(new TextDecoder("utf-8", { ignoreBOM: true }).decode(part), 0).count;
+            this.hiddenCache.set(e.path, { size: st.size, mtime: st.mtimeMs, count });
+          }
+          if (count > 0) e.hidden = count;
+        } finally {
+          await fh.close();
+        }
+      } catch {}
+    }
+    for (const k of this.hiddenCache.keys()) if (!keep.has(k)) this.hiddenCache.delete(k);
+  }
 
   /**
    * Files changed in the working tree against HEAD ("head") or against the merge-base with the
@@ -473,6 +528,7 @@ export class Git {
       else byPath.set(p, { path: p, status: "U", added: null, removed: null, binary: false });
     }
     const files = [...byPath.values()];
+    await this.markHidden(files);
     let commits = 0;
     let subjects: string[] = [];
     if (branch) {
@@ -519,7 +575,7 @@ export class Git {
           continue; // keep consuming: the numstat records of kept entries follow
         }
         const status = (/^[MADRCTUX]$/.test(st) ? st : "M") as ChangeEntry["status"];
-        const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false };
+        const e: ChangeEntry = { path: rel, status, added: null, removed: null, binary: false, oldMode: parts[0], newMode: parts[1] };
         // Kept for the stat-only check below (not part of the entry sent to the client).
         if (status === "M" && parts[0] === parts[1]) statOnly.set(e, parts[2] ?? "");
         if (two) {
@@ -592,11 +648,26 @@ export class Git {
     const paths = all.slice(0, MAX_CHANGES);
     const files: ChangeEntry[] = paths.map((p) => ({ path: p, status: "?", added: null, removed: null, binary: false }));
     // A few files at a time through one 64 KiB buffer each: never 200 MiB of buffers per request.
+    for (const e of files) e.newMode = this.untrackedMode(e.path);
     const queue = files.slice(0, COUNT_UNTRACKED);
     await Promise.all(Array.from({ length: 8 }, async () => {
       for (let e = queue.shift(); e; e = queue.shift()) await this.countLines(e);
     }));
     return { files, truncated: all.length > MAX_CHANGES };
+  }
+
+  /** Mode of an untracked file from lstat (a link is never followed); the parent directory must resolve inside the root. */
+  private untrackedMode(rel: string): string | undefined {
+    try {
+      const abs = path.join(this.root, ...rel.split("/"));
+      const parent = realpathSync(path.dirname(abs));
+      if (parent !== this.root && !parent.startsWith(this.root + path.sep)) return undefined;
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) return "120000";
+      return st.mode & 0o111 ? "100755" : "100644";
+    } catch {
+      return undefined;
+    }
   }
 
   private async countLines(e: ChangeEntry) {

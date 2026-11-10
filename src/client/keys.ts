@@ -60,3 +60,21 @@ export function referenceKey(e: KeyLike, o: { isMac: boolean }): boolean {
   if (!mod || !e.altKey || e.shiftKey) return false;
   return e.key.toLowerCase() === "c" || (e.code === "KeyC" && !/^[a-z]$/i.test(e.key));
 }
+
+/**
+ * Back / Forward through the jump list. macOS: Ctrl+- goes back, Ctrl+Shift+- forward (Cmd and
+ * Option stay free: Cmd+- is zoom out). Elsewhere: Ctrl+Alt+- back, Ctrl+Shift+- forward (plain
+ * Ctrl+- is zoom out). Never from a focused terminal. "_" is the shifted "-" on US layouts.
+ */
+export function navKey(e: KeyLike, o: { isMac: boolean; inTerm: boolean }): "back" | "forward" | null {
+  if (o.inTerm || !e.ctrlKey || e.metaKey || (e.key !== "-" && e.key !== "_")) return null;
+  if (e.shiftKey) return e.altKey ? null : "forward";
+  if (e.key !== "-") return null;
+  return o.isMac ? (e.altKey ? null : "back") : e.altKey ? "back" : null;
+}
+
+/** Alt+F6 / Alt+Shift+F6: next / previous unreviewed changed file (1 / -1). Never from a focused terminal. */
+export function unreviewedKey(e: KeyLike, o: { inTerm: boolean }): 1 | -1 | null {
+  if (o.inTerm || e.key !== "F6" || !e.altKey || e.ctrlKey || e.metaKey) return null;
+  return e.shiftKey ? -1 : 1;
+}

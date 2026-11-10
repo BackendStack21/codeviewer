@@ -1243,6 +1243,15 @@ svg {
   overflow: visible;
   box-shadow: 0 0 0 1px var(--danger);
 }
+/* A zero-width, tag or variation character in code: zero width like .bidi, so columns stay put; the outline makes it visible. */
+.hidden-char {
+  display: inline-block;
+  width: 0;
+  height: 1.1em;
+  vertical-align: text-bottom;
+  overflow: visible;
+  box-shadow: 0 0 0 1px var(--danger);
+}
 .trunc {
   -webkit-user-select: none;
   user-select: none;
@@ -2250,6 +2259,9 @@ li[data-state="done"] .upd-mark {
 .ch-add { color: var(--git-add); }
 .ch-del { color: var(--git-del); }
 .ch-bin { color: var(--fg-faint); font-family: var(--font-mono); }
+/* Risk flags: a word in a bordered pill, so the meaning never rests on colour alone. */
+.risk { flex: none; margin-left: 4px; padding: 0 4px; border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent); border-radius: 3px; font: 600 9.5px/14px var(--font-ui); letter-spacing: 0.04em; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.ch-riskcount { flex: none; flex-shrink: 0; color: var(--warn); }
 
 /* diff tab */
 .tab-kind { margin-left: 2px; padding: 0 4px; border-radius: 3px; font: 600 9.5px/14px var(--font-ui); letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-muted); background: var(--bg-active); }

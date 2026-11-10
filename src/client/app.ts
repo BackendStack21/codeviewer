@@ -1,5 +1,6 @@
 import { wsUrl } from "./auth.ts"; // first: installs the auth header on fetch
 import { api, type Info } from "./api.ts";
+import { CHECKPOINT_COMMANDS, CheckpointController, checkpointText } from "./checkpointctl.ts";
 import { Editor, type StatusInfo } from "./editor.ts";
 import { FileTree } from "./tree.ts";
 import { Palette, type Command, type PickItem } from "./palette.ts";
@@ -16,9 +17,12 @@ import { isContextMenuOpen } from "./menu.ts";
 import { SearchView } from "./search.ts";
 import { ChangesView } from "./changes.ts";
 import type { ChangeFile } from "./api.ts";
-import { helpKey, normSideView, referenceKey, searchKey, symbolKey, type SideView } from "./keys.ts";
+import { Navigation, routeNavZoomKey } from "./navigation.ts";
+import { helpKey, normSideView, referenceKey, searchKey, symbolKey, unreviewedKey, type SideView } from "./keys.ts";
+import { liveAnnouncer, runUnreviewed, UNREVIEWED_COMMANDS } from "./unreviewed.ts";
 import { reference, referenceWithCode, unsafePath } from "./reference.ts";
-import { headingText } from "./symbols.ts";
+import { headingText, type Sym } from "./symbols.ts";
+import { createHiddenNav } from "./hiddennav.ts";
 import { slugify } from "./markdown.ts";
 
 
@@ -92,6 +96,28 @@ class App {
   private statusRight!: HTMLElement;
   private themeBtn!: HTMLButtonElement;
   private live!: HTMLElement;
+  private checkpoints = new CheckpointController({
+    changes: () => api.gitChanges("head"),
+    readText: (p) => checkpointText(() => api.file(p)),
+    baseText: (p, rev) => api.gitBase(p, rev),
+    now: () => Date.now(),
+    notify: (m) => this.notify(m),
+    pick: (items, title) => this.palette.pick(items, title),
+    openDiff: (d) => void this.editor.openSinceDiff(d, { focus: true }),
+  });
+  private nav = new Navigation({
+    open: (loc) => this.editor.open(loc.path, loc.view ? { pin: true, view: loc.view, focus: false } : { pin: true, line: loc.line, focus: false }).then((ok) => (void this.tree.reveal(loc.path), ok)),
+    current: () => this.editor.location(),
+    announce: (m) => (this.live.textContent = m),
+    notify: (m) => this.notify(m),
+  });
+  private hiddenNav = createHiddenNav({
+    lines: () => this.editor.active?.code?.lineTexts ?? null,
+    position: () => ({ line: this.editor.location()?.line ?? 1 }),
+    reveal: (l) => this.editor.active?.code?.revealLine(l),
+    announce: (m) => (this.live.textContent = m),
+    toast: (m) => this.notify(m),
+  });
   private killArmed = 0;
   private help = new Help();
   private sideSplit!: HTMLElement;
@@ -149,7 +175,7 @@ class App {
     if (tabs.active) await this.editor.open(tabs.active, { focus: false });
     this.editor.onChange = () => {
       store.set(`tabs:${this.info.root}`, this.editor.serialize());
-      this.changes.watching = this.editor.tabs.some((t) => t.isDiff && !t.commit);
+      this.changes.watching = this.editor.tabs.some((t) => t.isDiff && !t.commit && !t.since);
     };
   }
 
@@ -190,13 +216,13 @@ class App {
 
     // Sidebar
     this.tree = new FileTree(this.info.name);
-    this.tree.onOpen = (p, pin) => void this.openFile(p, { pin, focus: pin });
+    this.tree.onOpen = (p, pin) => void this.jump(p, { pin, focus: pin });
     this.search = new SearchView();
     this.tree.onSearchIn = (dir, ignored) => this.search.searchIn(dir, ignored);
     this.tree.onViewChanges = (p) => void this.viewChanges(p);
     this.tree.onHistory = (p) => void this.fileHistory(p);
     this.search.onReveal = () => this.showSearch();
-    this.search.onOpen = (path, line, col, len) => void this.openFile(path, { line, col, len, focus: false });
+    this.search.onOpen = (path, line, col, len) => void this.jump(path, { line, col, len, focus: false });
     this.changes = new ChangesView();
     this.changes.onOpen = (f, pin) => void this.openDiff(f, pin);
     this.changes.onData = (d) => {
@@ -363,8 +389,8 @@ class App {
     });
 
     this.palette.recent = this.recent;
-    this.palette.onOpenFile = (p, line) => void this.openFile(p, { pin: true, line });
-    this.palette.onGoToLine = (n) => this.editor.goToLine(n);
+    this.palette.onOpenFile = (p, line) => void this.jump(p, { pin: true, line });
+    this.palette.onGoToLine = (n) => this.jumpToLine(n);
     this.palette.symbols = () => this.symbolItems();
     this.palette.commands = this.commands();
 
@@ -389,6 +415,8 @@ class App {
       c("view.theme", "Cycle Theme (System/Dark/Light)", () => this.cycleTheme()),
       c("view.zoomIn", "Increase Font Size", () => this.zoom(1), `${MOD}=`),
       c("view.zoomOut", "Decrease Font Size", () => this.zoom(-1), `${MOD}-`),
+      c("nav.back", "Go Back", () => this.navigate("back"), key("⌃-", "Ctrl+Alt+-")),
+      c("nav.forward", "Go Forward", () => this.navigate("forward"), key("⌃⇧-", "Ctrl+Shift+-")),
       c("view.zoomReset", "Reset Font Size", () => this.zoom(0), `${MOD}0`),
       c("search.files", "Search in Files", () => this.showSearch(), IS_MAC ? "⌘⇧F" : "Ctrl+Shift+F"),
       c("search.next", "Next Search Result", () => this.search.step(1), "F4"),
@@ -423,6 +451,7 @@ class App {
         if (!t) this.notify("Open a file first");
         else void this.fileHistory(t.path);
       }),
+      ...CHECKPOINT_COMMANDS.map((k) => c(k.id, k.title, () => void (k.id === "changes.checkpoint" ? this.checkpoints.set() : k.id === "changes.sinceCheckpoint" ? this.checkpoints.since() : this.checkpoints.clear()))),
       c("git.scope", "Git: Compare With Base Branch / HEAD", () => this.changes.toggleScope()),
       c("app.update", "Check for Updates…", () => void this.updates.checkNow()),
       c("app.autoUpdate", "Toggle Automatic Update Checks", () => {
@@ -430,8 +459,10 @@ class App {
         store.set("updates", { auto });
         this.notify(`Automatic update checks ${auto ? "on" : "off"} (from the next launch)`);
       }),
+      c("file.nextHidden", "Go to Next Hidden Character", () => this.hiddenNav.next()),
       c("git.next", "Git: Next Change", () => this.editor.nextChange(1), key("⌥F5", "Alt+F5")),
       c("git.prev", "Git: Previous Change", () => this.editor.nextChange(-1), key("⌥⇧F5", "Alt+Shift+F5")),
+      ...UNREVIEWED_COMMANDS.map((u) => c(u.id, u.title, () => this.stepUnreviewed(u.dir), u.dir === 1 ? key("⌥F6", "Alt+F6") : key("⌥⇧F6", "Alt+Shift+F6"))),
     ];
   }
 
@@ -440,6 +471,26 @@ class App {
   private async openFile(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
     await this.editor.open(path, opts);
     void this.tree.reveal(path);
+  }
+
+  /** Opens a file as a jump the Back / Forward history remembers. */
+  private async jump(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
+    const from = this.editor.location();
+    await this.openFile(path, opts);
+    if (from?.path === path && !opts.line) return; // re-showing the open file is not a jump
+    if (this.editor.location()?.path === path) this.nav.record(from, this.editor.landing(path, opts.line));
+  }
+
+  private jumpToLine(n: number) {
+    const from = this.editor.location();
+    this.editor.goToLine(n);
+    if (from) this.nav.record(from, { path: from.path, line: n });
+  }
+
+  private jumpToSymbol(s: Sym, slug?: string) {
+    const from = this.editor.location();
+    this.editor.revealSymbol(s, slug);
+    if (from) this.nav.record(from, { path: from.path, line: s.line + 1 });
   }
 
   private async openFromTerminal(p: string, line: number) {
@@ -452,7 +503,7 @@ class App {
       if (c.startsWith("/") || c.startsWith("~")) break;
       const type = await api.stat(c);
       if (type === "file") {
-        await this.openFile(c, { pin: true, line, focus: false });
+        await this.jump(c, { pin: true, line, focus: false });
         return;
       }
       if (type === "dir") {
@@ -470,6 +521,13 @@ class App {
     if (!this.L.sidebar) this.toggleSidebar(true);
     this.setSideView("changes");
     this.changes.focus();
+  }
+
+  /** ⌥F6 / ⌥⇧F6: step to the next / previous unreviewed changed file and announce it. */
+  private stepUnreviewed(dir: 1 | -1) {
+    if (!this.git.repo) return this.notify("Not a git repository");
+    this.showChanges();
+    runUnreviewed(dir, { view: this.changes, announce: liveAnnouncer(this.live) });
   }
 
   private async openDiff(f: ChangeFile, pin: boolean, focus = false) {
@@ -508,7 +566,7 @@ class App {
         detail: `${s.kind} · line ${s.line + 1}`,
         icon: `<span class="sym-kind sym-${s.kind}" aria-hidden="true">${SYM_LETTER[s.kind]}</span>`,
         indent: depths.indexOf(s.depth),
-        run: () => this.editor.revealSymbol(s, slug),
+        run: () => this.jumpToSymbol(s, slug),
       };
     });
   }
@@ -612,6 +670,10 @@ class App {
     this.L.maximized = !this.L.maximized;
     if (this.L.maximized && !this.L.panel) this.togglePanel(true);
     this.applyLayout();
+  }
+
+  private navigate(dir: "back" | "forward") {
+    void this.nav.go(dir);
   }
 
   private zoom(d: number) {
@@ -769,7 +831,9 @@ class App {
         const appKey = IS_MAC || !inTerm;
         let handled = true;
         const sk = searchKey(e, { isMac: IS_MAC, inTerm: !!inTerm });
-        if (sk === "search") this.showSearch();
+        if (routeNavZoomKey(e, { isMac: IS_MAC, inTerm: !!inTerm }, { navigate: (d) => this.navigate(d), zoom: (d) => this.zoom(d) })) {
+          // Go Back / Go Forward and the zoom keys
+        } else if (sk === "search") this.showSearch();
         else if (sk === "next" || sk === "prev") this.search.step(sk === "next" ? 1 : -1);
         else if (e.ctrlKey && (e.code === "Backquote" || k === "`")) {
           if (e.shiftKey) this.newTerminal();
@@ -779,6 +843,7 @@ class App {
         else if (symbolKey(e, { isMac: IS_MAC }) && appKey) this.palette.open("@");
         else if (referenceKey(e, { isMac: IS_MAC }) && !inTerm) this.copyReference(false);
         else if (e.altKey && e.key === "F5" && !inTerm) this.editor.nextChange(e.shiftKey ? -1 : 1);
+        else if (unreviewedKey(e, { inTerm: !!inTerm }) !== null) this.stepUnreviewed(unreviewedKey(e, { inTerm: !!inTerm })!);
         else if (mod && e.shiftKey && k === "p") this.palette.open(">");
         else if (mod && !e.shiftKey && k === "p" && appKey && (IS_MAC || !inPalette)) this.palette.open(); // Linux: Ctrl+P is the palette's own "up"
         else if (mod && e.shiftKey && k === "e") {
@@ -806,9 +871,6 @@ class App {
           else this.editor.cycle(dir);
         }
         else if (e.ctrlKey && e.key === "Tab" && !inTerm) this.editor.cycle(e.shiftKey ? -1 : 1);
-        else if (mod && (k === "=" || k === "+") && appKey) this.zoom(1);
-        else if (mod && k === "-" && appKey) this.zoom(-1);
-        else if (mod && k === "0" && appKey) this.zoom(0);
         else if (mod && k === "j" && appKey) this.togglePanel();
         else if (helpKey(e, { isMac: IS_MAC }) && appKey) this.help.open();
         else if (e.key === "Escape" && this.help.isOpen) this.help.close();
@@ -864,7 +926,7 @@ class App {
         } else if (msg.t === "git" && msg.status) {
           this.git.set(msg.status as never);
         } else if (msg.t === "open" && msg.path) {
-          void this.openFile(msg.path, { pin: true, line: msg.line, focus: false });
+          void this.jump(msg.path, { pin: true, line: msg.line, focus: false });
           window.focus();
         }
       };

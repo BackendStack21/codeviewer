@@ -1,3 +1,4 @@
+import { classify, hiddenName } from "./hidden.ts";
 import { Highlighter, type Tok } from "./highlight.ts";
 import { dismissable, esc, h, isEditable } from "./util.ts";
 import { icons } from "./icons.ts";
@@ -53,6 +54,47 @@ export function markBidi(html: string, budget: { left: number } = { left: MAX_BI
     const cps = [...run].map((c) => `U+${c.charCodeAt(0).toString(16).toUpperCase()}`).join(" ");
     return `<span class="bidi" title="${run.length > 8 ? `${run.length} bidi controls` : cps}">${run}</span>`;
   });
+}
+
+/**
+ * Wraps each run of counted zero-width, tag and variation characters in `.hidden-char` (the same
+ * rules as scanHidden; bidi controls stay with markBidi). `ctx.prev` is the code point just before
+ * index 0, `ctx.atFileStart` says index 0 is offset 0 of the file (the only place a BOM is exempt).
+ */
+export function markHidden(html: string, budget: { left: number } = { left: MAX_BIDI_MARKS }, ctx: { prev?: number; atFileStart?: boolean } = {}): string {
+  if (!/[\u200b-\u2064\ufe00-\ufeff\ud800-\udbff]/.test(html)) return html;
+  let out = "";
+  let prev = ctx.prev ?? -1;
+  let run: number[] = [];
+  const flush = () => {
+    if (!run.length) return;
+    const raw = String.fromCodePoint(...run);
+    if (budget.left <= 0) out += run.map((c) => (c > 0xffff ? `\\u{${c.toString(16)}}` : `\\u${c.toString(16).padStart(4, "0")}`)).join("");
+    else {
+      budget.left--;
+      out += `<span class="hidden-char" title="${run.length > 8 ? `${run.length} hidden characters` : hiddenName(run[0]!)}">${raw}</span>`;
+    }
+    run = [];
+  };
+  for (let i = 0, from = 0; i < html.length; ) {
+    const cp = html.codePointAt(i)!;
+    const w = cp > 0xffff ? 2 : 1;
+    const kind = classify(cp, prev, ctx.atFileStart && i === 0 ? 0 : 1);
+    if (kind && kind !== "bidi") {
+      if (!run.length) out += html.slice(from, i);
+      run.push(cp);
+      from = i + w;
+    } else {
+      flush();
+    }
+    prev = cp;
+    i += w;
+    if (i >= html.length) {
+      flush();
+      out += html.slice(from);
+    }
+  }
+  return out;
 }
 
 /** Bidi markers per rendered line (see markBidi). */
@@ -675,7 +717,12 @@ export class CodeView {
     const bidi = { left: MAX_BIDI_MARKS };
     for (let p = 1; p <= n; p++) {
       if (p === n || cls[p] !== cls[s] || (mark && mark[p] !== mark[s])) {
-        const seg = markBidi(esc(text.slice(s, p)), bidi);
+        let prev = i > 0 ? 0x0a : -1;
+        if (s > 0) {
+          const lo = text.charCodeAt(s - 1);
+          prev = lo >= 0xdc00 && lo <= 0xdfff && s > 1 ? text.codePointAt(s - 2)! : lo;
+        }
+        const seg = markBidi(markHidden(esc(text.slice(s, p)), bidi, { prev: prev < 0 ? undefined : prev, atFileStart: i === 0 && s === 0 }), bidi);
         const t = cls[s] ? TOKS[cls[s]! - 1] : "";
         const m = mark?.[s];
         let piece = t ? `<span class="t-${t}">${seg}</span>` : seg;
@@ -697,6 +744,17 @@ export class CodeView {
       if (old >= 0) this.rowEl(old)?.classList?.remove?.("active");
       this.rowEl(n)?.classList?.add?.("active");
     }
+  }
+
+  /** Topmost visible line (0-based). */
+  firstVisibleLine(): number {
+    return Math.max(0, Math.floor(this.scroller.scrollTop / this.lh));
+  }
+
+  /** Last visible line (0-based, inclusive). */
+  lastVisibleLine(): number {
+    const s = this.scroller;
+    return Math.max(this.firstVisibleLine(), Math.ceil((s.scrollTop + (s.clientHeight || 800)) / this.lh) - 1);
   }
 
   /** Scrolls so that 0-based `line` is visible (centered when far away). */

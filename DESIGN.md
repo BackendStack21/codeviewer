@@ -1082,3 +1082,126 @@ everything under a heavy folder, so a Mac folder could show `main*  1 untracked`
 `FileIndex.apply` keeps its own test: its watcher paths can be the heavy folder itself, which must
 not restart a build. A nested repository still counts as one untracked folder with no row in
 Changes: status cannot tell it from a plain folder, and it does exist.
+
+## 27. Round 18: back and forward navigation
+
+After jumping by `path:line`, Go to Symbol, a search result or a terminal link there was no way back.
+A panel of four (agent-workflow developer, UX/accessibility designer, code-navigation engineer,
+git/security engineer) compared options. B7, a browser-style jump list with Back and Forward, won with
+3 votes and no vetoes. Runners-up: risky-change flags in Changes (2 votes) and a checkpoint diff (2 votes).
+
+The list is `NavHistory` (`navhistory.ts`, pure): a capped list (100) with a current index; jumps within
+10 lines of the current entry merge. `Navigation` (`navigation.ts`) records jumps, reopens entries
+without recording, and announces "Back to path line N" in the polite live region. Keys: Ctrl+- and
+Ctrl+Shift+- on macOS, Ctrl+Alt+- and Ctrl+Shift+- on Linux. The history is never stored or sent.
+
+| Finding | Fix |
+| --- | --- |
+| `src/client/app.ts` constructs the app on import, so tests cannot load it | The jump bookkeeping lives in `src/client/navigation.ts` (`Navigation` with injected open/announce/notify) and the key routing in `routeNavZoomKey`; app.ts is glue |
+| On Linux Ctrl+Alt+- also matched zoom-out (Ctrl+-) | The navigation keys are routed before zoom |
+| The first AC-12 tests matched app.ts source text and broke on the refactor | Replaced by behavioural tests through `routeNavZoomKey` |
+| A file in the history may have vanished | `Editor.open` reports whether the file opened; Back/Forward drop the path and move on |
+
+## 28. Round 19: risk flags in Changes
+
+A panel of four (agent-workflow developer, git/security engineer, UX/accessibility designer,
+code-navigation engineer) picked the next feature. Risk flags in Changes won with 3 votes (agent-workflow
+developer #1, git/security engineer #1, UX/accessibility designer #2). Back/Forward fidelity got 4 votes
+and follows as a separate part; a checkpoint diff got 3 votes but is size L and deferred. Single votes:
+live-change announcements, Go to Definition, a hidden-Unicode detector.
+
+`ChangeEntry` carries git's `oldMode`/`newMode`. `src/client/risk.ts` (pure) turns an entry into flags
+(`exec`, `symlink`, `ci`, `hook`, `lockfile`, `manifest`, `env`); `ChangesView` renders one badge per flag
+after the path, counts flagged rows in the summary and exposes `flags(path)`. The flags are hints, not a verdict.
+
+| Finding | Fix |
+| --- | --- |
+| Existing Changes tests compared whole entries with `toEqual`, so the new mode fields changed seven expectations | Each now names the exact modes: stricter, not looser |
+| The mode of an untracked file must not follow a link or leave the root | It comes from `lstat` after the parent directory's realpath is checked to be inside the root; tests cover a parent link leaving the root and a file that vanishes before `lstat` |
+| A mode-only change has no diff lines | The exec badge is the only sign of a `chmod +x` in the list |
+| The plan claimed a path matches at most one path category, but a directory rule and a name rule can both match (`.husky/.env` is hook and env) | Flags are a set returned in union order; the plan review caught it before any test was written |
+| The Changes summary had no `role="status"` although it is a count that changes | The summary wrap is a status region |
+| Back restored the clicked line, which may be scrolled off screen, and a never-clicked file always went back to line 1 | `Editor.location()` reports the active line only while it is on screen, else the topmost visible line (`CodeView.firstVisibleLine`/`lastVisibleLine`, inclusive) |
+| A Markdown file shown as the rendered preview came back as source | `NavLoc.view = "preview"` is recorded by `location()` and `Editor.landing()`, kept by `NavHistory` on every update path (set or removed together with the line), and `Editor.open(path, { view: "preview" })` reopens the preview; `app.ts` only forwards it |
+| Closing a tab might forget where Back should go | Pinned by tests: history entries survive `Editor.close`, and Back reopens the file; diff and image tabs have no location |
+
+
+## 29. Round 20: hidden characters
+
+A panel of four (git/security engineer, UX/accessibility designer, agent-workflow developer,
+code-navigation engineer) picked the next feature. Hidden characters won with 4 votes (git/security #1,
+UX #2, agent-workflow #3, navigation #4). A checkpoint diff got 3 votes but is size L and was deferred a
+third time. The Changes summary live-region fix (Q1/Q2) got 3 votes and ships as Part B. Single votes:
+Go to Definition, next unreviewed changed file, go to last live change, a repository trust report.
+
+`src/client/hidden.ts` (pure, also imported by the server) defines the counted set once. The server adds
+`hidden` to changed files, Changes rows show a `hidden` badge, the code view marks zero-width, tag and
+variation runs, and "Go to Next Hidden Character" jumps between hits. Results are hints, not verdicts.
+
+| Finding | Fix |
+| --- | --- |
+| The code view renders a line in token segments, so the joiner and variation-selector rules could not see the character before a segment and a BOM starting a later line was never marked | `markHidden` takes `ctx {prev, atFileStart}` and the code view passes them per segment (caught in plan review) |
+| The first tests held raw bidi controls and failed the repo's own invariant against raw bidi in sources | Every hidden character in tests is a `\u` escape |
+| `TextDecoder` strips one leading BOM, so a file starting with two BOMs reported none | The server decodes with the BOM kept and `scanHidden` applies its own offset-0 rule |
+| Go to Next Hidden Character started from its own last jump and skipped hits after a search or Go to Line | It starts from the editor's current position |
+| The marker had `min-width`, which shifted columns | It is zero-width with an outline like the bidi marker |
+| Joiners in Arabic, Persian, Indic text and emoji sequences would be false positives | Joiners after those letters and emoji, a lone U+FE0F, and a BOM at offset 0 are exempt |
+| The Changes summary wrapper was a live region, so any re-render re-announced the whole line, and the count sat inside `.ch-counts`, whose ellipsis could clip it | The wrapper has no live role; one persistent `.ch-riskcount` element carries `role="status"`, sits beside `.ch-counts` and does not shrink |
+
+
+## 30. Round 21: changes since a checkpoint
+
+A panel of four picked the next feature. A checkpoint got 3 votes with two first places (agent-workflow
+developer #1, git/security engineer #1, navigation #2); it had been deferred three times before as size L and
+is scoped here to a client-only, in-memory version. Next/Previous Unreviewed Changed File got 3 votes (UX #1)
+and is next in line. Go to Definition got a first place for the fourth time.
+
+The design is client-only and in memory. `src/client/checkpoint.ts` (pure) has `takeCheckpoint` (bounded:
+500 files, 16 million characters) and `sinceCheckpoint` (statuses and line counts from `diffLines`).
+`src/client/checkpointctl.ts` is the controller behind "Changes: Set Checkpoint", "Changes: Since
+Checkpoint…" and "Changes: Clear Checkpoint"; `app.ts` only wires it to the existing endpoints and the
+palette's `pick()`. Enter opens a read-only diff tab (`Editor.openSinceDiff`) labelled "since HH:MM".
+
+| Finding | Fix |
+| --- | --- |
+| A server checkpoint would have needed the first state-setting route and blobs git cannot keep without writing | The checkpoint is client-only, in memory, read through existing GET endpoints; it is lost on reload |
+| A path in neither `texts` nor `skipped` has no stored text | It means unchanged from the checkpoint's HEAD; its text is read at the checkpoint's `rev` |
+| A path that is no longer changed would look deleted | It reverts to its base text (the text at the checkpoint's `rev`) |
+| Binary and unreadable files cannot be compared | They are skipped and counted in the toast, never put in the comparison |
+| The line counts depend on how a trailing newline splits | The rule drops one final empty element, pinned with examples; `old === now` is compared on strings, so a trailing-newline-only change is kept with 0/0 counts |
+| A rename whose new path was binary or unreadable lost the old path's deletion | A rename is a delete plus an add: the old path is recorded as deleted before the new one is read |
+| Clear Checkpoint during an in-flight Set was undone when the listing resolved | Clear bumps a generation and the late result is dropped |
+| A failed base read left an unhandled rejection and no message | Since Checkpoint resolves and says it could not compare |
+| Since tabs could be re-pointed by git events, stepping or reloads | The since tab is not tied to Changes: no re-pointing, no stepping, no reloads, no position |
+| The Changes summary was rebuilt with innerHTML, replacing the `ch-riskcount` live region so screen readers might not announce the new count | The summary elements are created once; the render updates only their text and the `ch-riskcount` element persists |
+
+
+## 31. Round 22: next unreviewed file
+
+A panel of four picked the next feature. Next/Previous Unreviewed Changed File got 4 of 4 votes this time
+(agent-workflow #1, UX #1, navigation #2, git/security #3) and 3 in panel 4; S1 got 3 votes.
+A repository trust report got a first place (git/security). Go to Definition got a first place for the fifth time
+(navigation). Votes for content-based risk hints: 2.
+
+The search is pure: `nextUnreviewed` in `changes.ts` walks the paths from the current file, wrapping, and
+checks the current file last. `ChangesView.stepUnreviewed` and `unreviewedCount` use the same `seenKey` rule
+as the dimmed rows. `src/client/unreviewed.ts` holds the two palette commands and `runUnreviewed`, which
+announces through the live region (no toast); `unreviewedKey` in `keys.ts` routes Alt+F6 and Alt+Shift+F6
+and is `null` in the terminal. `app.ts` is glue. The checkpoint fix (S1) is `checkpointText` in
+`checkpointctl.ts`: `api.ts` throws an `ApiError` with the HTTP status, and a 404 while reading a file for a
+checkpoint means it vanished (recorded as deleted); every other failure stays skipped. The server answers a
+uniform 404 for a symlink that leaves the root too, so a listing entry whose newMode is 120000 (a symlink)
+is never recorded as deleted: its 404 is skipped.
+
+| Finding | Fix |
+| --- | --- |
+| Stepping with the diff's buttons visited reviewed rows | `stepUnreviewed` goes only to rows that are not reviewed, and returns `null` when none is left |
+| Reviewed was only visual (a dimmed row) | A reviewed row carries a visually hidden ", reviewed" text, so its accessible name says so |
+| The unreviewed search could be wrong at the ends or when everything is reviewed | It is pure (`nextUnreviewed`), wraps, checks the current file last and returns -1 when all are reviewed |
+| The stepping start was first tied to the private keyboard selection, which tests and other callers could not set | The current file is the one whose diff is open (`setCurrent`) |
+| The hidden ", reviewed" text first sat before the directory, so nested rows read "name, reviewed dir" | It follows the directory span: "name dir, reviewed" |
+| One scenario test reused a view where the expected file was already reviewed | The test uses a fresh view and records the step again |
+| A key could fire inside the terminal, which keeps Alt combinations | Routing goes through `unreviewedKey`, which is `null` when the focus is in the terminal |
+| A toast would be missed by screen readers and cover the diff | The result is announced through the polite live region as "path, N unreviewed left"; no toast |
+| A file that vanished while a checkpoint was taken was recorded as skipped instead of deleted | `api.ts` throws `ApiError` with the status; `checkpointText` maps a 404 to deleted (null) and other failures to skipped |
+| The server's uniform 404 for a symlink leaving the root made `checkpointText` record such a symlink as deleted | The controller skips a symlink entry (newMode 120000) whose read gives null; only a non-symlink 404 means vanished, and the server's 404 stays uniform |

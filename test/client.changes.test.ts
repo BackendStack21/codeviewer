@@ -351,3 +351,205 @@ describe("ChangesView.ready", () => {
     expect(t.v.files).toEqual([]);
   });
 });
+
+describe("risk flags in the Changes view", () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+  });
+
+  async function load(files: ChangeFile[]) {
+    const m = mockFetch(() => Response.json(data(files)));
+    restore = m.restore;
+    const v = new C.ChangesView({ debounce: 0 });
+    const el = v.el as unknown as FakeElement;
+    v.setRepo(true);
+    await v.refresh();
+    return { v, list: el.querySelector(".ch-list")!, summary: el.querySelector(".ch-summary-wrap")! };
+  }
+
+  const attrs = (tag: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const m of tag.matchAll(/([\w-]+)="([^"]*)"/g)) out[m[1]!] = m[2]!;
+    return out;
+  };
+  /** The rows of the rendered list as HTML strings (rows contain no nested divs). */
+  const rowsOf = (html: string) => html.split('<div class="ch-row').slice(1).map((r) => '<div class="ch-row' + r.split("</div>")[0] + "</div>");
+  /** Badge elements of a row: attributes, text and the offset in the row. */
+  const badges = (row: string) =>
+    [...row.matchAll(/<(\w+)([^>]*)>([^<]*)<\/\1>/g)]
+      .map((m) => ({ attrs: attrs(m[2]!), text: m[3]!, at: m.index! }))
+      .filter((b) => (b.attrs.class ?? "").split(/\s+/).includes("risk"));
+  const rowFor = (html: string, path: string) => rowsOf(html).find((r) => attrs(r.match(/^<div[^>]*>/)![0]).title?.startsWith(path + " ·"));
+
+  test("flags(path) reports the computed flags of a listed row", async () => {
+    const t = await load([
+      f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }),
+      f("package-lock.json", "M", 2, 1),
+      f("plain.txt", "M"),
+    ]);
+    expect(t.v.flags("a.sh")).toEqual(["exec"]);
+    expect(t.v.flags("package-lock.json")).toEqual(["lockfile"]);
+    expect(t.v.flags("plain.txt")).toEqual([]);
+    expect(t.v.flags("nope")).toEqual([]);
+  });
+
+  test("a flagged row has a badge after the path with text, title and aria-label", async () => {
+    const t = await load([f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" })]);
+    const row = rowFor(t.list.innerHTML, "a.sh")!;
+    expect(row).toBeDefined();
+    const all = badges(row);
+    expect(all.length).toBe(1);
+    const [b, ...rest] = all;
+    expect(rest).toEqual([]);
+    expect(b!.text).toBe("exec");
+    expect(b!.attrs.title).toBe("executable bit added");
+    expect(b!.attrs["aria-label"]).toBe("executable bit added");
+    expect(b!.at).toBeGreaterThan(row.indexOf('class="ch-name"'));
+  });
+
+  test("every flag has its visible text, and multiple flags keep union order", async () => {
+    const cases: Array<[ChangeFile, string[], string[]]> = [
+      [f("l", "A", 1, 0, { oldMode: "000000", newMode: "120000" }), ["symlink"], ["new symbolic link"]],
+      [f(".github/workflows/ci.yml", "M"), ["CI"], ["CI configuration"]],
+      [f(".husky/pre-commit", "M"), ["hook"], ["git hook"]],
+      [f("yarn.lock", "M"), ["lock"], ["dependency lockfile"]],
+      [f("Dockerfile", "M"), ["manifest"], ["package manifest or build file"]],
+      [f(".env.local", "M"), ["env"], ["environment or registry configuration"]],
+      [f(".github/workflows/deploy.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }), ["exec", "CI"], ["executable bit added", "CI configuration"]],
+      [f(".husky/.env", "M"), ["hook", "env"], ["git hook", "environment or registry configuration"]],
+    ];
+    for (const [file, texts, labels] of cases) {
+      const t = await load([file]);
+      restore?.();
+      restore = null;
+      const bs = badges(rowFor(t.list.innerHTML, file.path)!);
+      expect(bs.map((b) => b.text)).toEqual(texts);
+      expect(bs.map((b) => b.attrs.title)).toEqual(labels);
+      expect(bs.map((b) => b.attrs["aria-label"])).toEqual(labels);
+    }
+  });
+
+  test("hostile paths are escaped, badges included", async () => {
+    const evil = '.husky/<img src=x onerror=1>"q".sh';
+    const t = await load([f(evil, "A", 1, 0, { oldMode: "000000", newMode: "100755" }), f('Dockerfile.<b>"x"', "M")]);
+    const html = t.list.innerHTML;
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;img src=x onerror=1&gt;");
+    const row = rowsOf(html).find((r) => r.includes("&lt;img"))!;
+    expect(badges(row).map((b) => b.text)).toEqual(["exec", "hook"]);
+    // Attribute values are closed strings (the path's quotes are entities) and no attribute is named onerror.
+    for (const r of rowsOf(html)) {
+      const tag = r.match(/<div[^>]*>/)![0];
+      expect(Object.keys(attrs(tag))).not.toContain("onerror");
+      expect(tag.replace(/<div|>$/g, "").replace(/\s[\w-]+="[^"]*"/g, "").trim()).toBe("");
+    }
+    expect(attrs(rowsOf(html).find((r) => r.includes("&lt;img"))!.match(/<div[^>]*>/)![0]).title).toContain("&quot;q&quot;");
+  });
+
+  test("summary appends the flagged count only when rows are flagged", async () => {
+    const t = await load([
+      f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }),
+      f("package.json", "M"),
+      f("plain.txt", "M"),
+    ]);
+    expect(t.summary.innerHTML).toContain("· 2 flagged");
+    expect(t.summary.innerHTML.match(/flagged/g)!.length).toBe(1);
+    // The count is announced by the persistent .ch-riskcount element, not by the wrapper.
+    expect(t.summary.getAttribute("role")).toBeNull();
+    expect(t.summary.innerHTML.match(/role="status"/g)!.length).toBe(1);
+    const none = await load([f("plain.txt", "M"), f("b.ts", "M", 1, 0, { oldMode: "100644", newMode: "100644" })]);
+    expect(none.summary.innerHTML).not.toContain("flagged");
+    expect(none.summary.getAttribute("role")).toBeNull();
+    expect(none.summary.innerHTML.match(/role="status"/g)!.length).toBe(1);
+  });
+
+  test("Part B: the live region is the persistent ch-riskcount element, outside ch-counts", async () => {
+    const flaggedT = await load([f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" }), f("package.json", "M"), f("plain.txt", "M")]);
+    const none = await load([f("plain.txt", "M")]);
+    for (const t of [flaggedT, none]) {
+      const html = t.summary.innerHTML;
+      expect(t.summary.getAttribute("role")).toBeNull();
+      expect(t.summary.getAttribute("aria-live")).toBeNull();
+      expect(html).not.toContain("aria-live");
+      expect(html.match(/role="status"/g)!.length).toBe(1);
+      const tag = html.match(/<[^>]*role="status"[^>]*>/)![0];
+      expect(tag).toContain('class="ch-riskcount"');
+      // A sibling of .ch-counts inside .ch-summary: not within the .ch-counts element.
+      const start = html.indexOf('<span class="ch-counts"');
+      expect(start).toBeGreaterThan(-1);
+      const riskAt = html.indexOf('class="ch-riskcount"');
+      let depth = 0, end = -1;
+      for (const m of html.slice(start).matchAll(/<(\/?)span\b/g)) {
+        depth += m[1] ? -1 : 1;
+        if (depth === 0) { end = start + m.index! + "</span>".length; break; }
+      }
+      expect(end).toBeGreaterThan(start);
+      expect(riskAt).toBeGreaterThanOrEqual(end);
+      expect(html.slice(start, end)).not.toContain("ch-riskcount");
+    }
+    expect(flaggedT.summary.innerHTML).toContain('<span class="ch-riskcount" role="status">· 2 flagged</span>');
+    expect(none.summary.innerHTML).toContain('<span class="ch-riskcount" role="status"></span>');
+  });
+
+  test("Part B: ch-riskcount stays at the same markup position when the flagged count changes", async () => {
+    const a = await load([f("a.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755" })]);
+    const b = await load([f("plain.txt", "M")]);
+    // Same neighbours in both renders: right after .ch-counts and right before .ch-vs.
+    for (const t of [a, b]) {
+      expect(t.summary.innerHTML).toMatch(/<\/span><span class="ch-riskcount" role="status">[^<]*<\/span><span class="ch-vs">/);
+    }
+    expect(a.summary.innerHTML).toContain("· 1 flagged");
+    expect(b.summary.innerHTML).not.toContain("flagged");
+  });
+
+  test("Part B: styles keep ch-riskcount from shrinking and ch-counts ellipsised; DESIGN.md has the round", () => {
+    const css = require("node:fs").readFileSync(`${import.meta.dir}/../src/client/styles.css`, "utf8") as string;
+    const rule = (sel: string) => [...css.matchAll(new RegExp(`(?:^|\\n)${sel.replace(".", "\\.")}\\s*\\{([^}]*)\\}`, "g"))].map((m) => m[1]).join(" ");
+    expect(rule(".ch-riskcount")).toMatch(/flex-shrink:\s*0/);
+    expect(rule(".ch-riskcount")).not.toContain("ellipsis");
+    expect(rule(".ch-counts")).toContain("text-overflow: ellipsis");
+    const design = require("node:fs").readFileSync(`${import.meta.dir}/../DESIGN.md`, "utf8") as string;
+    expect(design).toContain("## 29. Round 20: hidden characters");
+    const sec = design.slice(design.indexOf("## 29. Round 20"));
+    expect(sec).toMatch(/hidden characters[^\n]*4 votes|4 votes[^\n]*hidden/i);
+    expect(sec).toContain("| Finding | Fix |");
+  });
+
+  test("a row with hidden characters has the hidden badge, and the summary counts it once", async () => {
+    const t = await load([
+      f("notes.md", "M", 1, 0, { hidden: 3 }),
+      f("plain.txt", "M"),
+      f("run.sh", "A", 1, 0, { oldMode: "000000", newMode: "100755", hidden: 1 }),
+    ]);
+    const row = rowFor(t.list.innerHTML, "notes.md")!;
+    expect(row).toBeDefined();
+    expect(row).toContain(
+      '<span class="risk risk-hidden" title="hidden or invisible characters" aria-label="hidden or invisible characters">hidden</span>',
+    );
+    expect(badges(row).map((b) => b.text)).toEqual(["hidden"]);
+    expect(badges(row)[0]!.at).toBeGreaterThan(row.indexOf('class="ch-name"'));
+    expect(badges(rowFor(t.list.innerHTML, "run.sh")!).map((b) => b.text)).toEqual(["exec", "hidden"]);
+    expect(badges(rowFor(t.list.innerHTML, "plain.txt")!)).toEqual([]);
+    expect(t.summary.innerHTML).toContain("· 2 flagged");
+    const one = await load([f("notes.md", "M", 1, 0, { hidden: 1 }), f("plain.txt", "M")]);
+    expect(one.summary.innerHTML).toContain("· 1 flagged");
+    expect(t.v.flags("notes.md")).toEqual(["hidden"]);
+  });
+
+  test("flags do not reorder rows, and an unflagged row renders as before", async () => {
+    const files = [f("z.ts", "M", 10, 2), f("package.json", "M"), f("a.ts", "M", 1, 0, { oldMode: "100644", newMode: "100644" })];
+    const t = await load(files);
+    expect(t.v.files.map((x) => x.path)).toEqual(["a.ts", "package.json", "z.ts"]);
+    const titles = rowsOf(t.list.innerHTML).map((r) => attrs(r.match(/<div[^>]*>/)![0]).title);
+    expect(titles).toEqual(["a.ts · Modified", "package.json · Modified", "z.ts · Modified"]);
+    expect(rowsOf(t.list.innerHTML)[0]).toBe(
+      '<div class="ch-row git-M" data-i="0" id="ch-0" role="option" aria-selected="false" title="a.ts · Modified">' +
+        '<span class="gbadge">M</span><span class="ch-name">a.ts</span><span class="ch-dir"></span>' +
+        '<span class="ch-add">+1</span><span class="ch-del"></span></div>',
+    );
+    expect(badges(rowsOf(t.list.innerHTML)[0]!)).toEqual([]);
+  });
+});

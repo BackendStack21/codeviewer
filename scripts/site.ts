@@ -110,7 +110,7 @@ const fileName = (id: string) => `<code data-name="${id}">${esc(placeholder(id))
 const FEATURES: [string, string, string][] = [
   ["terminal", "A real terminal, built in", "A native PTY and a from-scratch xterm-grade emulator: truecolor, mouse, alternate screen, bracketed paste and crisp box drawing. Run Claude Code, Codex, aider, vim or htop right next to the code, and hand the agent a <code>path:12-40</code> reference: <kbd>⌥⌘C</kbd> copies it, the palette types it at the prompt."],
   ["live", "Live while agents work", "Files reload in place as they change on disk. Changed lines flash, the explorer marks them, and nothing you are reading jumps."],
-  ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, a Changes view that lists every file the branch touched as read-only diffs, and the history of any file, one commit at a time. It never writes to your repository."],
+  ["git", "Git, read-only", "Status letters in the explorer, gutter markers against HEAD with a peek at the old lines, inline blame, branch, ahead/behind and merge state, a Changes view that lists every file the branch touched as read-only diffs, flags risky edits and hidden characters, steps through what you have not reviewed yet and shows what changed since a checkpoint, and the history of any file, one commit at a time. It never writes to your repository."],
   ["fast", "Fast at any size", "Virtualized everything: 100k-line files open instantly, quick-open searches 200k paths as you type, and the terminal streams megabytes per second."],
   ["lock", "Locked down", "The window can only reach its own local server. Header-token auth, DNS-rebinding and CSRF guards, read-only file access with symlink containment, git hardened against hostile repositories and signed updates. Reviewed adversarially, round after round."],
   ["native", "Native and small", "A small native Mac app on the system WebKit, with real menus, window tabs and a folder picker. Built with Bun and TypeScript and zero third-party dependencies, so there is no supply chain to audit but this repository."],
@@ -159,8 +159,8 @@ const TOUR: Chapter[] = [
       {
         shot: "quick-open",
         title: "Go to file",
-        body: "Fuzzy-matches file names first, then whole paths. Type <code>path:line</code> to land on a line; an empty box lists recent files.",
-        keys: ["⌘P"],
+        body: "Fuzzy-matches file names first, then whole paths. Type <code>path:line</code> to land on a line; an empty box lists recent files. After any jump, <kbd>⌃-</kbd> takes you back to where you were and <kbd>⌃⇧-</kbd> forward again (Ctrl+Alt+- and Ctrl+Shift+- on Linux).",
+        keys: ["⌘P", "⌃- / ⌃⇧-"],
         alt: "Go to file with “ca” typed, listing cache.ts, cache.test.ts and other matches with the matched letters highlighted.",
       },
       {
@@ -175,7 +175,7 @@ const TOUR: Chapter[] = [
         title: "Command palette",
         body: "Every command with its shortcut: terminals, panels, theme, font size, git, references, updates. The same box takes <code>&gt;</code> for commands, <code>:</code> for a line and <code>@</code> for symbols.",
         keys: ["⌘⇧P"],
-        alt: "The command palette filtered by “git”: Next Change, Show Changes, File History, Previous Change, Peek HEAD on Current Line, Compare With Base Branch / HEAD and Toggle Automatic Update Checks, with their shortcuts.",
+        alt: "The command palette filtered by “changes”: Set Checkpoint, Since Checkpoint…, Show Changes, Clear Checkpoint, Next and Previous Unreviewed File and Clear Change Markers, with their shortcuts.",
       },
       {
         shot: "find",
@@ -244,11 +244,23 @@ const TOUR: Chapter[] = [
     lead: {
       shot: "changes",
       title: "Review the branch",
-      body: "Lists every file the branch touched since it left <code>main</code>, or only what is uncommitted, with <code>+/−</code> counts. Each file opens as a read-only diff. <kbd>⌥F5</kbd> walks hunk by hunk and on to the next file, and reviewed files dim until they change again.",
-      keys: ["⌘⇧G", "⌥F5 / ⌥⇧F5"],
+      body: "Lists every file the branch touched since it left <code>main</code>, or only what is uncommitted, with <code>+/−</code> counts. Each file opens as a read-only diff. <kbd>⌥F5</kbd> walks hunk by hunk and on to the next file. Reviewed files dim until they change again, and <kbd>⌥F6</kbd> skips straight to the next file you have not reviewed.",
+      keys: ["⌘⇧G", "⌥F5 / ⌥⇧F5", "⌥F6 / ⌥⇧F6"],
       alt: "The Changes view comparing the branch with main: six files with their status letters and line counts, and cache.ts open as a unified diff with added and removed lines.",
     },
     items: [
+      {
+        shot: "flags",
+        title: "Risk flags and hidden characters",
+        body: "Badges mark the edits worth a second look: an executable bit or symlink, CI workflows, git hooks, lockfiles, manifests, <code>.env</code> and registry files, and invisible Unicode (zero-width, tag and variation characters, bidi controls). The code view outlines each hidden character in place, and <b>Go to Next Hidden Character</b> walks them. Hints, never a verdict.",
+        alt: "The Changes view with 4 flagged files: deploy.yml in .github/workflows marked CI, package.json manifest, router.ts hidden and server.ts exec. router.ts is open on a comment that ends in a red marker where invisible tag characters hide text.",
+      },
+      {
+        shot: "checkpoint",
+        title: "Changes since a checkpoint",
+        body: "<b>Changes: Set Checkpoint</b> remembers every uncommitted file. After the agent's next turn, <b>Since Checkpoint…</b> lists only what changed after that moment, each file opening as a diff from the checkpoint to now. Kept in memory only, never on disk.",
+        alt: "The list of changes since 06:33: src/cache.ts and src/router.ts modified and src/version.ts added, with their added and removed line counts.",
+      },
       {
         shot: "peek",
         title: "Peek at HEAD",

@@ -102,3 +102,40 @@ test("/api/git/base rejects anything but a full object id and malformed paths", 
   }
   expect((await get(base2, `/api/git/base?path=f.txt&rev=${mainOid}`)).status).toBe(404);
 });
+
+test("/api/git/changes carries oldMode/newMode per entry", async () => {
+  const { chmodSync, symlinkSync, writeFileSync } = await import("node:fs");
+  const d = await realpath(await mkdtemp(path.join(tmpdir(), "cv-httpmodes-")));
+  const sh = (...a: string[]) => {
+    const r = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: d, stderr: "pipe", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } });
+    if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+  };
+  let srv: ReturnType<typeof startServer> | undefined;
+  try {
+    writeFileSync(path.join(d, "a.sh"), "echo\n");
+    writeFileSync(path.join(d, "gone.txt"), "bye\n");
+    sh("init", "-q", "-b", "main");
+    sh("add", ".");
+    sh("commit", "-q", "-m", "init");
+    chmodSync(path.join(d, "a.sh"), 0o755);
+    sh("rm", "-q", "gone.txt");
+    writeFileSync(path.join(d, "added.txt"), "x\n");
+    sh("add", "added.txt");
+    writeFileSync(path.join(d, "u.sh"), "#!/bin/sh\n");
+    chmodSync(path.join(d, "u.sh"), 0o755);
+    symlinkSync("a.sh", path.join(d, "u-link"));
+    srv = startServer({ root: d, port: 0, host: "127.0.0.1", shell: "/bin/sh", token, openExternal: () => {} });
+    const b = srv.url.split("/#")[0]!;
+    const j = (await (await get(b, "/api/git/changes?scope=head")).json()) as { files: { path: string; oldMode?: string; newMode?: string }[] };
+    const f = Object.fromEntries(j.files.map((x) => [x.path, x]));
+    expect([f["a.sh"]!.oldMode, f["a.sh"]!.newMode]).toEqual(["100644", "100755"]);
+    expect([f["added.txt"]!.oldMode, f["added.txt"]!.newMode]).toEqual(["000000", "100644"]);
+    expect([f["gone.txt"]!.oldMode, f["gone.txt"]!.newMode]).toEqual(["100644", "000000"]);
+    expect(f["u.sh"]!.newMode).toBe("100755");
+    expect(f["u.sh"]!.oldMode).toBeUndefined();
+    expect(f["u-link"]!.newMode).toBe("120000");
+  } finally {
+    srv?.stop();
+    await rm(d, { recursive: true, force: true });
+  }
+});
