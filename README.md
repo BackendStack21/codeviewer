@@ -200,6 +200,9 @@ The server binds to localhost and serves a shell. It was hardened through an adv
   - A throwaway profile, locked to the window's own server port.
   - External links open in your default browser.
   - Terminal clipboard writes always show a notice.
+- **Hidden characters:** the code view marks zero-width, tag and variation characters and bidi
+  controls in place, and Changes counts them per changed file (regular files up to 1 MiB, 32 MiB per
+  listing). Like the other risk flags, a hint, not a verdict.
 - **Markdown:** repository files are untrusted. The preview never uses `innerHTML`, shows no raw HTML,
   filters link schemes and loads no remote images (the CSP is unchanged).
 - **Terminals:** the shell gets a narrow token that only lets `codeviewer open` ask the viewer to show

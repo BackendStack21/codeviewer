@@ -49,7 +49,7 @@ export const SHOTS: Shot[] = [
   {
     name: "commands",
     tabs: ["src/router.ts"],
-    steps: [s(`mod('p', { shiftKey: true }); const i = await until(() => visible('.palette-input')); typeInto(i, '>git');`, 500)],
+    steps: [s(`mod('p', { shiftKey: true }); const i = await until(() => visible('.palette-input')); typeInto(i, '>changes');`, 500)],
     crop: `return rect('.palette', 0);`,
   },
   {
@@ -82,6 +82,40 @@ export const SHOTS: Shot[] = [
       s(`await until(() => visible('.diffview .dr-add')); key('F5', { altKey: true }, document.body);`, 600),
     ],
     crop: `return box(0, 0, 1280, 640);`,
+  },
+  {
+    // Risky edits made from the terminal: a new CI workflow, chmod +x, a manifest change, and a
+    // comment carrying invisible Unicode tag characters (escaped here: no raw ones in the source).
+    name: "flags",
+    tabs: ["src/router.ts"],
+    layout: { panel: true, panelSize: { bottom: 250, right: 560 } },
+    term: [
+      `mkdir -p .github/workflows && printf 'name: deploy\\non: push\\n' > .github/workflows/deploy.yml`,
+      `chmod +x src/server.ts && perl -pi -e 's/"0.4.0"/"0.5.0"/' package.json`,
+      String.raw`perl -CSD -pi -e 's{^(\s*)(routes\.set\("DELETE)}{$1 . "// Clears finished jobs." . join("", map { chr(0xE0000 + ord) } split //, "skip review") . "\n" . $1 . $2}e' src/router.ts`,
+    ],
+    steps: [
+      s(`mod('j');`, 400),
+      s(`mod('g', { shiftKey: true }); await until(() => visible('.ch-row .risk'));`, 900),
+      s(`await cmd('Go to Next Hidden Character');`, 900),
+    ],
+    crop: `return box(0, 0, 1280, Math.round(lineEl(24).getBoundingClientRect().bottom + 1));`,
+  },
+  {
+    // Set a checkpoint, let the terminal change two files and add one, then list what changed since.
+    name: "checkpoint",
+    tabs: ["src/router.ts"],
+    layout: { panel: true, panelSize: { bottom: 250, right: 560 } },
+    steps: [
+      s(`await until(() => $$('.term-input').length); await sleep(1200); await cmd('Changes: Set Checkpoint');`, 1500),
+      s(`const t = $$('.term-input').at(-1); t.focus(); const dt = new DataTransfer();
+         dt.setData('text/plain', ${JSON.stringify(
+           String.raw`perl -pi -e 's/1-64/1-128/; s/> 64/> 128/' src/router.ts && perl -pi -e 's/Removes every entry\./Removes every entry; the next get misses./' src/cache.ts && printf 'export const VERSION = "0.5.0";\n' > src/version.ts`,
+         )});
+         t.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); key('Enter', {}, t);`, 1800),
+      s(`await cmd('Since Checkpoint'); await until(() => visible('.pal-item'));`, 700),
+    ],
+    crop: `return rect('.palette', 0);`,
   },
   {
     name: "peek",
