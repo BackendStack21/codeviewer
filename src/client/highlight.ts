@@ -269,17 +269,19 @@ export const LANG_IDS: readonly string[] = Object.keys(LANGS);
 
 export function languageFor(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-  if (NAMES[base]) return NAMES[base]!;
+  // Own keys only: `constructor` and `x.__proto__` are plain text, not Object.prototype members.
+  if (Object.hasOwn(NAMES, base)) return NAMES[base]!;
   if (base.startsWith("dockerfile")) return "docker";
   if (base.startsWith(".env")) return "sh";
   const dot = base.lastIndexOf(".");
-  return (dot >= 0 && EXT[base.slice(dot + 1)]) || "text";
+  return (dot >= 0 && Object.hasOwn(EXT, base.slice(dot + 1)) && EXT[base.slice(dot + 1)]) || "text";
 }
 
 export function languageName(id: string): string {
   return LANGS[id]?.name ?? "Plain Text";
 }
 
+const RUST_CHAR = /'(?:\\(?:u\{[0-9a-fA-F_]{1,8}\}|x[0-9a-fA-F]{2}|[^ux])|[\ud800-\udbff][\udc00-\udfff]|[^\\'])'/y;
 const NUM = /0[xX][\da-fA-F_]+n?|0[bB][01_]+n?|0[oO][0-7_]+n?|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?[a-zA-Z%]*/y;
 const IDENT = /[A-Za-z_$À-￿][\w$À-￿]*[?!]?/y;
 const CSS_IDENT = /-?-?[A-Za-z_][\w-]*/y;
@@ -292,6 +294,50 @@ export type Span = [number, number, Tok];
  * 201 = markdown fence, 202 = inside a markup tag.
  */
 export function lexLine(langId: string, text: string, state: number, out: Span[]): number {
+  return langId === "sh" ? lexShell(text, state, out) : lexCore(langId, text, state, out);
+}
+
+/** Here-document delimiters seen so far: a line's state is HEREDOC + the index of its delimiter. */
+const HEREDOC = 1000;
+const HEREDOC_MAX = 4096;
+const heredocs: string[] = [];
+const heredocIds = new Map<string, number>();
+const HEREDOC_OPEN = /<<(-?)[ \t]*(?:(["'])([^"'\s]{1,80})\2|\\?([A-Za-z_][\w.-]{0,79}))/g;
+
+/**
+ * Shell: the body of a here-document is text up to its delimiter line. Lexed as code, an
+ * apostrophe in it opened a string that swallowed the rest of the file.
+ */
+function lexShell(text: string, state: number, out: Span[]): number {
+  if (state >= HEREDOC) {
+    const key = heredocs[state - HEREDOC] ?? "";
+    const dash = key[0] === "-";
+    if ((dash ? text.replace(/^\t+/, "") : text) === key.slice(1)) return 0;
+    if (text.length) out.push([0, text.length, "s"]);
+    return state;
+  }
+  const next = lexCore("sh", text, state, out);
+  if (next !== 0 || !text.includes("<<")) return next;
+  HEREDOC_OPEN.lastIndex = 0;
+  for (let m; (m = HEREDOC_OPEN.exec(text)); ) {
+    const at = m.index;
+    // Not `<<<` (a here-string), not inside a comment or a string, not a shift in `(( ))`.
+    if (text[at - 1] === "<" || text[at + 2] === "<") continue;
+    if (out.some(([a, b]) => a < at && at < b) || out.some(([a, b, k]) => k === "c" && a <= at && at < b)) continue;
+    if (text.lastIndexOf("((", at) > text.lastIndexOf("))", at)) continue;
+    const key = (m[1] ? "-" : " ") + (m[3] ?? m[4]!);
+    let id = heredocIds.get(key);
+    if (id === undefined) {
+      if (heredocs.length >= HEREDOC_MAX) return 0; // table full: lexed as before
+      id = heredocs.push(key) - 1;
+      heredocIds.set(key, id);
+    }
+    return HEREDOC + id;
+  }
+  return 0;
+}
+
+function lexCore(langId: string, text: string, state: number, out: Span[]): number {
   const L = LANGS[langId];
   if (!L || langId === "text") return 0;
   if (L.special === "markup") return lexMarkup(text, state, out);
@@ -357,7 +403,8 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
     }
     if (L.line) {
       for (const lc of L.line) {
-        if (text.startsWith(lc, i) && !(lc === "#" && L.css)) {
+        // A block opener that starts with the line marker wins (Lua's `--[[` is not a `--` comment).
+        if (text.startsWith(lc, i) && !(lc === "#" && L.css) && !L.block?.some(([open]) => open.length > lc.length && text.startsWith(open, i))) {
           // "#" only starts a comment at a word boundary (so "a#b" in shell is not one)
           if (lc === "#" && i > 0 && !/[\s;|&(]/.test(text[i - 1]!) && L.dollarVars) break;
           out.push([i, n, "c"]);
@@ -385,6 +432,16 @@ export function lexLine(langId: string, text: string, state: number, out: Span[]
       if (end > 0) {
         out.push([i, end, "s"]);
         i = end;
+        continue;
+      }
+    }
+    // Rust char literals ('"', '\'', '\u{41}'): the quote inside one must not open a string that
+    // runs to the next `"`, lines away. A lifetime ('a) has no closing quote and does not match.
+    if (c === 39 && langId === "rs") {
+      RUST_CHAR.lastIndex = i;
+      if (RUST_CHAR.test(text)) {
+        out.push([i, RUST_CHAR.lastIndex, "s"]);
+        i = RUST_CHAR.lastIndex;
         continue;
       }
     }

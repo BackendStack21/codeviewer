@@ -312,6 +312,27 @@ test("/api/update/relaunch: only POST, only when available", async () => {
   expect((await get("/api/update/install")).status).toBe(405);
 });
 
+test("a page that reconnects after an install learns its outcome (the last update event is replayed)", async () => {
+  const saved = applyMode;
+  applyMode = "ok";
+  const first = await events();
+  try {
+    await fetch(`${base}/api/update/install`, { method: "POST", headers: json, body: "{}" });
+    await first.waitFor((m) => m.t === "update" && m.phase === "installed");
+  } finally {
+    first.ws.close();
+  }
+  // The socket dropped mid-install and comes back: without the replay the dialog stays on "Installing…".
+  const again = await events();
+  try {
+    const m = await again.waitFor((x) => x.t === "update");
+    expect(m).toMatchObject({ t: "update", phase: "installed", detail: "9.9.9", replay: true });
+  } finally {
+    again.ws.close();
+    applyMode = saved;
+  }
+});
+
 test("/api/settings: round-trip, validation, size limit, method check", async () => {
   expect(await (await get("/api/settings")).json()).toEqual({});
   const put = (body: string) => fetch(`${base}/api/settings`, { method: "PUT", headers: json, body });
@@ -360,6 +381,30 @@ test("/api/open validates the path and broadcasts to event sockets", async () =>
   } finally {
     ev.ws.close();
   }
+});
+
+test("/api/open broadcasts a canonical root-relative path, however the caller spelled it", async () => {
+  const post = (body: unknown) => fetch(`${base}/api/open`, { method: "POST", headers: json, body: JSON.stringify(body) });
+  const ev = await events();
+  try {
+    // The page keys tabs, the tree and git status by path: "./sub//b.ts" opened a second tab of sub/b.ts.
+    for (const spelled of ["./sub//b.ts", "sub/./b.ts", "sub/b.ts/"]) {
+      ev.msgs.length = 0;
+      expect((await post({ path: spelled })).status).toBe(200);
+      expect((await ev.waitFor((m) => m.t === "open")).path).toBe("sub/b.ts");
+    }
+  } finally {
+    ev.ws.close();
+  }
+});
+
+test("/api/git/between lists paths changed between two commits and validates the ids", async () => {
+  const head = git("rev-parse", "HEAD").stdout.toString().trim();
+  expect(await (await get(`/api/git/between?from=${head}&to=${head}`)).json()).toEqual({ paths: [], truncated: false });
+  expect((await (await get(`/api/git/between?to=${head}`)).json()).paths).toContain("a.txt");
+  expect((await get(`/api/git/between?from=HEAD&to=${head}`)).status).toBe(400);
+  expect((await get(`/api/git/between?from=${head}`)).status).toBe(400);
+  expect((await get(`/api/git/between?from=${head}&to=${"e".repeat(40)}`)).status).toBe(404);
 });
 
 test("unknown API paths and unknown websocket paths are 404", async () => {

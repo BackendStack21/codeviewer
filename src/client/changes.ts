@@ -184,6 +184,17 @@ export class ChangesView {
     if (this.visible || this.watching) this.schedule();
   }
 
+  /**
+   * Files written in the working tree (watcher paths; `many`: a burst too large to list). A reviewed
+   * file among them is unreviewed again: the status and line counts that "reviewed" is keyed on stay
+   * the same when an already changed line is rewritten.
+   */
+  onFilesChanged(paths: readonly string[], many = false) {
+    if (many) this.seen.clear();
+    else for (const p of paths) this.seen.delete(p);
+    this.onGitChanged();
+  }
+
   onShown() {
     this.visible = true;
     if (this.repo && this.stale) void this.refresh();
@@ -218,8 +229,11 @@ export class ChangesView {
         this.data = null;
         this.files = [];
       } else {
+        // The selection is a file, not a row number: rows shift when files join or leave the list.
+        const selected = this.files[this.sel]?.path;
         this.data = d;
         this.files = sortChanges(d.files);
+        if (selected !== undefined) this.sel = this.files.findIndex((f) => f.path === selected);
         for (const k of [...this.seen.keys()]) if (!this.files.some((f) => f.path === k)) this.seen.delete(k);
       }
     } catch {

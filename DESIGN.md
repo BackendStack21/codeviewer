@@ -1205,3 +1205,71 @@ is never recorded as deleted: its 404 is skipped.
 | A toast would be missed by screen readers and cover the diff | The result is announced through the polite live region as "path, N unreviewed left"; no toast |
 | A file that vanished while a checkpoint was taken was recorded as skipped instead of deleted | `api.ts` throws `ApiError` with the status; `checkpointText` maps a 404 to deleted (null) and other failures to skipped |
 | The server's uniform 404 for a symlink leaving the root made `checkpointText` record such a symlink as deleted | The controller skips a symlink entry (newMode 120000) whose read gives null; only a non-symlink 404 means vanished, and the server's 404 stays uniform |
+
+
+## 32. Round 23: bug and security sweep
+
+Four readers went through the code in parallel (server, terminal, Markdown and highlighter, client views),
+each proving a finding with a script before reporting it. Every fix below started as a failing test. No
+bypass of containment, auth, the link allow-list or the HTML rules was found; the security-relevant
+findings are places where a review aid under-reported (hidden characters) and two main-thread freezes on
+hostile file content.
+
+| Finding | Fix |
+| --- | --- |
+| Changes never flagged hidden characters in a UTF-16 file (it was scanned as UTF-8), though the viewer shows the file as text: a bidi override went unflagged | `decodeForScan` in `git.ts` decodes by BOM as `readForView` does |
+| Go to Next Hidden Character walked only the first 200 hits and wrapped: 200 zero-width decoys hid a later bidi override | `hiddennav.ts` scans with a cap of one million hits |
+| A Markdown paragraph of many `&` took seconds to parse (`decodeEntity` searched the rest of the paragraph for `;` each time; 1 MB: 6 s) | The search stops after the 12 characters an entity can span |
+| Go to Symbol backtracked on runs of NBSP, form feed or other `\s` the space collapse missed (180 ms a line) | Every whitespace run collapses to one space before matching |
+| The file index kept the files of a folder that was replaced by a file when the watcher reported one event | `FileIndex.apply` drops what is under any known folder that is no longer one |
+| `/api/open` broadcast the path as spelled (`./a//b`), which opened a second tab of the same file | The path is canonicalised before the broadcast |
+| ICH or insert mode in front of a wide character erased it (`Line.clear` read a stale WIDE flag in the gap) | `insertChars` blanks the gap cell by cell |
+| DCH ending inside a wide character left its second half alone at the cursor | The orphan half is blanked before the shift |
+| A combining mark or a ZWJ join on a cell past the used width was left out of copies and scrollback and survived recycling; a glyph after ZWJ joined a blank cell after a scroll or an erase | Both paths raise `hw`; the join requires the cell to still end with the ZWJ |
+| IND (`ESC D`, C1 0x84) kept a pending wrap, so the next character moved two rows and marked a soft wrap | IND clears it, as LF does |
+| Synchronized output (2026) left on held every later frame for a second | The mode is dropped when the one-second hold expires |
+| Lines waiting for the screen-reader log grew without bound while no frame ran (occluded window) | Only the newest are kept (twice the log limit at most) |
+| A reviewed file edited again with the same +/- counts stayed reviewed | The watcher's paths un-review their rows (`ChangesView.onFilesChanged`) |
+| The Changes keyboard selection was a row number: a refresh that inserted rows moved it to another file | The selection is remapped by path after each refresh |
+| A slow diff load that finished after a newer click made Changes mark the wrong file current and reviewed | `Editor.openDiff` resolves whether its tab is the one shown; `app.ts` only then calls `setCurrent` |
+| Since Checkpoint read a file that is no longer changed at the checkpoint's HEAD: after a commit it showed a diff back to the old content | The new side is read at the current HEAD (`baseNow`), the old side at the checkpoint's |
+| A file that is only a newline showed one deleted line against an identical HEAD | The base normalises a lone empty line to no lines, as the buffer does |
+| Next Change skipped a change on the first visible line of a fresh view, and stopped one line below a deletion's marker | The search starts above the top line when no line is active; a deletion targets its marked line |
+| A heading link did nothing when a diff tab of the same Markdown file came first | `revealFragment` picks the tab that has a preview |
+| Files named `constructor` or `x.__proto__` took an icon colour and a language from `Object.prototype` | Own-key lookups in `icons.ts` and `languageFor` |
+| Lua `--[[` was a line comment, so block comments never spanned lines | A block opener that starts with the line marker wins |
+| A Rust char literal holding a quote (`'"'`) opened a string that inverted the rest of the file | Char literals are consumed before strings |
+| Fences tagged `javascript`, `python`, `rust` or in upper case were not highlighted | The tag is lowercased and a small alias table maps names to extensions |
+
+A second pass took the findings the first one had only reproduced:
+
+| Finding | Fix |
+| --- | --- |
+| Since Checkpoint missed a file that was clean at the checkpoint and edited and committed afterwards (it is in neither uncommitted listing) | `Git.between` and `GET /api/git/between` list the paths that differ between two commits (full object ids only, the viewed folder only); the controller adds them when HEAD moved and reads both sides at their commits |
+| Back from a tab chosen by hand overwrote the entry it left, so the last jump target was lost | `NavHistory.back` appends that file as a new last entry and returns to the recorded one; `forward` overwrites nothing |
+| Palette match positions shifted after a character whose lower case is longer (`\u0130`), and a match on an astral character was drawn as two lone halves | `lowerSameLength` keeps positions aligned; the highlight walks code points |
+| A reload that failed after a newer one succeeded marked the tab deleted | The failure path checks the load generation, like the success path |
+| An earlier `open` finishing late moved the tree selection to a file that is not shown | `openFile` reveals only the active file |
+| `- [ ] 1. write tests` became a checkbox holding a nested list, `- [x] # x` a heading | `taskText` escapes a block start after the task marker: the rest is paragraph text (GFM) |
+| A multi-line setext heading lost its hard breaks | Lines keep their trailing spaces; only the end is trimmed |
+| `_https://example.com_` was not linked, though `*…*` was | An emphasis underscore before a bare URL is allowed unless it follows a word |
+| `safeHref` decoded entities the parser had already decoded (`a&amp;b` became `a&b`) | The URL is used as parsed; the decoded reading is still classified and must agree, so an entity-hidden scheme is refused as before |
+| DEL inside an escape or control sequence aborted or corrupted it | Ignored there, in the client parser and in the server's `ModeTracker` alike (the differential test feeds DEL to both) |
+| DECALN kept colours and WIDE flags, so every second `E` was not drawn | Cells are reset to plain |
+| Maximal REP on a large screen parsed at 22 s per megabyte, and the replay ring is parsed on each reattach | An ASCII repeat goes through `printAscii`: about a third of the time, same result (both compared in the tests). The rest is real work, a screenful of cells per sequence |
+| A burst of OSC 52 made one clipboard write and one toast per sequence | One write per batch of output, the last text |
+| A file name holding a newline became two bogus entries of the newline-separated index | Such names are left out of the index (search in a repository lists files through git and still finds them) |
+| Search globs written from the root (`./src/*.ts`, `/src/*.ts`) matched nothing | The prefix is dropped and the pattern is anchored at the root |
+
+A third pass closed what was left:
+
+| Finding | Fix |
+| --- | --- |
+| A shell here-document with an apostrophe in its body opened a string that ran to the next quote | `lexShell` keeps the body as text up to its delimiter line; the line state is 1000 plus the index of the delimiter in a small table. `<<<`, shifts inside `(( ))` and `<<` inside a string or comment open nothing |
+| Since Checkpoint skipped binary files, images and text files too large to read | With `describe` wired, such a file is compared by a one-line stand-in (size, modification time; `Binary file at commit …` for a committed side, from the 415 of `/api/git/base`) |
+| A tab after a quote marker was dropped: `>\t- a` was a paragraph, `>\t\tcode` lost its code block | `quoteRest` measures the whitespace at its real columns, one of which is the marker's space |
+| A page whose events socket dropped during an install stayed on "Installing…" | The server keeps the latest install event and sends it to every page that connects, marked `replay`; only a page that is still waiting acts on it |
+
+What stays: REP of a screenful on a very large screen is real work for every sequence (bounded by the
+screen size and the 512 KB replay ring), and a tracked blob over the 8 MB text limit reads as absent in
+Since Checkpoint.

@@ -1,6 +1,6 @@
 import { wsUrl } from "./auth.ts"; // first: installs the auth header on fetch
 import { api, type Info } from "./api.ts";
-import { CHECKPOINT_COMMANDS, CheckpointController, checkpointText } from "./checkpointctl.ts";
+import { CHECKPOINT_COMMANDS, CheckpointController, checkpointBase, checkpointText, describeFile } from "./checkpointctl.ts";
 import { Editor, type StatusInfo } from "./editor.ts";
 import { FileTree } from "./tree.ts";
 import { Palette, type Command, type PickItem } from "./palette.ts";
@@ -99,7 +99,9 @@ class App {
   private checkpoints = new CheckpointController({
     changes: () => api.gitChanges("head"),
     readText: (p) => checkpointText(() => api.file(p)),
-    baseText: (p, rev) => api.gitBase(p, rev),
+    baseText: (p, rev) => checkpointBase(() => api.gitBaseAt(p, rev), rev),
+    describe: (p) => describeFile(() => api.file(p)),
+    between: (from, to) => api.gitBetween(from, to),
     now: () => Date.now(),
     notify: (m) => this.notify(m),
     pick: (items, title) => this.palette.pick(items, title),
@@ -470,7 +472,8 @@ class App {
 
   private async openFile(path: string, opts: { pin?: boolean; line?: number; col?: number; len?: number; focus?: boolean } = {}) {
     await this.editor.open(path, opts);
-    void this.tree.reveal(path);
+    // Only the file on screen: an earlier open that finished later must not move the tree away.
+    if (this.editor.active?.path === path) void this.tree.reveal(path);
   }
 
   /** Opens a file as a jump the Back / Forward history remembers. */
@@ -532,7 +535,9 @@ class App {
 
   private async openDiff(f: ChangeFile, pin: boolean, focus = false) {
     const d = this.changes.data;
-    await this.editor.openDiff(f, { rev: d?.rev ?? null, vs: this.changes.vs }, { pin, focus });
+    // Only the diff on screen becomes current (and reviewed): an earlier click whose load finished
+    // later must not move the Changes cursor back to a file that is not shown.
+    if (!(await this.editor.openDiff(f, { rev: d?.rev ?? null, vs: this.changes.vs }, { pin, focus }))) return;
     this.changes.setCurrent(f.path);
     this.editor.setDiffPositions((p) => this.changes.position(p));
   }
@@ -911,8 +916,9 @@ class App {
           if (msg.structural) this.palette.invalidate();
           this.search.markStale(msg.paths, msg.many);
           // A second edit to an already modified file changes no status, so no git event follows:
-          // the Changes counts would stay stale (it debounces its own refresh).
-          this.changes.onGitChanged();
+          // the Changes counts would stay stale (it debounces its own refresh), and a file reviewed
+          // before this edit would stay dimmed.
+          this.changes.onFilesChanged(msg.paths, msg.many);
           if (msg.many) {
             void this.tree.reloadAll();
             this.editor.onChanged(this.editor.tabs.map((t) => t.path));
@@ -921,8 +927,8 @@ class App {
             this.editor.onChanged(msg.paths);
           }
         } else if (msg.t === "update") {
-          const m = msg as unknown as { phase: string; detail?: string; relaunch?: "native" | "server" | "manual" };
-          this.updates.onEvent(m.phase, m.detail, m.relaunch);
+          const m = msg as unknown as { phase: string; detail?: string; relaunch?: "native" | "server" | "manual"; replay?: boolean };
+          this.updates.onEvent(m.phase, m.detail, m.relaunch, m.replay);
         } else if (msg.t === "git" && msg.status) {
           this.git.set(msg.status as never);
         } else if (msg.t === "open" && msg.path) {

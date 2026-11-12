@@ -24,6 +24,9 @@ export interface HiddenNav {
   seen(line: number): void;
 }
 
+/** Hits kept for one walk (24 bytes each or so; a file of nothing but hidden characters stays bounded). */
+const MAX_HITS = 1_000_000;
+
 export function createHiddenNav(host: HiddenNavHost): HiddenNav {
   let line = 0; // 1-based position of the last jump (0: none yet)
   let col = 0;
@@ -49,7 +52,9 @@ export function createHiddenNav(host: HiddenNavHost): HiddenNav {
         col = p.col ?? (p.line === line ? col : 0);
         line = p.line;
       }
-      const hit: HiddenHit | undefined = lines ? nextHidden(scanHidden(lines.join("\n")).hits, line, col) : undefined;
+      // Every hit, not scanHidden's default first 200: behind 200 decoy zero-width characters a
+      // bidi override was never reached, the walk wrapped to the first hit instead.
+      const hit: HiddenHit | undefined = lines ? nextHidden(scanHidden(lines.join("\n"), MAX_HITS).hits, line, col) : undefined;
       if (!hit) return void host.toast("No hidden characters in this file");
       line = hit.line;
       col = hit.col;

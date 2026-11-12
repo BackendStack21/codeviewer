@@ -95,6 +95,17 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
     for (const ws of events) ws.send(s);
   };
 
+  /**
+   * The latest install event. Events are not queued for a page whose socket is down, so a page
+   * that reconnects gets this one again (marked `replay`): its dialog would otherwise wait on
+   * "Installing…" for an outcome that was already sent.
+   */
+  let lastUpdate: Record<string, unknown> | null = null;
+  const updateEvent = (msg: Record<string, unknown>) => {
+    lastUpdate = { t: "update", ...msg };
+    broadcast(lastUpdate);
+  };
+
   const gitReady = Git.open(opts.root).then((g) => {
     g?.watch((status) => broadcast({ t: "git", status }));
     return g;
@@ -459,6 +470,15 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           return json({ repo: true, ...(await g.changes(url.searchParams.get("scope") === "head" ? "head" : "branch")) });
         }
 
+        case "/api/git/between": {
+          // Paths that differ between two commits (full object ids; no `from`: the empty tree).
+          const from = url.searchParams.get("from");
+          const to = url.searchParams.get("to") ?? "";
+          if ((from !== null && !isOid(from)) || !isOid(to)) return fail(400, "bad rev");
+          const list = await (await gitReady)?.between(from, to);
+          return list ? json(list) : fail(404, "no such commits");
+        }
+
         case "/api/git/base": {
           // HEAD version of a file, for gutter diffs. 404 = not tracked at HEAD.
           // `rev` (a full object id from /api/git/changes) reads the file as of that commit instead;
@@ -513,10 +533,10 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           if (updater.installing) return fail(409, "an update is already being installed");
           // Runs in the background; progress and the result arrive on the events socket.
           void updater
-            .apply((phase, detail) => broadcast({ t: "update", phase, detail }))
+            .apply((phase, detail) => updateEvent({ phase, detail }))
             .then(
-              (r) => broadcast({ t: "update", phase: "installed", detail: r.version, relaunch: r.kind === "macos-app" ? "native" : opts.relaunch?.available() ? "server" : "manual" }),
-              (e: Error) => broadcast({ t: "update", phase: "error", detail: e.message }),
+              (r) => updateEvent({ phase: "installed", detail: r.version, relaunch: r.kind === "macos-app" ? "native" : opts.relaunch?.available() ? "server" : "manual" }),
+              (e: Error) => updateEvent({ phase: "error", detail: e.message }),
             );
           return json({ ok: true });
         }
@@ -565,7 +585,10 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
           // resolve the parent, keeping the name as given (the file itself may not exist yet).
           const given = body.path;
           const abs = path.isAbsolute(given) ? path.join(await realpath(path.dirname(given)).catch(() => path.dirname(given)), path.basename(given)) : null;
-          const rel = abs !== null ? toRel(opts.root, abs) : given;
+          // Canonical spelling: the page keys tabs, the tree and git status by this path
+          // ("./a//b" opened a second tab of a/b).
+          const raw = abs !== null ? toRel(opts.root, abs) : given;
+          const rel = raw === null ? null : raw.split(SEP_RE).filter((seg) => seg && seg !== ".").join("/");
           const target = rel === null ? null : await resolveSafe(opts.root, rel);
           if (rel === null || !target) return fail(404, "path is outside the viewed directory");
           // Files only: the root itself, folders and FIFOs have nothing to open.
@@ -583,6 +606,7 @@ export function startServer(opts: ServeOptions): { server: Server<SocketData>; u
       open(ws) {
         if (ws.data.kind === "events") {
           events.add(ws);
+          if (lastUpdate) ws.send(JSON.stringify({ ...lastUpdate, replay: true }));
           if (!firstClient) {
             firstClient = true;
             opts.onFirstClient?.();

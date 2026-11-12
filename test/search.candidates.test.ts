@@ -246,3 +246,10 @@ describe("GET /api/search candidates (AC-11, AC-12, AC-13, AC-26)", () => {
     await until(async () => !files((await fx.search({ q: "needle" })).events).some((f) => f.path === "gone.txt"));
   });
 });
+
+test("a glob written from the root (`./src/*.ts`, `/src/*.ts`) matches like `src/*.ts`", () => {
+  const all = ["src/a.ts", "src/deep/b.ts", "x.ts", "lib/src/c.ts"];
+  for (const g of ["./src/*.ts", "/src/*.ts", "src/*.ts"]) expect([g, S.filterByGlobs(all, [g], [])]).toEqual([g, ["src/a.ts"]]);
+  expect(S.filterByGlobs(all, ["./*.ts"], [])).toEqual(["x.ts"]);
+  expect(S.filterByGlobs(all, [], ["./src/"])).toEqual(["x.ts", "lib/src/c.ts"]);
+});

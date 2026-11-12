@@ -226,8 +226,12 @@ export function globsOk(s: string): boolean {
  * is matched as written.
  */
 export function compileGlob(pattern: string): (path: string) => boolean {
+  // Written from the root: "./src/*.ts" and "/src/*.ts" are "src/*.ts" (paths have no such prefix,
+  // so they matched nothing).
+  const anchored = /^\.?\//.test(pattern);
+  if (anchored) pattern = pattern.replace(/^\.?\/+/, "");
   if (pattern.endsWith("/")) pattern += "**";
-  if (pattern.includes("/")) {
+  if (pattern.includes("/") || anchored) {
     const g = new Bun.Glob(pattern);
     return (p) => g.match(p);
   }

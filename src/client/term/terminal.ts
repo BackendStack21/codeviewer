@@ -421,9 +421,11 @@ export class Terminal {
       this.control(c);
       return;
     }
+    // DEL is ignored inside escape and control sequences (VT500); in a string it is data.
+    // The server's ModeTracker (pty.ts) does the same.
+    if (c === 0x7f && this.state !== S.Osc && this.state !== S.Str) return;
     switch (this.state) {
       case S.Ground:
-        if (c === 0x7f) return;
         if (c >= 0x80 && c < 0xa0) return this.c1(c);
         return;
       case S.Esc:
@@ -502,7 +504,10 @@ export class Terminal {
       this.state = S.Str;
       return;
     }
-    if (c === 0x84) this.index();
+    if (c === 0x84) {
+      this.index();
+      this.cur.wrapPending = false; // as LF does
+    }
     else if (c === 0x85) this.nextLine();
     else if (c === 0x88) this.tabs[this.cur.x] = true;
     else if (c === 0x8d) this.reverseIndex();
@@ -597,6 +602,9 @@ export class Terminal {
       // or ZWJ + REP, grew one cell without bound until the tab died).
       if (x >= 0 && line.text[x]!.length < MAX_CLUSTER) {
         line.text[x] += ch;
+        // The cell now holds something: a mark on a blank cell past the used width was left out of
+        // copies and scrollback, and stayed behind when the line was recycled.
+        if (x >= line.hw) line.hw = x + 1;
         this.lastChar += ch; // so a following emoji can join a ZWJ sequence
         this.markDirty(cur.y);
       }
@@ -608,8 +616,11 @@ export class Terminal {
       const line = this.lines[cur.y]!;
       let x = cur.wrapPending ? cur.x : cur.x - 1;
       if (x > 0 && line.text[x] === "") x--;
-      if (x >= 0 && line.text[x]!.length < MAX_CLUSTER) {
+      // The cell must still end with that ZWJ: after a scroll or an erase the same coordinates
+      // hold another (blank) cell, and the glyph is an ordinary print.
+      if (x >= 0 && line.text[x]!.endsWith("\u200d") && line.text[x]!.length < MAX_CLUSTER) {
         line.text[x] += ch;
+        if (x >= line.hw) line.hw = x + 1;
         this.lastChar = ch;
         this.markDirty(cur.y);
         return;
@@ -796,7 +807,15 @@ export class Terminal {
     n = Math.min(n, this.cols - x);
     this.splitWide(line, x);
     for (let i = this.cols - 1; i >= x + n; i--) line.copyCell(i, line, i - n);
-    line.clear(x, x + n, this.cur.bg);
+    // Blanked cell by cell, not with Line.clear: the gap still carries the flags of what was
+    // shifted out of it, and a stale WIDE flag made clear() erase the first shifted cell too.
+    for (let i = x; i < x + n; i++) {
+      line.text[i] = " ";
+      line.fg[i] = DEFAULT;
+      line.bg[i] = this.cur.bg;
+      line.fl[i] = 0;
+    }
+    if (this.cur.bg !== DEFAULT && x + n > line.hw) line.hw = x + n;
     // A wide character pushed onto the last column lost its second half.
     if (line.fl[this.cols - 1]! & WIDE) line.clear(this.cols - 1, this.cols, this.cur.bg);
     this.markDirty(this.cur.y);
@@ -807,6 +826,11 @@ export class Terminal {
     const x = this.cur.x;
     n = Math.min(n, this.cols - x);
     this.splitWide(line, x);
+    // The deleted range ends inside a wide character: its second half would move to x alone.
+    if (x + n < this.cols && line.text[x + n] === "") {
+      line.text[x + n] = " ";
+      line.fl[x + n] = 0;
+    }
     for (let i = x; i < this.cols - n; i++) line.copyCell(i, line, i + n);
     line.clear(this.cols - n, this.cols, this.cur.bg);
     this.markDirty(this.cur.y);
@@ -1039,6 +1063,10 @@ export class Terminal {
         // DECALN: fill screen with E
         for (const l of this.lines) {
           for (let i = 0; i < this.cols; i++) l.text[i] = "E";
+          // Plain cells: a WIDE flag left behind made the renderer skip the cell after it.
+          l.fg.fill(DEFAULT);
+          l.bg.fill(DEFAULT);
+          l.fl.fill(0);
           l.hw = this.cols;
         }
         this.markAll();
@@ -1052,7 +1080,9 @@ export class Terminal {
       case "8":
         return this.restoreCursor();
       case "D":
-        return this.index();
+        this.index();
+        this.cur.wrapPending = false; // as LF does: the next character is not a soft wrap
+        return;
       case "E":
         return this.nextLine();
       case "H":
@@ -1164,7 +1194,11 @@ export class Terminal {
         const n = Math.min(this.p(0, 1), 65535);
         const cap = this.cols * this.rows;
         const period = charWidth(cp) === 2 ? Math.max(1, Math.floor(this.cols / 2)) : this.cols;
-        for (let i = n > cap ? cap + ((n - cap) % period) : n; i > 0; i--) this.print(cp, ch);
+        const count = n > cap ? cap + ((n - cap) % period) : n;
+        // ASCII goes through the run copier (the same result as print(), a tenth of the time:
+        // the replay ring is parsed again on every reattach).
+        if (cp >= 0x20 && cp < 0x7f && this.asciiRuns) this.printAscii(ch.repeat(count), 0, count);
+        else for (let i = count; i > 0; i--) this.print(cp, ch);
         return;
       }
       case "c":

@@ -94,7 +94,7 @@ export class FileIndex {
     const dirs = this.knownDirs();
     await Promise.all(
       paths.map(async (p) => {
-        if (p.split("/").some((seg) => HEAVY_DIRS.has(seg))) return;
+        if (p.includes("\n") || p.split("/").some((seg) => HEAVY_DIRS.has(seg))) return;
         const abs = path.join(this.root, p);
         const st = await stat(abs).catch(() => null);
         if (st?.isDirectory()) {
@@ -106,7 +106,17 @@ export class FileIndex {
             this.invalidate();
             changed = true;
           }
-        } else if (st && !files.has(p)) {
+          return;
+        }
+        // No longer a directory (deleted, or replaced by a file in one burst, which the watcher
+        // can report as a single event for the path): drop everything under it. Only for a known
+        // directory: scanning every file for every deleted path froze the server for 20 s on a
+        // 1 500-file `rm`.
+        if (dirs.has(p)) for (const f of files) if (f.startsWith(p + "/")) {
+          files.delete(f);
+          changed = true;
+        }
+        if (st && !files.has(p)) {
           // Like build(): a new symlink to a file outside the root is never listed.
           if (!(await this.inside(abs))) return;
           files.add(p);
@@ -114,12 +124,6 @@ export class FileIndex {
           changed = true;
         } else if (!st) {
           if (files.delete(p)) changed = true;
-          // A deleted directory: drop everything under it. Only for a known directory: scanning
-          // every file for every deleted path froze the server for 20 s on a 1 500-file `rm`.
-          if (dirs.has(p)) for (const f of files) if (f.startsWith(p + "/")) {
-            files.delete(f);
-            changed = true;
-          }
         }
       }),
     );
@@ -158,6 +162,8 @@ export class FileIndex {
             return;
           }
           for (const d of dirents) {
+            // The list is newline separated: such a name cannot be in it (it read as two entries).
+            if (d.name.includes("\n")) continue;
             const p = rel ? rel + "/" + d.name : d.name;
             if (d.isSymbolicLink()) {
               // Symlinks are followed only inside the root: a link to ~ or / is neither listed nor walked.

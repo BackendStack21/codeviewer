@@ -19,9 +19,10 @@ const NAMED: Record<string, string> = {
 
 export function fileColor(name: string): string {
   const lower = name.toLowerCase();
-  if (NAMED[lower]) return NAMED[lower]!;
-  const dot = lower.lastIndexOf(".");
-  return (dot >= 0 && COLORS[lower.slice(dot + 1)]) || "var(--icon-file)";
+  // Own keys only: a file named `constructor` must not find Object.prototype.constructor.
+  if (Object.hasOwn(NAMED, lower)) return NAMED[lower]!;
+  const ext = lower.slice(lower.lastIndexOf(".") + 1);
+  return (ext !== lower && Object.hasOwn(COLORS, ext) && COLORS[ext]) || "var(--icon-file)";
 }
 
 export function fileIcon(name: string): string {

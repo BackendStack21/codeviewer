@@ -361,3 +361,30 @@ describe("AC-17 view survives in the history", () => {
     expect(h.entries()[1]).toEqual(P("b.ts", 1));
   });
 });
+
+describe("Back / Forward from a file the history does not know (a tab chosen by hand)", () => {
+  const A = { path: "A", line: 1 };
+  const B = { path: "B", line: 50 };
+  const C = { path: "C", line: 7 };
+
+  test("Back returns to the last recorded place, which is kept; Forward comes back", () => {
+    const h = new NavHistory();
+    h.record(undefined, A);
+    h.record(A, B);
+    expect(h.back(C)).toEqual(B); // not A: B:50 was overwritten by C:7 and lost
+    expect(h.entries()).toEqual([A, B, C]);
+    expect(h.forward(B)).toEqual(C);
+    expect(h.back(C)).toEqual(B);
+    expect(h.back(B)).toEqual(A);
+  });
+
+  test("Forward from such a file goes to the next entry and overwrites nothing", () => {
+    const h = new NavHistory();
+    h.record(undefined, A);
+    h.record(A, B);
+    expect(h.back(B)).toEqual(A);
+    expect(h.forward(C)).toEqual(B);
+    expect(h.entries()).toEqual([A, B]);
+  });
+
+});

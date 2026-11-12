@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChangeFile } from "../src/client/api.ts";
 import type { PickItem } from "../src/client/palette.ts";
-import { CHECKPOINT_COMMANDS, CheckpointController, hhmm, type CheckpointDeps, type SinceDiff } from "../src/client/checkpointctl.ts";
+import { CHECKPOINT_COMMANDS, CheckpointController, checkpointBase, describeFile, hhmm, type CheckpointDeps, type SinceDiff } from "../src/client/checkpointctl.ts";
 
 const T0705 = new Date(2026, 10, 9, 7, 5).getTime();
 
@@ -447,5 +447,103 @@ describe("AC-13 opening an entry", () => {
     expect(s.log.picks.length).toBe(1);
     s.log.picks[0]!.items[0]!.run();
     expect(s.log.opened).toEqual([{ path: "k.ts", status: "M", oldText: "edited\n", newText: "orig\n", since: "07:05" }]);
+  });
+});
+
+describe("since a checkpoint, after a commit moved HEAD", () => {
+  test("a file dirty at the checkpoint and committed unchanged is not listed", async () => {
+    const s = setup({ files: [file("a.ts")], texts: { "a.ts": "v1\n" }, base: { "R:a.ts": "v0\n", "R2:a.ts": "v1\n" } });
+    await s.ctl.set();
+    s.w.rev = "R2"; // git commit -am: nothing changed on disk, the listing is empty
+    s.w.files = [];
+    await s.ctl.since();
+    expect(s.log.picks).toEqual([]);
+    expect(s.log.toasts.at(-1)).toBe("Nothing changed since the checkpoint (07:05)");
+  });
+
+  test("a file edited and committed after the checkpoint is compared with the new HEAD, not the old one", async () => {
+    const s = setup({ files: [file("a.ts")], texts: { "a.ts": "v1\n" }, base: { "R:a.ts": "v0\n", "R2:a.ts": "v1\nv2\n" } });
+    await s.ctl.set();
+    s.w.rev = "R2";
+    s.w.files = [];
+    await s.ctl.since();
+    const items = s.log.picks[0]?.items ?? [];
+    expect(items.map((i) => [i.label, i.detail])).toEqual([["a.ts", "+1 \u22120"]]);
+    items[0]!.run();
+    expect(s.log.opened[0]).toMatchObject({ path: "a.ts", oldText: "v1\n", newText: "v1\nv2\n" });
+  });
+});
+
+describe("since a checkpoint: files committed after it that were clean at the time", () => {
+  test("a file clean at the checkpoint, then edited and committed, is listed", async () => {
+    const s = setup({ files: [], texts: {}, base: { "R:b.ts": "b0\n", "R2:b.ts": "b0\nb1\n", "R:n.ts": null, "R2:n.ts": "new\n", "R:same.ts": "x\n", "R2:same.ts": "x\n" } });
+    const asked: [string | null, string][] = [];
+    (s.ctl as unknown as { deps: CheckpointDeps }).deps.between = async (from, to) => {
+      asked.push([from, to]);
+      return ["b.ts", "n.ts", "same.ts"];
+    };
+    await s.ctl.set();
+    await s.ctl.since();
+    expect(asked).toEqual([]); // HEAD did not move: nothing to ask
+    s.w.rev = "R2"; // edit + commit: the working tree is clean again
+    await s.ctl.since();
+    expect(asked).toEqual([["R", "R2"]]);
+    const items = s.log.picks[0]?.items ?? [];
+    expect(items.map((i) => [i.label, i.detail])).toEqual([["b.ts", "+1 \u22120"], ["n.ts", "+1 \u22120"]]);
+    items[0]!.run();
+    expect(s.log.opened[0]).toMatchObject({ path: "b.ts", status: "M", oldText: "b0\n", newText: "b0\nb1\n" });
+  });
+
+  test("a path the checkpoint or the listing already holds keeps its own text; a failed listing says so", async () => {
+    const s = setup({ files: [file("a.ts")], texts: { "a.ts": "v1\n" }, base: { "R:a.ts": "v0\n", "R2:a.ts": "v1\n" } });
+    const deps = (s.ctl as unknown as { deps: CheckpointDeps }).deps;
+    deps.between = async () => ["a.ts"];
+    await s.ctl.set();
+    s.w.rev = "R2";
+    s.w.files = [];
+    await s.ctl.since();
+    expect(s.log.picks).toEqual([]); // a.ts: v1 at the checkpoint, v1 now
+    deps.between = async () => null;
+    await s.ctl.since();
+    expect(s.log.toasts.at(-1)).toBe("Could not compare with the checkpoint");
+  });
+});
+
+describe("since a checkpoint: files that are not text", () => {
+  test("a binary file that changed is listed, compared by its description", async () => {
+    const s = setup({ files: [file("img.png", "M", { binary: true }), file("a.ts")], texts: { "a.ts": "x\n" } });
+    const info: Record<string, string | null> = { "img.png": "Binary file: 10 bytes, modified T1\n" };
+    (s.ctl as unknown as { deps: CheckpointDeps }).deps.describe = async (p) => (p in info ? info[p] : undefined);
+    await s.ctl.set();
+    expect(s.log.toasts.at(-1)).toBe("Checkpoint set (2 files)");
+    await s.ctl.since();
+    expect(s.log.toasts.at(-1)).toBe("Nothing changed since the checkpoint (07:05)");
+    info["img.png"] = "Binary file: 12 bytes, modified T2\n";
+    await s.ctl.since();
+    const items = s.log.picks[0]?.items ?? [];
+    expect(items.map((i) => i.label)).toEqual(["img.png"]);
+    items[0]!.run();
+    expect(s.log.opened[0]).toMatchObject({ path: "img.png", status: "M", oldText: "Binary file: 10 bytes, modified T1\n", newText: "Binary file: 12 bytes, modified T2\n" });
+  });
+
+  test("a text file too large to read is described too; a symlink leaving the root stays skipped", async () => {
+    const s = setup({ files: [file("big.ts"), file("link", "?", { newMode: "120000" })], texts: { link: null } });
+    (s.ctl as unknown as { deps: CheckpointDeps }).deps.describe = async (p) => (p === "big.ts" ? "Large text file: 9 bytes, modified T1\n" : null);
+    await s.ctl.set();
+    expect(entries(s.ctl)).toEqual([["big.ts", "Large text file: 9 bytes, modified T1\n"]]);
+    expect(s.ctl.checkpoint?.skipped).toEqual(["link"]);
+  });
+
+  test("describeFile and checkpointBase", async () => {
+    const f = (kind: string, truncated = false) => async () => ({ kind, truncated, text: "", size: 1234, mtime: 0 });
+    expect(await describeFile(f("binary"))).toBe("Binary file: 1,234 bytes, modified 1970-01-01T00:00:00.000Z\n");
+    expect(await describeFile(f("image"))).toBe("Image: 1,234 bytes, modified 1970-01-01T00:00:00.000Z\n");
+    expect(await describeFile(f("text", true))).toBe("Large text file: 1,234 bytes, modified 1970-01-01T00:00:00.000Z\n");
+    expect(await describeFile(async () => Promise.reject({ status: 404 }))).toBeNull();
+    expect(await describeFile(async () => Promise.reject(new Error("x")))).toBeUndefined();
+    const rev = "abcdef0123456789";
+    expect(await checkpointBase(async () => ({ status: 200, text: "t\n" }), rev)).toBe("t\n");
+    expect(await checkpointBase(async () => ({ status: 404, text: "" }), rev)).toBeNull();
+    expect(await checkpointBase(async () => ({ status: 415, text: "" }), rev)).toBe("Binary file at commit abcdef0123\n");
   });
 });

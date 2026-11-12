@@ -183,7 +183,8 @@ export class Editor {
    * Opens (or re-shows) the diff tab of a changed file. Like `open`, an unpinned tab is reused
    * while stepping through the list; a double-click or Shift+Enter pins it.
    */
-  async openDiff(file: ChangeFile, ctx: DiffContext, opts: { pin?: boolean; focus?: boolean } = {}) {
+  /** Opens the diff of a changed file; resolves true when that diff is the active tab once it has loaded. */
+  async openDiff(file: ChangeFile, ctx: DiffContext, opts: { pin?: boolean; focus?: boolean } = {}): Promise<boolean> {
     this.diffContext = ctx;
     let tab = this.tabs.find((t) => t.isDiff && !t.commit && !t.since && t.path === file.path);
     if (!tab) {
@@ -207,8 +208,11 @@ export class Editor {
       this.activate(tab);
       if (!same) await this.loadDiff(tab);
     }
-    if (opts.focus !== false) tab.diff?.focus();
+    // A slower load that finished after the user moved on: its tab is not the one on screen.
+    const shown = this.active === tab;
+    if (shown && opts.focus !== false) tab.diff?.focus();
     this.render();
+    return shown;
   }
 
   /**
@@ -480,6 +484,9 @@ export class Editor {
       }
       tab.kind = f.kind;
     } catch (e) {
+      // A newer load is in flight or done: this failure is about a state that is already replaced
+      // (a file that was briefly missing showed "deleted" after it was read again).
+      if (gen !== tab.gen) return;
       if (reload) {
         tab.deleted = true;
         this.render();
@@ -532,7 +539,7 @@ export class Editor {
 
   /** Scrolls an open Markdown preview to a heading fragment. */
   revealFragment(path: string, hash: string) {
-    this.tabs.find((t) => t.path === path)?.md?.scrollToFragment(hash);
+    this.tabs.find((t) => t.path === path && t.md)?.md?.scrollToFragment(hash);
   }
 
   activate(tab: Tab) {

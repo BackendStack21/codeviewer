@@ -72,9 +72,11 @@ Every feature below has a screenshot in the [feature tour](https://codeviewer.21
     file; later, "Changes: Since Checkpoint…" lists what changed after that moment (path, `+added
     −removed`, type to filter) and Enter opens a read-only diff tab labelled "since HH:MM".
     "Changes: Clear Checkpoint" forgets it. The checkpoint is kept in memory only and is lost on reload;
-    nothing is written or sent anywhere. Binary files, unreadable files and files over the caps
-    (500 files, 16 million characters) are skipped, and the toast counts them ("Checkpoint set (4 files, 2
-    skipped)"). The since tab is fixed content: it does not follow the Changes list.
+    nothing is written or sent anywhere. Binary files, images and text
+    files too large to read are compared by size and modification time (the diff shows one line for
+    each side); unreadable files and files over the caps (500 files, 16 million characters) are skipped, and the toast counts them ("Checkpoint set (4 files, 2
+    skipped)"). The since tab is fixed content: it does not follow the Changes list. Commits made
+    after the checkpoint are covered too: a file edited and committed since is listed.
   - Everything updates live as files, the index or refs change.
 - **Built-in updates:** "Check for Updates…" (command palette, or the Mac app menu), and an
   update pill in the status bar when a new version is out. Installing verifies the release's

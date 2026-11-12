@@ -56,7 +56,8 @@ beforeAll(async () => {
   await symlink("target.txt", path.join(dir, "link.txt"));
   await writeFile(path.join(dir, "toobig.txt"), sized(ZW, MIB + 1));
   await writeFile(path.join(dir, "exact.txt"), sized(ZW, MIB));
-  await writeFile(path.join(dir, "badutf8.txt"), Buffer.concat([Buffer.from([0xff, 0xfe, 0xc3]), Buffer.from(`x${ZW}y\n`)]));
+  // Not `ff fe` first: that is a UTF-16 BOM, and the file is then read as UTF-16 (as the viewer does).
+  await writeFile(path.join(dir, "badutf8.txt"), Buffer.concat([Buffer.from([0xc3, 0xff, 0xfe]), Buffer.from(`x${ZW}y\n`)]));
   git = (await Git.open(dir))!;
   app = startServer({ root: dir, port: 0, host: "127.0.0.1", shell: "/bin/sh", token, openExternal: () => {} });
 });

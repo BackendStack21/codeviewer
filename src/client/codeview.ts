@@ -474,6 +474,9 @@ export class CodeView {
   setGit(base: string | null, untracked: boolean) {
     this.gitBase = base === null ? null : base === "" ? [] : base.split(/\r\n|\r|\n/);
     if (this.gitBase && this.gitBase.length > 1 && this.gitBase[this.gitBase.length - 1] === "") this.gitBase.pop();
+    // A lone empty line is no lines, as for the buffer (recomputeGit): a file that is just "\n"
+    // showed one deleted line against an identical HEAD.
+    if (this.gitBase && this.gitBase.length === 1 && this.gitBase[0] === "") this.gitBase = [];
     this.gitUntracked = untracked;
     this.recomputeGit();
     this.schedule();
@@ -510,8 +513,11 @@ export class CodeView {
   /** Jumps to the next/previous change vs HEAD (wraps around). */
   nextChange(dir: 1 | -1) {
     if (!this.hunks.length) return;
-    const cur = this.activeLine >= 0 ? this.activeLine : Math.floor(this.scroller.scrollTop / this.lh);
-    const starts = this.hunks.map((h) => Math.min(h.b0, Math.max(0, this.lines.length - 1)));
+    // No active line yet: a change on the first visible line is the next one, not one to skip.
+    const top = Math.floor(this.scroller.scrollTop / this.lh);
+    const cur = this.activeLine >= 0 ? this.activeLine : dir > 0 ? top - 1 : top;
+    // A pure deletion is marked on the line above it (DELETED_BELOW), which is where Peek finds it.
+    const starts = this.hunks.map((h) => Math.min(h.b1 === h.b0 && h.b0 > 0 ? h.b0 - 1 : h.b0, Math.max(0, this.lines.length - 1)));
     const next = dir > 0 ? starts.find((b) => b > cur) ?? starts[0]! : [...starts].reverse().find((b) => b < cur) ?? starts[starts.length - 1]!;
     this.revealLine(next);
   }

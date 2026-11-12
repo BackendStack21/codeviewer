@@ -100,6 +100,7 @@ export class TerminalView {
   private composing = false;
   private disposed = false;
   private bellQueued = false;
+  private pendingClip: string | null = null;
 
   constructor(private opts: TerminalViewOptions) {
     this.el = document.createElement("div");
@@ -108,11 +109,21 @@ export class TerminalView {
       reply: (d) => opts.send(d),
       title: (t) => opts.onTitle?.(t),
       // OSC 52: allowed (editors and agents use it), but never silently.
-      clipboard: (t) =>
-        void navigator.clipboard
-          ?.writeText(t)
-          .then(() => window.dispatchEvent(new CustomEvent("cv-toast", { detail: `A terminal program copied ${t.length.toLocaleString()} characters to your clipboard` })))
-          .catch(() => {}),
+      // One write and one toast per batch of output (the last text wins): 10 000 sequences in a
+      // burst were 10 000 clipboard writes, each with its own toast.
+      clipboard: (t) => {
+        const first = this.pendingClip === null;
+        this.pendingClip = t;
+        if (!first) return;
+        queueMicrotask(() => {
+          const text = this.pendingClip ?? "";
+          this.pendingClip = null;
+          void navigator.clipboard
+            ?.writeText(text)
+            .then(() => window.dispatchEvent(new CustomEvent("cv-toast", { detail: `A terminal program copied ${text.length.toLocaleString()} characters to your clipboard` })))
+            .catch(() => {});
+        });
+      },
       colors: () => ({ fg: opts.theme.fg, bg: opts.theme.bg, cursor: opts.theme.cursor, palette: this.renderer.palette }),
       // One flash per batch of output: each BEL forced a layout, and 200 KB of them froze the page.
       bell: () => {
@@ -127,6 +138,9 @@ export class TerminalView {
       },
       onLine: (text) => {
         this.pendingLines.push(text);
+        // No frame runs in an occluded window or a background tab: only the newest lines are kept
+        // (the log shows LOG_LIMIT at most), or hours of output would pile up here.
+        if (this.pendingLines.length > 2 * LOG_LIMIT) this.pendingLines.splice(0, this.pendingLines.length - LOG_LIMIT);
         if (!this.logFrame) this.logFrame = requestAnimationFrame(() => this.flushLog());
       },
     });

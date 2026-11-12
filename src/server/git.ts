@@ -74,6 +74,17 @@ export interface ChangeEntry {
   hidden?: number;
 }
 
+/**
+ * File bytes as the text the viewer shows: UTF-16 by its BOM (readForView transcodes it), else
+ * UTF-8. Read as UTF-8, a UTF-16 file's bidi overrides and zero-width characters were never counted.
+ */
+function decodeForScan(buf: Uint8Array): string {
+  const le = buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe;
+  const be = buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff;
+  if (le || be) return new TextDecoder(le ? "utf-16le" : "utf-16be").decode(buf.subarray(2));
+  return new TextDecoder("utf-8", { ignoreBOM: true }).decode(buf);
+}
+
 /** Most file content scanned for hidden characters per changes() call. */
 export const HIDDEN_SCAN_BUDGET = 32 * 1024 * 1024;
 const HIDDEN_MAX_FILE = 1024 * 1024;
@@ -484,7 +495,7 @@ export class Git {
               n += bytesRead;
             }
             const part = buf.subarray(0, n);
-            count = looksBinary(part.subarray(0, 64 * 1024)) ? 0 : scanHidden(new TextDecoder("utf-8", { ignoreBOM: true }).decode(part), 0).count;
+            count = looksBinary(part.subarray(0, 64 * 1024)) ? 0 : scanHidden(decodeForScan(part), 0).count;
             this.hiddenCache.set(e.path, { size: st.size, mtime: st.mtimeMs, count });
           }
           if (count > 0) e.hidden = count;
@@ -621,6 +632,23 @@ export class Git {
       });
     }
     return { files: [...byPath.values()], truncated };
+  }
+
+  /**
+   * Root-relative paths that differ between two commits (`from` null: against the empty tree), for
+   * "Changes since a checkpoint" after HEAD moved. Null when either id is not a full object id or
+   * names no commit. Renames are a deleted and an added path.
+   */
+  async between(from: string | null, to: string): Promise<{ paths: string[]; truncated: boolean } | null> {
+    this.fresh();
+    if ((from !== null && !isOid(from)) || !isOid(to)) return null;
+    const r = await this.git([
+      "diff", "--name-only", "-z", "--no-renames", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--ignore-submodules=all", "-O/dev/null",
+      from ?? this.emptyTree, to, "--", ".",
+    ]);
+    if (r.code !== 0) return null;
+    const all = new TextDecoder().decode(r.out).split("\0").filter((p) => p.startsWith(this.prefix) && p.length > this.prefix.length).map((p) => p.slice(this.prefix.length));
+    return { paths: all.slice(0, MAX_CHANGES), truncated: all.length > MAX_CHANGES };
   }
 
   /** Paths with unresolved merge conflicts (root-relative): `git diff <commit>` never reports them. */
