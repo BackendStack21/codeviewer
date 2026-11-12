@@ -239,6 +239,9 @@ export class Renderer {
         setTimeout(() => this.schedule(), 16);
         return;
       }
+      // The program never ended its update (killed mid-frame, or the sequence was only `cat`
+      // output): the mode is dropped, or every later frame would be held a second as well.
+      term.modes.synchronized = false;
     }
     this.syncSince = 0;
     if (term.scrolledOff) {

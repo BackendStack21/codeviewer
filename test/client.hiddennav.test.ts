@@ -74,11 +74,14 @@ describe("AC-22 state", () => {
     nav.next();
     expect(log.announce[4]).toBe("U+200B ZERO WIDTH SPACE at line 2, column 1");
   });
-  test("only the first 200 hits are navigable, then it wraps", () => {
+  test("every hit is navigable, past the 200 the scanner keeps by default, then it wraps", () => {
+    // A cap here hid whatever came after 200 decoys: the walk wrapped to the first hit instead.
     const { nav, log } = mk([ZW.repeat(300)]);
-    for (let i = 0; i < 201; i++) nav.next();
+    for (let i = 0; i < 301; i++) nav.next();
     expect(log.announce[0]).toBe("U+200B ZERO WIDTH SPACE at line 1, column 1");
     expect(log.announce[199]).toBe("U+200B ZERO WIDTH SPACE at line 1, column 200");
-    expect(log.announce[200]).toBe("U+200B ZERO WIDTH SPACE at line 1, column 1");
+    expect(log.announce[200]).toBe("U+200B ZERO WIDTH SPACE at line 1, column 201");
+    expect(log.announce[299]).toBe("U+200B ZERO WIDTH SPACE at line 1, column 300");
+    expect(log.announce[300]).toBe("U+200B ZERO WIDTH SPACE at line 1, column 1");
   });
 });

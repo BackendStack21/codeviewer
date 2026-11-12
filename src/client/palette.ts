@@ -32,7 +32,22 @@ interface Match {
 const BOUNDARY = /[/\\_\-. ]/;
 
 /** Subsequence match with bonuses for word starts, contiguity and basename hits. */
-export function fuzzy(q: string, s: string, base = 0, sl = s.toLowerCase(), ql = q.toLowerCase()): Match | null {
+/**
+ * Lower case with the length kept: match positions index the original string, and a few characters
+ * lower-case to more code units ("\u0130" to two), which shifted every later position by one.
+ */
+export function lowerSameLength(s: string): string {
+  const l = s.toLowerCase();
+  if (l.length === s.length) return l;
+  let out = "";
+  for (const ch of s) {
+    const c = ch.toLowerCase();
+    out += c.length === ch.length ? c : ch;
+  }
+  return out;
+}
+
+export function fuzzy(q: string, s: string, base = 0, sl = lowerSameLength(s), ql = lowerSameLength(q)): Match | null {
   const pos: number[] = [];
   let score = 0;
   let si = base;
@@ -75,7 +90,7 @@ function subsequence(ql: string, qi: number, sl: string, si: number): boolean {
   return true;
 }
 
-export function scorePath(q: string, path: string, lower = path.toLowerCase(), ql = q.toLowerCase()): Match | null {
+export function scorePath(q: string, path: string, lower = lowerSameLength(path), ql = lowerSameLength(q)): Match | null {
   const slash = path.lastIndexOf("/") + 1;
   const inBase = fuzzy(q, path, slash, lower, ql);
   if (inBase) return { score: inBase.score + 30 + (path.length - slash === q.length ? 20 : 0), pos: inBase.pos };
@@ -90,7 +105,7 @@ const TOP = 80;
  * match a subset. Returns all matching indices too, for the next keystroke.
  */
 export function searchPaths(q: string, files: string[], lower: string[], prev: Int32Array | null) {
-  const ql = q.toLowerCase();
+  const ql = lowerSameLength(q);
   const hits: number[] = [];
   const best: { p: string; m: Match }[] = []; // ascending by score, at most TOP
   const n = prev ? prev.length : files.length;
@@ -181,7 +196,7 @@ export class Palette {
       .index()
       .then((f) => {
         this.files = f;
-        this.lower = f.map((p) => p.toLowerCase());
+        this.lower = f.map(lowerSameLength);
         this.lastQ = "";
         this.lastHits = null;
         this.stale = false;
@@ -339,6 +354,13 @@ function highlight(s: string, pos: number[]): string {
   if (!pos.length) return esc(showHidden(s));
   const set = new Set(pos);
   let out = "";
-  for (let i = 0; i < s.length; i++) out += set.has(i) ? `<b>${esc(showHidden(s[i]!))}</b>` : esc(showHidden(s[i]!));
+  // By code point: a match on one half of a surrogate pair marks the whole character (two lone
+  // halves render as two replacement glyphs).
+  for (let i = 0; i < s.length; ) {
+    const ch = String.fromCodePoint(s.codePointAt(i)!);
+    const hit = set.has(i) || (ch.length === 2 && set.has(i + 1));
+    out += hit ? `<b>${esc(showHidden(ch))}</b>` : esc(showHidden(ch));
+    i += ch.length;
+  }
   return out;
 }

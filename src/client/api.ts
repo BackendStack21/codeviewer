@@ -178,6 +178,16 @@ export const api = {
     const r = await fetch(`/api/git/base?path=${q(path)}${rev ? `&rev=${q(rev)}` : ""}`);
     return r.ok ? r.text() : null;
   },
+  /** Paths that differ between two commits (`from` null: nothing committed then); null when they cannot be compared. */
+  gitBetween: async (from: string | null, to: string): Promise<string[] | null> => {
+    const r = await fetch(`/api/git/between?to=${q(to)}${from ? `&from=${q(from)}` : ""}`);
+    return r.ok ? ((await r.json()) as { paths: string[] }).paths : null;
+  },
+  /** A file at a commit with the HTTP status: 200 and its text, 404 not there, 415 binary. */
+  gitBaseAt: async (path: string, rev: string): Promise<{ status: number; text: string }> => {
+    const r = await fetch(`/api/git/base?path=${q(path)}&rev=${q(rev)}`);
+    return { status: r.status, text: r.ok ? await r.text() : "" };
+  },
   /** Changed files vs HEAD or vs the base branch (see src/server/git.ts Changes). */
   gitChanges: async (scope: "head" | "branch"): Promise<ChangesData> => (await check(await fetch(`/api/git/changes?scope=${scope}`))).json(),
   gitBlame: async (path: string, line: number, signal?: AbortSignal) => {

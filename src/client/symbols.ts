@@ -156,7 +156,9 @@ export function symbols(lang: string, lines: readonly string[]): Sym[] {
     if (depth > 0 && TOP_LEVEL_ONLY.has(lang)) continue;
     // Runs of spaces collapse to one first: several patterns let `\s+` and a class holding `\s`
     // share the same spaces, which backtracks cubically (`public` + 990 spaces: 360 ms a line).
-    const c = t.replace(/[ \t]{2,}/g, " ");
+    // Every kind of whitespace `\s` matches, not only spaces and tabs: 990 NBSPs or form feeds
+    // backtracked just the same.
+    const c = t.replace(/\s+/g, " ");
     for (const [re, kind] of rules) {
       const m = re.exec(c);
       if (m && m[1]) {

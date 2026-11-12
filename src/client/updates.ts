@@ -153,7 +153,9 @@ export class Updates {
   }
 
   /** {t: "update"} events from the server. */
-  onEvent(phase: string, detail?: string, relaunch?: "native" | "server" | "manual") {
+  onEvent(phase: string, detail?: string, relaunch?: "native" | "server" | "manual", replay = false) {
+    // A replay (sent to every page that connects) matters only to a page still waiting for it.
+    if (replay && !this.installing) return;
     if (phase === "error") {
       this.installing = false;
       this.open();

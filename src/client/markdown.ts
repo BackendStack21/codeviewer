@@ -190,6 +190,21 @@ function quoteAt(line: string): number {
   return line[i + 1] === " " ? i + 2 : i + 1;
 }
 
+/**
+ * The content of a quote line whose marker ends at `at` (from quoteAt). A tab right after `>` is
+ * columns up to the next tab stop: one is the marker's optional space, the others indent the
+ * content (`>\t- a` is a list, `>\t\tcode` is indented code).
+ */
+function quoteRest(line: string, at: number): string {
+  if (line[at] !== "\t" || line[at - 1] !== ">") return line.slice(at);
+  // The whole run of leading whitespace is measured at its real columns, then written as spaces
+  // (a later tab would land on another stop once the marker is cut off).
+  let col = at;
+  let k = at;
+  for (; line[k] === "\t" || line[k] === " "; k++) col = line[k] === "\t" ? col + 4 - (col % 4) : col + 1;
+  return " ".repeat(col - at - 1) + line.slice(k);
+}
+
 interface Marker {
   key: string;
   ordered: boolean;
@@ -243,7 +258,7 @@ function paraOpen(line: string): boolean {
   for (let n = 0; n < MAX_DEPTH + 1; n++) {
     const q = quoteAt(s);
     if (q >= 0) {
-      s = s.slice(q);
+      s = quoteRest(s, q);
       continue;
     }
     const m = listMarker(s);
@@ -256,6 +271,19 @@ function paraOpen(line: string): boolean {
   return !isBlank(s) && !isHr(s) && !atx(s) && !fenceOpen(s) && indent(s) < 4;
 }
 
+/**
+ * The text after a task marker. It is paragraph text (GFM), so a start that would open another
+ * block (`1.`, `#`, `>`, `-`, a fence, a rule) is escaped: "- [ ] 1. write tests" was a checkbox
+ * holding a nested ordered list.
+ */
+function taskText(rest: string): string {
+  const t = rest.trimStart();
+  const num = /^\d{1,9}(?=[.)](?:[ \t]|$))/.exec(t);
+  if (num) return num[0] + "\\" + t.slice(num[0].length);
+  if (listMarker(t) || atx(t) || fenceOpen(t) || isHr(t) || t[0] === ">") return "\\" + t;
+  return rest.replace(/^[ \t]/, "");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Entities, escapes
 
@@ -263,8 +291,16 @@ const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"'
 const PUNCT = /[!-/:-@[-`{-~]/;
 
 function decodeEntity(s: string, i: number): { str: string; len: number } | null {
-  const end = s.indexOf(";", i + 2);
-  if (end < 0 || end - i > 12) return null;
+  // Only as far as an entity can reach: indexOf scanned the rest of the paragraph for every `&`
+  // (a megabyte of "&\n" took 6 s to parse).
+  let end = -1;
+  for (let k = i + 2, stop = Math.min(s.length, i + 13); k < stop; k++) {
+    if (s.charCodeAt(k) === 59) {
+      end = k;
+      break;
+    }
+  }
+  if (end < 0) return null;
   const body = s.slice(i + 1, end);
   let str: string | undefined;
   if (body[0] === "#") {
@@ -530,7 +566,7 @@ function parseBlocks(lines: string[], from: number, depth: number, ctx: Ctx, laz
         const rest = takeDefs(para, ctx);
         para = [];
         if (paraBlank && blocks.length) gap = true;
-        if (rest.length) addText({ type: "heading", level: su, children: [] }, rest.map((l) => l.trim()).join("\n"));
+        if (rest.length) addText({ type: "heading", level: su, children: [] }, rest.map((l) => l.trimStart()).join("\n").trimEnd()); // trailing spaces inside stay: two of them are a hard break
         else para.push(line.trimStart()); // only definitions before it: the underline is plain text
         i++;
         continue;
@@ -635,7 +671,7 @@ function parseBlocks(lines: string[], from: number, depth: number, ctx: Ctx, laz
           const prev = q.lines[q.lines.length - 1];
           if (at >= 0) {
             q.fenceClosed.push(t.f === null);
-            const s = L.slice(at);
+            const s = quoteRest(L, at);
             q.lines.push(s);
             q.lazy.push(false);
             track(t, s);
@@ -668,7 +704,7 @@ function parseBlocks(lines: string[], from: number, depth: number, ctx: Ctx, laz
         const itemLines = [lines[i]!.slice(cur.offset)];
         const itemLazy = [false];
         const task = /^\[([ xX])\](?:[ \t]|$)/.exec(itemLines[0]!);
-        if (task) itemLines[0] = itemLines[0]!.slice(3).replace(/^[ \t]/, "");
+        if (task) itemLines[0] = taskText(itemLines[0]!.slice(3));
         const t: FenceTrack = { f: null };
         track(t, itemLines[0]!);
         i++;
@@ -1250,7 +1286,11 @@ function parseInline(s: string, defs: Defs): Inline[] {
       }
       case 104:
       case 72: {
-        const u = brackets.length || (i > 0 && WORD.test(s[i - 1]!)) ? null : bareUrl(s, i);
+        // Not inside a word. An emphasis `_` right before it is fine (`_https://…_`), unless that
+        // underscore itself follows a word (snake_https).
+        let p = i - 1;
+        while (p >= 0 && s[p] === "_") p--;
+        const u = brackets.length || (p >= 0 && WORD.test(s[p]!)) ? null : bareUrl(s, i);
         if (!u) {
           i++;
           break;
@@ -1333,8 +1373,17 @@ export function safeHref(raw: string): SafeHref | null {
     }
     dec += raw[i];
   }
-  const out = dec.replace(INVISIBLE, "").trim();
-  const probe = dec.replace(PROBE_STRIP, "");
+  // The parser has decoded entities already, so the URL is `raw` as it stands (decoding again
+  // turned `a&amp;b` into `a&b`). The decoded form is still classified, as a second opinion: a
+  // URL is refused when either reading of it is, or when the two readings disagree.
+  const href = classifyHref(raw);
+  const again = dec === raw ? href : classifyHref(dec);
+  return href && again && href.kind === again.kind ? href : null;
+}
+
+function classifyHref(s: string): SafeHref | null {
+  const out = s.replace(INVISIBLE, "").trim();
+  const probe = s.replace(PROBE_STRIP, "");
   if (!probe || out.includes("\\") || probe.includes("\\")) return null;
   if (probe.startsWith("//")) return null;
   if (probe.startsWith("#")) return { kind: "fragment", href: out };

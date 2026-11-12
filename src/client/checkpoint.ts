@@ -51,14 +51,18 @@ export function sinceCheckpoint(
   cp: Checkpoint,
   current: ReadonlyMap<string, string | null>,
   base: (path: string) => string | null | undefined,
+  /** Text of a path that is not in `current`: it equals HEAD as it is now, which a commit may have moved. */
+  baseNow: (path: string) => string | null | undefined = base,
+  /** Paths in neither listing that differ between the checkpoint's HEAD and the current one (commits made since). */
+  committed: Iterable<string> = [],
 ): SinceEntry[] {
   const skipped = new Set(cp.skipped);
-  const paths = new Set<string>([...current.keys(), ...cp.texts.keys()]);
+  const paths = new Set<string>([...current.keys(), ...cp.texts.keys(), ...committed]);
   const out: SinceEntry[] = [];
   for (const path of [...paths].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (skipped.has(path)) continue;
     const old = cp.texts.has(path) ? cp.texts.get(path) : base(path);
-    const now = current.has(path) ? current.get(path) : base(path);
+    const now = current.has(path) ? current.get(path) : baseNow(path);
     if (old === undefined || now === undefined || old === now) continue;
     let added = 0;
     let removed = 0;

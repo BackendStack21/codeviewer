@@ -15,6 +15,12 @@ const MAX_NODES = 200_000;
 const MAX_FENCE_LINES = 2000;
 const MAX_FENCE_CHARS = 200 * 1024;
 
+/** Info-string names that are not a file extension, mapped to one languageFor knows. */
+const FENCE_ALIASES: Record<string, string> = {
+  javascript: "js", typescript: "ts", python: "py", rust: "rs", ruby: "rb", golang: "go",
+  shell: "sh", console: "sh", shellscript: "sh", markdown: "md", yml: "yaml",
+};
+
 /** Builds the <pre><code> for a block; `lang` is only a lookup key, never emitted. */
 function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
   const pre = document.createElement("pre");
@@ -22,7 +28,10 @@ function codeBlock(value: string, lang: string | null, b: Budget): HTMLElement {
   const code = document.createElement("code");
   pre.append(code);
   let id = "text";
-  if (lang && /^[a-z0-9+#-]{1,20}$/.test(lang)) id = languageFor("x." + lang);
+  if (lang && /^[a-z0-9+#-]{1,20}$/i.test(lang)) {
+    const tag = lang.toLowerCase();
+    id = languageFor("x." + (Object.hasOwn(FENCE_ALIASES, tag) ? FENCE_ALIASES[tag]! : tag));
+  }
   const lines = value.split("\n");
   if (
     id === "text" ||

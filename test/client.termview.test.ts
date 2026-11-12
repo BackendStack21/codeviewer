@@ -249,3 +249,78 @@ describe("terminal panel drives which terminal paints", () => {
     }
   });
 });
+
+describe("output while no frame runs (occluded window, background tab)", () => {
+  test("lines waiting for the screen-reader log are bounded", () => {
+    const { v } = mk();
+    for (let i = 0; i < 300; i++) v.write(`line ${i}\r\n`.repeat(100)); // no frame() in between
+    const pending = (v as unknown as { pendingLines: string[] }).pendingLines;
+    expect(pending.length).toBeLessThanOrEqual(400);
+    expect(pending.at(-1)).toBe("line 299");
+    frame();
+  });
+});
+
+describe("synchronized output (mode 2026) that is never switched off", () => {
+  test("after the one-second hold the terminal paints every frame again", () => {
+    const { v } = mk();
+    const real = performance.now;
+    let now = 1000;
+    performance.now = () => now;
+    const timers: (() => void)[] = [];
+    const realTimeout = globalThis.setTimeout;
+    (globalThis as { setTimeout: unknown }).setTimeout = (f: () => void) => (timers.push(f), 0);
+    const tick = (ms: number) => {
+      now += ms;
+      for (const f of timers.splice(0)) f();
+      frame();
+    };
+    try {
+      v.write("\x1b[?2026h"); // a TUI killed mid-frame never sends ?2026l
+      tick(0);
+      const held = v.renderer.rowsPainted;
+      v.write("a");
+      tick(500);
+      expect(v.renderer.rowsPainted).toBe(held); // still held within the second
+      tick(600);
+      const first = v.renderer.rowsPainted;
+      expect(first).toBeGreaterThan(held);
+      // The shell echoes a keystroke 20 ms later: it must show now, not a second from now.
+      v.write("b");
+      tick(20);
+      expect(v.renderer.rowsPainted).toBeGreaterThan(first);
+      // A program that does use the mode gets its hold back with the next ?2026h.
+      v.write("\x1b[?2026hc");
+      const before = v.renderer.rowsPainted;
+      tick(20);
+      expect(v.renderer.rowsPainted).toBe(before);
+      v.write("\x1b[?2026l");
+      tick(20);
+      expect(v.renderer.rowsPainted).toBeGreaterThan(before);
+    } finally {
+      performance.now = real;
+      globalThis.setTimeout = realTimeout;
+    }
+  });
+});
+
+describe("OSC 52 bursts", () => {
+  test("many clipboard writes in one batch of output become one write (the last) and one toast", async () => {
+    const writes: string[] = [];
+    const nav = globalThis.navigator as unknown as Record<string, unknown>;
+    const had = Object.getOwnPropertyDescriptor(nav, "clipboard");
+    Object.defineProperty(nav, "clipboard", { value: { writeText: async (t: string) => void writes.push(t) }, configurable: true });
+    try {
+      const { v } = mk();
+      v.write("\x1b]52;c;QQ==\x07".repeat(5000) + "\x1b]52;c;Qg==\x07");
+      await new Promise((r) => setTimeout(r, 10));
+      expect(writes).toEqual(["B"]);
+      v.write("\x1b]52;c;Qw==\x07"); // a later batch is its own write
+      await new Promise((r) => setTimeout(r, 10));
+      expect(writes).toEqual(["B", "C"]);
+    } finally {
+      if (had) Object.defineProperty(nav, "clipboard", had);
+      else delete nav.clipboard;
+    }
+  });
+});

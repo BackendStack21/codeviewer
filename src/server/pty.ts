@@ -101,6 +101,8 @@ export class ModeTracker {
       }
       return false; // other C0 controls are executed and leave the state alone
     }
+    // DEL is ignored inside sequences and is data in strings, as in the client.
+    if (c === 0x7f) return false;
     switch (this.st) {
       case P.Ground:
         if (c === 0x9b) this.csiStart();

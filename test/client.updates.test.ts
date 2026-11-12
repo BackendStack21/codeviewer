@@ -248,3 +248,28 @@ describe("Updates", () => {
     expect(t.box.innerHTML).toBe(before);
   });
 });
+
+describe("replayed update events (sent to a page that reconnects)", () => {
+  test("ignored unless this page is waiting for an install", async () => {
+    const t = setup();
+    await t.u.load();
+    let relaunched = 0;
+    t.u.nativeRelaunch = () => void relaunched++;
+    t.u.onEvent("installed", "1.1.0", "native", true);
+    t.u.onEvent("error", "boom", undefined, true);
+    expect(t.u.el.hidden).toBe(true);
+    expect(t.u.info?.available).toBe(true);
+    await new Promise((r) => setTimeout(r, 650));
+    expect(relaunched).toBe(0);
+  });
+
+  test("finishes the dialog of a page that was installing when its socket dropped", async () => {
+    const t = setup((url) => (String(url).includes("/install") ? Response.json({ ok: true }) : Response.json(info({ kind: "cli" }))));
+    await t.u.checkNow();
+    t.click("Install update");
+    await t.flush();
+    t.u.onEvent("installed", "1.1.0", "manual", true);
+    expect(t.box.textContent).toContain("Codeviewer 1.1.0 installed");
+    expect(t.u.info?.available).toBe(false);
+  });
+});

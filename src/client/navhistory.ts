@@ -38,14 +38,27 @@ export class NavHistory {
     else this.push(to);
   }
 
+  /**
+   * `current` is where the user is now. When it is the entry's own file, the entry takes its line.
+   * When it is another file (a tab chosen by hand, which is not a jump), the entry is left as it
+   * is: Back first remembers that file as a new last entry, so the place it returns to is the
+   * last recorded one and Forward comes back; Forward just moves on.
+   */
   back(current?: NavLoc): NavLoc | undefined {
     if (!this.canBack()) return undefined;
+    const cur = this.list[this.idx];
+    if (current && cur && current.path !== cur.path) {
+      this.list.length = this.idx + 1;
+      this.push(current);
+      return this.move(-1);
+    }
     return this.move(-1, current);
   }
 
   forward(current?: NavLoc): NavLoc | undefined {
     if (!this.canForward()) return undefined;
-    return this.move(1, current);
+    const cur = this.list[this.idx];
+    return this.move(1, current && cur && current.path !== cur.path ? undefined : current);
   }
 
   canBack(): boolean {

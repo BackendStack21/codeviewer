@@ -25,6 +25,29 @@ export async function checkpointText(
   }
 }
 
+/**
+ * One line standing in for a file whose text cannot be compared (binary, image, too large): its
+ * size and modification time, so a change still shows. null = the file vanished; undefined = unknown.
+ */
+export async function describeFile(
+  read: () => Promise<{ kind: string; truncated: boolean; size: number; mtime: number }>,
+): Promise<string | null | undefined> {
+  try {
+    const f = await read();
+    const what = f.kind === "image" ? "Image" : f.kind === "text" ? "Large text file" : "Binary file";
+    return `${what}: ${f.size.toLocaleString("en-US")} bytes, modified ${new Date(f.mtime).toISOString()}\n`;
+  } catch (e) {
+    return typeof e === "object" && e !== null && (e as { status?: unknown }).status === 404 ? null : undefined;
+  }
+}
+
+/** A file's text at a commit: null when it is not there; a one-line stand-in when it is binary (415). */
+export async function checkpointBase(read: () => Promise<{ status: number; text: string }>, rev: string): Promise<string | null> {
+  const r = await read();
+  if (r.status === 415) return `Binary file at commit ${rev.slice(0, 10)}\n`;
+  return r.status === 200 ? r.text : null;
+}
+
 export interface SinceDiff {
   path: string;
   status: "A" | "M" | "D";
@@ -40,6 +63,10 @@ export interface CheckpointDeps {
   /** Current text; null = missing; undefined = binary, too large or unreadable. */
   readText(path: string): Promise<string | null | undefined>;
   baseText(path: string, rev: string): Promise<string | null | undefined>;
+  /** A stand-in line for a file with no comparable text (see describeFile). Without it such files are skipped. */
+  describe?(path: string): Promise<string | null | undefined>;
+  /** Paths that differ between two commits (`from` null: no commit then); null when they cannot be listed. */
+  between?(from: string | null, to: string): Promise<string[] | null>;
   now(): number;
   notify(message: string): void;
   pick(items: PickItem[], title: string): void;
@@ -79,11 +106,13 @@ export class CheckpointController {
     for (const f of files) {
       // A rename is a delete plus an add: the old path is gone whatever the new file turns out to be.
       if (f.status === "R" && f.oldPath !== undefined && f.oldPath !== f.path && !listed.has(f.oldPath)) out.push({ path: f.oldPath, text: null });
-      if (f.binary) {
+      if (f.binary && !this.deps.describe) {
         unreadable.push(f.path);
         continue;
       }
-      let text = f.status === "D" ? null : await this.deps.readText(f.path);
+      let text = f.status === "D" ? null : f.binary ? undefined : await this.deps.readText(f.path);
+      // Binary, image or too large: compared by a description (size, modification time) instead.
+      if (text === undefined && this.deps.describe) text = await this.deps.describe(f.path);
       // The server answers 404 for a symlink that leaves the root as well as for a missing file, so a
       // symlink's 404 does not mean it vanished: it is skipped.
       if (text === null && f.status !== "D" && f.newMode === "120000") text = undefined;
@@ -120,11 +149,24 @@ export class CheckpointController {
     const current = new Map(out.map((o) => [o.path, o.text]));
     const derived: Checkpoint = { ...cp, skipped: [...cp.skipped, ...unreadable] };
     const skip = new Set(derived.skipped);
+    // A path missing from one listing was unchanged against HEAD at that moment: the checkpoint's
+    // HEAD for the old side, the current HEAD for the new one. They differ once a commit was made
+    // (read at the old HEAD, a file committed as it was showed a diff back to its old content).
     const base = new Map<string, string | null | undefined>();
+    const head = new Map<string, string | null | undefined>();
+    // A file that was clean at the checkpoint and is clean now is in neither listing, yet a commit
+    // made in between may have changed it: those paths come from the two HEADs.
+    let committed: string[] = [];
     try {
-      for (const p of new Set([...current.keys(), ...cp.texts.keys()])) {
-        if (skip.has(p) || (cp.texts.has(p) && current.has(p))) continue;
-        base.set(p, cp.rev === null ? null : await this.deps.baseText(p, cp.rev));
+      if (l.rev !== null && l.rev !== cp.rev && this.deps.between) {
+        const paths = await this.deps.between(cp.rev, l.rev);
+        if (paths === null) throw new Error("no listing");
+        committed = paths;
+      }
+      for (const p of new Set([...current.keys(), ...cp.texts.keys(), ...committed])) {
+        if (skip.has(p)) continue;
+        if (!current.has(p)) head.set(p, l.rev === null ? null : await this.deps.baseText(p, l.rev));
+        if (!cp.texts.has(p)) base.set(p, cp.rev === null ? null : await this.deps.baseText(p, cp.rev));
       }
     } catch {
       if (this.cp === cp) this.deps.notify("Could not compare with the checkpoint");
@@ -132,7 +174,8 @@ export class CheckpointController {
     }
     if (this.cp !== cp) return;
     const baseOf = (p: string) => base.get(p);
-    const entries = sinceCheckpoint(derived, current, baseOf);
+    const headOf = (p: string) => head.get(p);
+    const entries = sinceCheckpoint(derived, current, baseOf, headOf, committed);
     const since = hhmm(cp.at);
     if (!entries.length) return this.deps.notify(`Nothing changed since the checkpoint (${since})`);
     const items: PickItem[] = entries.map((e) => ({
@@ -145,7 +188,7 @@ export class CheckpointController {
           status: e.status,
           since,
           oldText: cp.texts.has(e.path) ? cp.texts.get(e.path)! : baseOf(e.path)!,
-          newText: current.has(e.path) ? current.get(e.path)! : baseOf(e.path)!,
+          newText: current.has(e.path) ? current.get(e.path)! : headOf(e.path)!,
         }),
     }));
     this.deps.pick(items, `Changes since ${since}: ${items.length} ${items.length === 1 ? "file" : "files"}, type to filter`);

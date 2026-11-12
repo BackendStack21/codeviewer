@@ -199,3 +199,24 @@ test("apply(): deleting many files is not quadratic (each one used to rescan the
   await ix.apply(["many"]);
   expect((await list(ix)).some((f) => f.startsWith("many/"))).toBe(false);
 });
+
+test("apply() drops the files of a folder that was replaced by a file", async () => {
+  const ix = new FileIndex(root);
+  await ix.get();
+  await rm(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src"), "a file now");
+  // The watcher coalesces the removal into one event for the path itself (FSEvents does).
+  expect(await ix.apply(["src"])).toBe(true);
+  expect(await list(ix)).toEqual(["src", "top.txt"]);
+});
+
+test("a file name holding a newline is left out: the list is newline separated and it became two bogus entries", async () => {
+  await writeFile(path.join(root, "nl\nname.txt"), "");
+  await mkdir(path.join(root, "dir\nx"));
+  await writeFile(path.join(root, "dir\nx", "inner.txt"), "");
+  const ix = new FileIndex(root);
+  expect(await list(ix)).toEqual(["src/a.ts", "src/deep/b.ts", "top.txt"]);
+  await writeFile(path.join(root, "late\n.txt"), "");
+  await ix.apply(["late\n.txt"]);
+  expect(await list(ix)).toEqual(["src/a.ts", "src/deep/b.ts", "top.txt"]);
+});
